@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>POS System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        
+        <aside class="sidebar">
+            <div class="sidebar-header">CATEGORIES</div>
+            <ul class="category-list" id="categoryList">
+                </ul>
+        </aside>
+
+        <main class="main-content">
+            <div class="top-bar">
+                <h2>Select Items</h2>
+                <input type="text" id="searchInput" placeholder="Search by code or name...">
+            </div>
+            <div class="items-grid" id="itemsGrid">
+                </div>
+        </main>
+
+        <aside class="cart-panel">
+            <div class="party-selector">
+                <div class="party-info">
+                    <span class="label">CURRENT PARTY</span>
+                    <span class="party-name" id="currentParty">Table 5 (C1)</span>
+                </div>
+                <button class="change-btn">+ Change</button>
+            </div>
+
+            <div class="cart-items" id="cartItems">
+                </div>
+
+            <div class="billing-section">
+                <div class="total-row">
+                    <span>Total:</span>
+                    <span class="total-amount">₹198.00</span>
+                </div>
+                <div class="action-grid">
+                    <button class="btn btn-hold" onclick="alert('Order on Hold')">HOLD</button>
+                    <button class="btn btn-kot" onclick="alert('KOT Printed')">KOT</button>
+                    <button class="btn btn-save" onclick="alert('Saved & Exited')">Save & Exit</button>
+                    <button class="btn btn-print" onclick="alert('Bill Printed')">Print Bill</button>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
