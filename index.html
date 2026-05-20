@@ -4,53 +4,77 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POS System</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div class="app-container">
-        
-        <aside class="sidebar">
-            <div class="sidebar-header">CATEGORIES</div>
-            <ul class="category-list" id="categoryList">
-                </ul>
-        </aside>
 
-        <main class="main-content">
-            <div class="top-bar">
-                <h2>Select Items</h2>
-                <input type="text" id="searchInput" placeholder="Search by code or name...">
+    <div id="screen-tables" class="screen active">
+        <header class="top-nav">
+            <h1>Select Table / Packing</h1>
+        </header>
+        <div class="table-grid" id="tableGrid">
             </div>
-            <div class="items-grid" id="itemsGrid">
-                </div>
-        </main>
-
-        <aside class="cart-panel">
-            <div class="party-selector">
-                <div class="party-info">
-                    <span class="label">CURRENT PARTY</span>
-                    <span class="party-name" id="currentParty">Table 5 (C1)</span>
-                </div>
-                <button class="change-btn">+ Change</button>
-            </div>
-
-            <div class="cart-items" id="cartItems">
-                </div>
-
-            <div class="billing-section">
-                <div class="total-row">
-                    <span>Total:</span>
-                    <span class="total-amount">₹198.00</span>
-                </div>
-                <div class="action-grid">
-                    <button class="btn btn-hold" onclick="alert('Order on Hold')">HOLD</button>
-                    <button class="btn btn-kot" onclick="alert('KOT Printed')">KOT</button>
-                    <button class="btn btn-save" onclick="alert('Saved & Exited')">Save & Exit</button>
-                    <button class="btn btn-print" onclick="alert('Bill Printed')">Print Bill</button>
-                </div>
-            </div>
-        </aside>
     </div>
 
-    <script src="script.js"></script>
+    <div id="screen-pos" class="screen hidden">
+        <header class="top-nav pos-header">
+            <button id="backToTablesBtn" class="back-btn">⬅ Back</button>
+            <h2 id="activeTableName">Table 5</h2>
+            
+            <div class="customer-tabs" id="customerTabsContainer">
+                <button class="tab active" data-id="C1">Customer 1</button>
+                <button class="tab add-tab-btn" id="addCustomerBtn">+</button>
+            </div>
+        </header>
+
+        <div class="pos-layout">
+            <aside class="sidebar" id="categoryList">
+                </aside>
+
+            <main class="main-content">
+                <div class="search-bar">
+                    <input type="text" id="searchInput" placeholder="Search items...">
+                </div>
+                <div class="items-grid" id="itemsGrid">
+                    </div>
+            </main>
+
+            <aside class="cart-panel">
+                <div class="cart-items" id="cartItems">
+                    </div>
+                
+                <div class="billing-section">
+                    <div class="total-row">
+                        <span>Total:</span>
+                        <span id="cartTotal">₹0.00</span>
+                    </div>
+                    <div class="action-grid">
+                        <button class="btn btn-hold" id="holdBtn">HOLD</button>
+                        <button class="btn btn-kot" id="kotBtn">KOT</button>
+                        <button class="btn btn-checkout" id="checkoutBtn">Bill & Settle</button>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <div id="checkoutModal" class="modal hidden">
+        <div class="modal-content">
+            <h3>Enter Customer Details (Optional)</h3>
+            <input type="number" id="customerPhone" placeholder="Phone Number">
+            <input type="text" id="customerName" placeholder="Name">
+            <div class="modal-actions">
+                <button id="cancelCheckoutBtn" class="btn btn-cancel">Cancel</button>
+                <button id="printBillBtn" class="btn btn-print">Print Bill</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="js/firebase-config.js"></script>
+    <script type="module" src="js/tables.js"></script>
+    <script type="module" src="js/menu.js"></script>
+    <script type="module" src="js/cart.js"></script>
+    <script type="module" src="js/checkout.js"></script>
+
 </body>
 </html>
