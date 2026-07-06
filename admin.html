@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Panel - New Pizza Hut</title>
+    <style>
+        body { display:flex; justify-content:center; align-items:center; height:100vh; background:#1f2937; color:white; font-family: sans-serif; }
+        .login-box { text-align:center; background:#374151; padding:30px; border-radius:12px; }
+        input { padding:15px; font-size:1.5rem; width:150px; text-align:center; border-radius:8px; border:none; margin-bottom:15px; }
+        .btn { padding:10px 20px; background:#4f46e5; color:white; border:none; border-radius:8px; cursor:pointer; }
+    </style>
+</head>
+<body>
+    <div class="login-box" id="loginScreen">
+        <h3>Enter 4-Digit PIN</h3>
+        <input type="password" id="pinInput" maxlength="4">
+        <br><button class="btn" onclick="checkPin()">LOGIN</button>
+    </div>
+    
+    <div id="adminContent" style="display:none; padding:20px;">
+        <h1>Admin Dashboard</h1>
+        <button onclick="window.location.href='index.html'">Back to POS</button>
+        </div>
+
+    <script>
+        function checkPin() {
+            const pin = document.getElementById('pinInput').value;
+            if(pin === "1414") { // Yahan apna PIN set kar le
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('adminContent').style.display = 'block';
+            } else {
+                alert("Wrong PIN!");
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,3 +1,9 @@
+// ==========================================
+// 1. FIREBASE IMPORTS (Sabse upar)
+// ==========================================
+import { db } from './firebase-config.js';
+import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
 document.addEventListener('DOMContentLoaded', () => {
     const cartItemsContainer = document.getElementById('cartItems');
     const cartTotalElement = document.getElementById('cartTotal');
@@ -9,7 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const getCurrentTable = () => activeTableNameEl.innerText;
     const getCurrentCustomer = () => activeTableNameEl.dataset.customer || 'C1';
     
-    // NAYA: Ab key Table+Customer ke naam se banegi (e.g. cart_Table 3_C2)
+    // Key Table+Customer ke naam se banegi (e.g. cart_Table 3_C2)
     const getCartKey = () => `cart_${getCurrentTable()}_${getCurrentCustomer()}`;
 
     // LocalStorage Helpers
@@ -28,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.dispatchEvent(new Event('cart-updated'));
     };
 
-    // 1. Jab Menu se item add ho
+    // Jab Menu se item add ho
     window.addEventListener('add-to-cart', (e) => {
         const item = e.detail;
         currentCart = getLocalCart();
@@ -44,7 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCart();
     });
 
-    // Jab Quick Add -> "Add to Bill Only" se koi item aaye
+    // Jab Quick Add -> "Add to Bill Only" se item aaye
     window.addEventListener('add-custom-item-to-bill', (e) => {
         const item = e.detail;
         currentCart = getLocalCart();
@@ -54,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCart();
     });
 
-    // 2. Quantity Update (+/-)
+    // Quantity Update (+/-)
     function updateQuantity(id, delta) {
         currentCart = getLocalCart();
         const itemIndex = currentCart.findIndex(item => item.id === id);
@@ -69,13 +75,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 3. Jab Table/Customer badle, toh uska specific cart render ho
+    // Jab Table/Customer badle, toh uska specific cart render ho
     window.addEventListener('load-table-cart', () => {
         currentCart = getLocalCart();
         renderCart();
     });
 
-    // 4. Render UI
+    // Render UI
     function renderCart() {
         cartItemsContainer.innerHTML = '';
         let totalAmount = 0;
@@ -124,15 +130,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ==========================================
-    // ACTION BUTTONS (HOLD, KOT, BILL) LOGIC
+    // ACTION BUTTONS (HOLD, KOT, BILL, SAVE & EXIT)
     // ==========================================
     const holdBtn = document.getElementById('holdBtn');
     const kotBtn = document.getElementById('kotBtn');
     const checkoutBtn = document.getElementById('checkoutBtn');
+    const saveExitBtn = document.getElementById('saveExitBtn'); // Naya button
     const printArea = document.getElementById('printArea');
     const backToTablesBtn = document.getElementById('backToTablesBtn');
 
-    // Display Title Generator (Parchi pe naam theek se dikhane ke liye)
     const getDisplayTitle = () => {
         const tName = getCurrentTable();
         return tName.includes('Parcel') ? tName : `${tName} [${getCurrentCustomer()}]`;
@@ -237,4 +243,45 @@ document.addEventListener('DOMContentLoaded', () => {
             backToTablesBtn.click();
         }, 500); 
     });
+
+    // 4. SAVE & EXIT (Bina print ke DB me save karo)
+    if (saveExitBtn) {
+        saveExitBtn.addEventListener('click', async () => {
+            if (currentCart.length === 0) {
+                backToTablesBtn.click(); // Agar khali hai toh sidha bahar jao
+                return;
+            }
+
+            const tableName = getCurrentTable();
+            const customerName = getCurrentCustomer();
+            const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+            
+            const originalText = saveExitBtn.innerText;
+            saveExitBtn.innerText = "Saving...";
+            saveExitBtn.disabled = true;
+
+            try {
+                // Firebase Database ke "sales_history" me record banao
+                await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
+                    table: tableName,
+                    customer: customerName,
+                    items: currentCart,
+                    total: total,
+                    timestamp: new Date().toISOString()
+                });
+
+                // Save hone ke baad table khali karo aur bahar aao
+                saveLocalCart([]); 
+                currentCart = [];
+                renderCart();
+                backToTablesBtn.click();
+            } catch (e) {
+                console.error("Sale Error: ", e);
+                alert("Database me save nahi ho paya. Internet connection check karo.");
+            } finally {
+                saveExitBtn.innerText = originalText;
+                saveExitBtn.disabled = false;
+            }
+        });
+    }
 });
