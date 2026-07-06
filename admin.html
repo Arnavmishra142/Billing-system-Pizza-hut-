@@ -18,6 +18,8 @@
         .login-box input:focus { border-color: #38bdf8; }
         .btn { padding: 12px 25px; background: #38bdf8; color: #0f172a; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; transition: 0.2s; font-size: 1rem; }
         .btn:hover { background: #0ea5e9; }
+        .btn-danger { background: #ef4444; color: white; padding: 6px 12px; font-size: 0.9rem; border-radius: 4px; }
+        .btn-danger:hover { background: #dc2626; }
         
         /* =========================================
            DASHBOARD LAYOUT
@@ -37,9 +39,13 @@
         /* =========================================
            SALES SECTION (CLEAN UI)
            ========================================= */
-        .filter-row { display: flex; gap: 10px; margin-bottom: 30px; }
+        .filter-row { display: flex; gap: 10px; margin-bottom: 30px; align-items: center; flex-wrap: wrap; }
         .filter-btn { padding: 10px 20px; background: #1e293b; color: white; border: 1px solid #334155; border-radius: 20px; cursor: pointer; font-weight: bold; transition: 0.2s; }
         .filter-btn.active { background: #10b981; color: white; border-color: #10b981; }
+        
+        /* Date Picker styling for dark theme */
+        input[type="date"] { color-scheme: dark; padding: 8px 15px; background: #1e293b; color: white; border: 1px solid #334155; border-radius: 8px; font-weight: bold; outline: none; }
+        input[type="date"]:focus { border-color: #38bdf8; }
 
         .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
         .stat-card { background: #1e293b; padding: 25px; border-radius: 12px; border: 1px solid #334155; }
@@ -53,6 +59,7 @@
 
         /* Helpers */
         .text-right { text-align: right !important; }
+        .text-center { text-align: center !important; }
         .loading { text-align: center; color: #94a3b8; font-size: 1.2rem; padding: 50px; }
     </style>
 </head>
@@ -80,10 +87,15 @@
         <main class="main-workspace">
             
             <div id="salesSection" class="section active">
+                
                 <div class="filter-row">
-                    <button class="filter-btn active" data-days="1">1 Day (Today)</button>
-                    <button class="filter-btn" data-days="7">1 Week</button>
-                    <button class="filter-btn" data-days="30">1 Month</button>
+                    <button class="filter-btn active" data-filter="days" data-val="1">1 Day (Today)</button>
+                    <button class="filter-btn" data-filter="days" data-val="7">1 Week</button>
+                    <button class="filter-btn" data-filter="days" data-val="30">1 Month</button>
+                    
+                    <span style="color: #94a3b8; margin: 0 10px;">|</span>
+                    <span style="color: #cbd5e1; font-weight: bold; margin-right: 5px;">Pick Date: </span>
+                    <input type="date" id="customDateSearch">
                 </div>
 
                 <div class="stats-grid">
@@ -98,7 +110,7 @@
                 </div>
 
                 <h3 style="margin-bottom: 15px; color: #e2e8f0;">Item-wise Sales Breakdown</h3>
-                <table class="data-table">
+                <table class="data-table" style="margin-bottom: 40px;">
                     <thead>
                         <tr>
                             <th>Item Name</th>
@@ -107,6 +119,20 @@
                         </tr>
                     </thead>
                     <tbody id="salesTableBody">
+                        </tbody>
+                </table>
+
+                <h3 style="margin-bottom: 15px; color: #e2e8f0; border-top: 1px dashed #334155; padding-top: 20px;">Recent Bills (Spoof Testing)</h3>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Time / Date</th>
+                            <th>Table & Customer</th>
+                            <th class="text-right">Bill Amount (₹)</th>
+                            <th class="text-center">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="billsTableBody">
                         </tbody>
                 </table>
             </div>
@@ -124,7 +150,7 @@
 
     <script type="module">
         import { db } from './js/firebase-config.js';
-        import { collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { collection, getDocs, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
         // --- LOGIN LOGIC ---
         document.getElementById('loginBtn').addEventListener('click', () => {
@@ -132,7 +158,7 @@
             if(pin === "1414") { 
                 document.getElementById('loginScreen').style.display = 'none';
                 document.getElementById('adminContent').style.display = 'flex';
-                loadSalesData(1); // Default load today's data
+                loadSalesData('days', 1); // Default load today
             } else {
                 alert("Incorrect PIN!");
                 document.getElementById('pinInput').value = '';
@@ -149,15 +175,19 @@
         }
 
         // --- SALES LOGIC & FIREBASE FETCH ---
-        let allSales = []; // Store all sales locally to filter fast
+        let allSales = []; 
 
         async function fetchAllSalesFromDB() {
             try {
                 document.getElementById('salesTableBody').innerHTML = '<tr><td colspan="3" class="loading">Fetching data from Cloud... ☁️</td></tr>';
+                document.getElementById('billsTableBody').innerHTML = '<tr><td colspan="4" class="loading">Fetching bills...</td></tr>';
+                
                 const querySnapshot = await getDocs(collection(db, "sales_history"));
                 allSales = [];
                 querySnapshot.forEach((doc) => {
-                    allSales.push(doc.data());
+                    let data = doc.data();
+                    data.id = doc.id; // Save document ID for deletion later
+                    allSales.push(data);
                 });
             } catch (error) {
                 console.error("Error fetching sales: ", error);
@@ -165,67 +195,94 @@
             }
         }
 
-        async function loadSalesData(days) {
-            // Agar data nahi hai toh fetch karo
+        // Filter Type can be 'days' or 'date'
+        window.loadSalesData = async function(filterType, filterValue) {
             if (allSales.length === 0) await fetchAllSalesFromDB();
 
             const now = new Date();
             let filteredSales = [];
 
-            // 1. FILTER BY DATE
+            // FILTERING LOGIC
             allSales.forEach(sale => {
                 const saleDate = new Date(sale.timestamp);
-                const diffTime = Math.abs(now - saleDate);
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-
-                if (days === 1) {
-                    // Check if date is exactly today
-                    if (saleDate.toDateString() === now.toDateString()) {
+                
+                if (filterType === 'date') {
+                    // Match Exact Date from Calendar
+                    const pickedDate = new Date(filterValue).toDateString();
+                    if (saleDate.toDateString() === pickedDate) {
                         filteredSales.push(sale);
                     }
-                } else {
-                    if (diffDays <= days) {
-                        filteredSales.push(sale);
+                } 
+                else if (filterType === 'days') {
+                    // Match Days (1, 7, 30)
+                    const diffTime = Math.abs(now - saleDate);
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+
+                    if (filterValue === 1) {
+                        if (saleDate.toDateString() === now.toDateString()) filteredSales.push(sale);
+                    } else {
+                        if (diffDays <= filterValue) filteredSales.push(sale);
                     }
                 }
             });
 
-            // 2. CALCULATE TOTALS & ITEM AGGREGATION
+            // SORT SALES BY LATEST FIRST (For the Bills Table)
+            filteredSales.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+            // CALCULATE TOTALS & AGGREGATE ITEMS
             let totalRevenue = 0;
-            let totalOrders = filteredSales.length;
-            let itemStats = {}; // To track { "Veg Burger": { qty: 5, rev: 495 } }
+            let itemStats = {}; 
+
+            const billsTbody = document.getElementById('billsTableBody');
+            billsTbody.innerHTML = '';
+
+            if (filteredSales.length === 0) {
+                billsTbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:#64748b;">No bills found for this date.</td></tr>';
+            }
 
             filteredSales.forEach(sale => {
                 totalRevenue += sale.total;
                 
-                // Aggregate items
+                // Aggregate items for Table 1
                 sale.items.forEach(item => {
-                    if (!itemStats[item.name]) {
-                        itemStats[item.name] = { qty: 0, rev: 0 };
-                    }
+                    if (!itemStats[item.name]) itemStats[item.name] = { qty: 0, rev: 0 };
                     itemStats[item.name].qty += item.qty;
                     itemStats[item.name].rev += (item.qty * item.price);
                 });
+
+                // Render Individual Bill for Table 2
+                const timeString = new Date(sale.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
+                const tableName = sale.table.includes('Parcel') ? sale.table : `${sale.table} [${sale.customer}]`;
+                
+                billsTbody.innerHTML += `
+                    <tr>
+                        <td style="color: #94a3b8;">${timeString}</td>
+                        <td style="font-weight: bold; color: #f8fafc;">${tableName}</td>
+                        <td class="text-right" style="color: #10b981; font-weight: bold;">₹${sale.total}</td>
+                        <td class="text-center">
+                            <button class="btn btn-danger" onclick="deleteSale('${sale.id}')">🗑️ Delete</button>
+                        </td>
+                    </tr>
+                `;
             });
 
             // Update Top Cards
             document.getElementById('totalRevenueBox').innerText = `₹${totalRevenue}`;
-            document.getElementById('totalOrdersBox').innerText = totalOrders;
+            document.getElementById('totalOrdersBox').innerText = filteredSales.length;
 
-            // Update Table
-            const tbody = document.getElementById('salesTableBody');
-            tbody.innerHTML = '';
+            // Update Item-wise Table
+            const salesTbody = document.getElementById('salesTableBody');
+            salesTbody.innerHTML = '';
 
-            // Convert object to array and sort by quantity sold (Highest first)
             let sortedItems = Object.keys(itemStats).map(key => {
                 return { name: key, qty: itemStats[key].qty, rev: itemStats[key].rev };
             }).sort((a, b) => b.qty - a.qty);
 
             if (sortedItems.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding:30px; color:#64748b;">No sales data for this period.</td></tr>';
+                salesTbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:30px; color:#64748b;">No items sold.</td></tr>';
             } else {
                 sortedItems.forEach(stat => {
-                    tbody.innerHTML += `
+                    salesTbody.innerHTML += `
                         <tr>
                             <td style="font-weight: bold; color: #f8fafc;">${stat.name}</td>
                             <td class="text-right" style="color: #38bdf8; font-weight: bold;">${stat.qty}</td>
@@ -236,17 +293,48 @@
             }
         }
 
-        // --- FILTER BUTTON LISTENERS ---
+        // --- DELETE SALE LOGIC ---
+        // Expose function globally so inline onclick can use it
+        window.deleteSale = async function(saleId) {
+            const confirmDelete = confirm("Are you sure you want to delete this bill? This cannot be undone.");
+            if (confirmDelete) {
+                try {
+                    // Firebase se delete karo
+                    await deleteDoc(doc(db, "sales_history", saleId));
+                    // Local array ko clear karke wapas fetch karo
+                    allSales = [];
+                    await fetchAllSalesFromDB();
+                    // UI reload karo (Current date/filter pe)
+                    document.querySelector('.filter-btn.active').click(); 
+                    alert("Bill successfully deleted!");
+                } catch (error) {
+                    console.error("Error deleting document: ", error);
+                    alert("Delete karne mein problem aayi.");
+                }
+            }
+        }
+
+        // --- FILTER BUTTON LISTENERS (1 Day, 1 Week, etc) ---
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
-                // Change active UI
                 document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
                 e.target.classList.add('active');
                 
-                // Load data based on selected days
-                const days = parseInt(e.target.dataset.days);
-                loadSalesData(days);
+                // Clear the date picker input visually so user knows filter changed
+                document.getElementById('customDateSearch').value = '';
+                
+                const days = parseInt(e.target.dataset.val);
+                loadSalesData('days', days);
             });
+        });
+
+        // --- CALENDAR DATE PICKER LISTENER ---
+        document.getElementById('customDateSearch').addEventListener('change', (e) => {
+            if (e.target.value) {
+                // Remove active class from day buttons
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                loadSalesData('date', e.target.value);
+            }
         });
     </script>
 </body>
