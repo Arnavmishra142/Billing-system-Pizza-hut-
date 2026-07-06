@@ -48,6 +48,23 @@ document.addEventListener('DOMContentLoaded', () => {
         saveLocalCart(tableName, currentCart);
         renderCart();
     });
+    // Jab Quick Add -> "Add to Bill Only" se koi item aaye
+    window.addEventListener('add-custom-item-to-bill', (e) => {
+        const item = e.detail;
+        const tableName = getCurrentTable();
+        currentCart = getLocalCart(tableName);
+
+        // Naya item humesha unique hota hai (ID temp hogi)
+        currentCart.push({
+            id: item.id,
+            name: item.name,
+            price: item.price,
+            qty: 1
+        });
+        
+        saveLocalCart(tableName, currentCart);
+        renderCart();
+    });
 
     // 2. Quantity Update (+/-)
     function updateQuantity(id, delta) {

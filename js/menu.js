@@ -1,3 +1,57 @@
+// 1. FIREBASE IMPORTS SABSE UPAR DAAL
+import { db } from './firebase-config.js';
+import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+document.addEventListener('DOMContentLoaded', () => {
+
+    // ... Tera purana DOM Elements code ...
+    const categoryList = document.getElementById('categoryList');
+    // ... baaki sab same ...
+
+    // TEMPORARY UPLOAD BUTTON KA LOGIC
+    const tempUploadBtn = document.getElementById('tempUploadBtn');
+    
+    // Yahan teri wo lambi wali `menuItems` array honi chahiye jo tune pehle banayi thi
+    const defaultItems = [
+        // Apne saare 70-80 items yahan ensure karna ki hain
+        { id: '101', name: 'Veg Burger', price: 50, category: 'Burger' },
+        { id: '601R', name: 'Margherita Pizza (Reg)', price: 75, category: 'Pizza' },
+        // ...
+    ];
+
+    if (tempUploadBtn) {
+        tempUploadBtn.addEventListener('click', async () => {
+            // Button ko disable kardo taaki double click na ho
+            tempUploadBtn.disabled = true;
+            tempUploadBtn.innerText = "Uploading...";
+
+            try {
+                let count = 0;
+                for (const item of defaultItems) {
+                    // Firebase me 'menu_items' collection ke andar item.id ke naam se document save hoga
+                    await setDoc(doc(db, "menu_items", item.id), {
+                        id: item.id,
+                        name: item.name,
+                        price: item.price,
+                        category: item.category
+                    });
+                    count++;
+                }
+                alert(`🔥 Success! ${count} items Firebase me upload ho gaye. Ab Firebase Console check kar.`);
+            } catch (error) {
+                console.error("Upload error:", error);
+                alert("Upload fail ho gaya. Console check kar.");
+            } finally {
+                tempUploadBtn.innerText = "Done!";
+            }
+        });
+    }
+
+    // ... Tera baaki ka `menu.js` ka code (Render Items, Quick Add modals) yahan niche waise ka waisa hi rahega ...
+
+});
+
+
 document.addEventListener('DOMContentLoaded', () => {
 
     const categoryList = document.getElementById('categoryList');
