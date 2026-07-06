@@ -18,7 +18,7 @@
         .login-box input:focus { border-color: #38bdf8; }
         .btn { padding: 12px 25px; background: #38bdf8; color: #0f172a; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; transition: 0.2s; font-size: 1rem; }
         .btn:hover { background: #0ea5e9; }
-        .btn-danger { background: #ef4444; color: white; padding: 6px 12px; font-size: 0.9rem; border-radius: 4px; }
+        .btn-danger { background: #ef4444; color: white; padding: 6px 12px; font-size: 0.9rem; border-radius: 4px; border: none; cursor: pointer; }
         .btn-danger:hover { background: #dc2626; }
         
         /* =========================================
@@ -31,6 +31,7 @@
         .nav-btn { background: transparent; color: #94a3b8; border: none; font-size: 1.1rem; font-weight: bold; cursor: pointer; padding: 8px 15px; border-radius: 6px; transition: 0.2s; }
         .nav-btn.active { background: #38bdf8; color: #0f172a; }
         .nav-btn:hover:not(.active) { color: white; background: #334155; }
+        .topbar-actions { display: flex; gap: 10px; }
         
         .main-workspace { padding: 30px; overflow-y: auto; flex-grow: 1; }
         .section { display: none; }
@@ -43,7 +44,6 @@
         .filter-btn { padding: 10px 20px; background: #1e293b; color: white; border: 1px solid #334155; border-radius: 20px; cursor: pointer; font-weight: bold; transition: 0.2s; }
         .filter-btn.active { background: #10b981; color: white; border-color: #10b981; }
         
-        /* Date Picker styling for dark theme */
         input[type="date"] { color-scheme: dark; padding: 8px 15px; background: #1e293b; color: white; border: 1px solid #334155; border-radius: 8px; font-weight: bold; outline: none; }
         input[type="date"]:focus { border-color: #38bdf8; }
 
@@ -57,7 +57,6 @@
         .data-table th { background: #0f172a; color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; }
         .data-table tr:hover { background: #334155; }
 
-        /* Helpers */
         .text-right { text-align: right !important; }
         .text-center { text-align: center !important; }
         .loading { text-align: center; color: #94a3b8; font-size: 1.2rem; padding: 50px; }
@@ -81,7 +80,10 @@
                 <button class="nav-btn active" onclick="switchTab('sales')">📊 Sales</button>
                 <button class="nav-btn" onclick="switchTab('menu')">🍔 Menu Edit</button>
             </div>
-            <button class="btn" onclick="window.location.href='index.html'" style="background: #ef4444; color: white;">Exit to POS</button>
+            <div class="topbar-actions">
+                <button class="btn" id="logoutBtn" style="background: #f59e0b; color: white;">🔒 Lock</button>
+                <button class="btn" onclick="window.location.href='index.html'" style="background: #ef4444; color: white;">Exit to POS</button>
+            </div>
         </header>
 
         <main class="main-workspace">
@@ -152,18 +154,43 @@
         import { db } from './js/firebase-config.js';
         import { collection, getDocs, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-        // --- LOGIN LOGIC ---
+        // ==========================================
+        // LOGIN & SESSION LOGIC (NEW UPDATE)
+        // ==========================================
+        
+        // Page load hone par check karo ki kya admin pehle se logged in hai
+        document.addEventListener('DOMContentLoaded', () => {
+            if (localStorage.getItem('adminLoggedIn') === 'true') {
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('adminContent').style.display = 'flex';
+                loadSalesData('days', 1); // Load dashboard directly
+            }
+        });
+
+        // Login Button Click
         document.getElementById('loginBtn').addEventListener('click', () => {
             const pin = document.getElementById('pinInput').value;
             if(pin === "1414") { 
+                localStorage.setItem('adminLoggedIn', 'true'); // Save login state
+                
                 document.getElementById('loginScreen').style.display = 'none';
                 document.getElementById('adminContent').style.display = 'flex';
-                loadSalesData('days', 1); // Default load today
+                loadSalesData('days', 1); 
             } else {
                 alert("Incorrect PIN!");
                 document.getElementById('pinInput').value = '';
             }
         });
+
+        // Lock (Logout) Button Click
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            localStorage.removeItem('adminLoggedIn'); // Remove login state
+            
+            document.getElementById('adminContent').style.display = 'none';
+            document.getElementById('loginScreen').style.display = 'flex';
+            document.getElementById('pinInput').value = ''; // Clear input field
+        });
+
 
         // --- TAB SWITCHING ---
         window.switchTab = function(tabName) {
@@ -186,7 +213,7 @@
                 allSales = [];
                 querySnapshot.forEach((doc) => {
                     let data = doc.data();
-                    data.id = doc.id; // Save document ID for deletion later
+                    data.id = doc.id; 
                     allSales.push(data);
                 });
             } catch (error) {
@@ -195,26 +222,22 @@
             }
         }
 
-        // Filter Type can be 'days' or 'date'
         window.loadSalesData = async function(filterType, filterValue) {
             if (allSales.length === 0) await fetchAllSalesFromDB();
 
             const now = new Date();
             let filteredSales = [];
 
-            // FILTERING LOGIC
             allSales.forEach(sale => {
                 const saleDate = new Date(sale.timestamp);
                 
                 if (filterType === 'date') {
-                    // Match Exact Date from Calendar
                     const pickedDate = new Date(filterValue).toDateString();
                     if (saleDate.toDateString() === pickedDate) {
                         filteredSales.push(sale);
                     }
                 } 
                 else if (filterType === 'days') {
-                    // Match Days (1, 7, 30)
                     const diffTime = Math.abs(now - saleDate);
                     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
 
@@ -226,10 +249,8 @@
                 }
             });
 
-            // SORT SALES BY LATEST FIRST (For the Bills Table)
             filteredSales.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-            // CALCULATE TOTALS & AGGREGATE ITEMS
             let totalRevenue = 0;
             let itemStats = {}; 
 
@@ -237,20 +258,18 @@
             billsTbody.innerHTML = '';
 
             if (filteredSales.length === 0) {
-                billsTbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:#64748b;">No bills found for this date.</td></tr>';
+                billsTbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:#64748b;">No bills found for this period.</td></tr>';
             }
 
             filteredSales.forEach(sale => {
                 totalRevenue += sale.total;
                 
-                // Aggregate items for Table 1
                 sale.items.forEach(item => {
                     if (!itemStats[item.name]) itemStats[item.name] = { qty: 0, rev: 0 };
                     itemStats[item.name].qty += item.qty;
                     itemStats[item.name].rev += (item.qty * item.price);
                 });
 
-                // Render Individual Bill for Table 2
                 const timeString = new Date(sale.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
                 const tableName = sale.table.includes('Parcel') ? sale.table : `${sale.table} [${sale.customer}]`;
                 
@@ -266,11 +285,9 @@
                 `;
             });
 
-            // Update Top Cards
             document.getElementById('totalRevenueBox').innerText = `₹${totalRevenue}`;
             document.getElementById('totalOrdersBox').innerText = filteredSales.length;
 
-            // Update Item-wise Table
             const salesTbody = document.getElementById('salesTableBody');
             salesTbody.innerHTML = '';
 
@@ -293,19 +310,21 @@
             }
         }
 
-        // --- DELETE SALE LOGIC ---
-        // Expose function globally so inline onclick can use it
         window.deleteSale = async function(saleId) {
             const confirmDelete = confirm("Are you sure you want to delete this bill? This cannot be undone.");
             if (confirmDelete) {
                 try {
-                    // Firebase se delete karo
                     await deleteDoc(doc(db, "sales_history", saleId));
-                    // Local array ko clear karke wapas fetch karo
                     allSales = [];
                     await fetchAllSalesFromDB();
-                    // UI reload karo (Current date/filter pe)
-                    document.querySelector('.filter-btn.active').click(); 
+                    
+                    const activeBtn = document.querySelector('.filter-btn.active');
+                    if(activeBtn) {
+                        activeBtn.click(); 
+                    } else {
+                        const dateVal = document.getElementById('customDateSearch').value;
+                        loadSalesData('date', dateVal);
+                    }
                     alert("Bill successfully deleted!");
                 } catch (error) {
                     console.error("Error deleting document: ", error);
@@ -314,13 +333,12 @@
             }
         }
 
-        // --- FILTER BUTTON LISTENERS (1 Day, 1 Week, etc) ---
+        // --- FILTER BUTTON LISTENERS ---
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
                 e.target.classList.add('active');
                 
-                // Clear the date picker input visually so user knows filter changed
                 document.getElementById('customDateSearch').value = '';
                 
                 const days = parseInt(e.target.dataset.val);
@@ -328,10 +346,8 @@
             });
         });
 
-        // --- CALENDAR DATE PICKER LISTENER ---
         document.getElementById('customDateSearch').addEventListener('change', (e) => {
             if (e.target.value) {
-                // Remove active class from day buttons
                 document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
                 loadSalesData('date', e.target.value);
             }
