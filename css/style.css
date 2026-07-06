@@ -475,3 +475,33 @@ body {
 .running-card .rc-title { font-weight: bold; font-size: 1.1rem; color: #1f2937; }
 .running-card .rc-amount { color: #10b981; font-weight: 800; font-size: 1rem; }
 .running-card .rc-items { font-size: 0.85rem; color: #6b7280; }
+/* Checkout button ko lamba karne ke liye */
+.btn-checkout { grid-column: span 2; }
+
+/* =========================================
+   THERMAL PRINTER STYLES (58mm EZO PRINTER)
+   ========================================= */
+#printArea { display: none; } /* Normal screen pe hide rakho */
+
+@media print {
+    body * { visibility: hidden; } /* Sab kuch chupa do */
+    #printArea, #printArea * { visibility: visible; } /* Sirf print area dikhao */
+    
+    #printArea { 
+        position: absolute; 
+        left: 0; 
+        top: 0; 
+        width: 58mm; /* Ezo Thermal Printer Width */
+        padding: 0;
+        margin: 0;
+        font-family: monospace; /* Classic printer font */
+        font-size: 12px;
+        color: black;
+    }
+
+    .print-header { text-align: center; margin-bottom: 10px; font-weight: bold; }
+    .print-header h2 { font-size: 16px; margin-bottom: 2px; }
+    .print-divider { border-top: 1px dashed black; margin: 5px 0; }
+    .print-item { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .print-total { font-weight: bold; font-size: 14px; display: flex; justify-content: space-between; margin-top: 10px; }
+}
