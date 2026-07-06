@@ -5,72 +5,58 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentCart = [];
 
-    // Table ka naam laane ka helper
+    // Helper functions for names
     const getCurrentTable = () => activeTableNameEl.innerText;
+    const getCurrentCustomer = () => activeTableNameEl.dataset.customer || 'C1';
+    
+    // NAYA: Ab key Table+Customer ke naam se banegi (e.g. cart_Table 3_C2)
+    const getCartKey = () => `cart_${getCurrentTable()}_${getCurrentCustomer()}`;
 
-    // LocalStorage se fetch karne ka helper
-    const getLocalCart = (tableName) => {
-        const data = localStorage.getItem(`cart_${tableName}`);
+    // LocalStorage Helpers
+    const getLocalCart = () => {
+        const data = localStorage.getItem(getCartKey());
         return data ? JSON.parse(data) : [];
     };
 
-    // LocalStorage me save karne ka helper
-    const saveLocalCart = (tableName, cartData) => {
+    const saveLocalCart = (cartData) => {
+        const key = getCartKey();
         if (cartData.length === 0) {
-            localStorage.removeItem(`cart_${tableName}`);
+            localStorage.removeItem(key);
         } else {
-            localStorage.setItem(`cart_${tableName}`, JSON.stringify(cartData));
+            localStorage.setItem(key, JSON.stringify(cartData));
         }
-        // Signal bhejo ki cart update hua hai taaki Home screen pe active cards update ho
         window.dispatchEvent(new Event('cart-updated'));
     };
 
     // 1. Jab Menu se item add ho
     window.addEventListener('add-to-cart', (e) => {
         const item = e.detail;
-        const tableName = getCurrentTable();
-        
-        // Pehle current table ka updated cart fetch karo
-        currentCart = getLocalCart(tableName);
+        currentCart = getLocalCart();
 
         const existingItem = currentCart.find(i => i.id === item.id);
         if (existingItem) {
             existingItem.qty += 1;
         } else {
-            currentCart.push({
-                id: item.id,
-                name: item.name,
-                price: item.price,
-                qty: 1
-            });
+            currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
         }
         
-        saveLocalCart(tableName, currentCart);
+        saveLocalCart(currentCart);
         renderCart();
     });
 
     // Jab Quick Add -> "Add to Bill Only" se koi item aaye
     window.addEventListener('add-custom-item-to-bill', (e) => {
         const item = e.detail;
-        const tableName = getCurrentTable();
-        currentCart = getLocalCart(tableName);
-
-        // Naya item humesha unique hota hai (ID temp hogi)
-        currentCart.push({
-            id: item.id,
-            name: item.name,
-            price: item.price,
-            qty: 1
-        });
+        currentCart = getLocalCart();
+        currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
         
-        saveLocalCart(tableName, currentCart);
+        saveLocalCart(currentCart);
         renderCart();
     });
 
     // 2. Quantity Update (+/-)
     function updateQuantity(id, delta) {
-        const tableName = getCurrentTable();
-        currentCart = getLocalCart(tableName);
+        currentCart = getLocalCart();
         const itemIndex = currentCart.findIndex(item => item.id === id);
         
         if (itemIndex > -1) {
@@ -78,14 +64,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (currentCart[itemIndex].qty <= 0) {
                 currentCart.splice(itemIndex, 1);
             }
-            saveLocalCart(tableName, currentCart);
+            saveLocalCart(currentCart);
             renderCart();
         }
     }
 
-    // 3. Jab Table badle, toh uska specific cart render ho
+    // 3. Jab Table/Customer badle, toh uska specific cart render ho
     window.addEventListener('load-table-cart', () => {
-        currentCart = getLocalCart(getCurrentTable());
+        currentCart = getLocalCart();
         renderCart();
     });
 
@@ -129,7 +115,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         cartTotalElement.innerText = `₹${totalAmount.toFixed(2)}`;
 
-        // Button Events Attach Karo
         document.querySelectorAll('.qty-minus').forEach(btn => {
             btn.addEventListener('click', (e) => updateQuantity(e.target.dataset.id, -1));
         });
@@ -147,25 +132,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const printArea = document.getElementById('printArea');
     const backToTablesBtn = document.getElementById('backToTablesBtn');
 
-    // 1. HOLD: Wapas Table Selection par bhej do (Data LocalStorage me safe rahega)
+    // Display Title Generator (Parchi pe naam theek se dikhane ke liye)
+    const getDisplayTitle = () => {
+        const tName = getCurrentTable();
+        return tName.includes('Parcel') ? tName : `${tName} [${getCurrentCustomer()}]`;
+    };
+
+    // 1. HOLD
     holdBtn.addEventListener('click', () => {
         backToTablesBtn.click();
     });
 
-    // 2. KOT: Kitchen Order Ticket
+    // 2. KOT
     kotBtn.addEventListener('click', () => {
         if (currentCart.length === 0) {
             alert("Cart empty hai! Pehle item add karo.");
             return;
         }
         
-        const tableName = getCurrentTable();
-        
-        // KOT ka HTML design
         let kotHtml = `
             <div class="print-header">
                 <h2>K.O.T</h2>
-                <p>${tableName}</p>
+                <p>${getDisplayTitle()}</p>
                 <p>Time: ${new Date().toLocaleTimeString()}</p>
             </div>
             <div class="print-divider"></div>
@@ -184,30 +172,25 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
         });
-        
         kotHtml += `<div class="print-divider"></div>`;
         
-        // Print Area me dal kar Print dialogue open karo
         printArea.innerHTML = kotHtml;
         window.print();
     });
 
-    // 3. BILL & SETTLE: Final Bill Parchi
+    // 3. BILL & SETTLE
     checkoutBtn.addEventListener('click', () => {
         if (currentCart.length === 0) {
             alert("Cart empty hai!");
             return;
         }
 
-        const tableName = getCurrentTable();
         let total = 0;
-        
-        // Final Bill ka HTML design
         let billHtml = `
             <div class="print-header">
                 <h2>NEW PIZZA HUT</h2>
                 <p style="font-size: 10px;">Live Cake | Salempur, Deoria</p>
-                <p style="margin-top:5px;">Bill: ${tableName}</p>
+                <p style="margin-top:5px;">Bill: ${getDisplayTitle()}</p>
                 <p>Date: ${new Date().toLocaleDateString()}</p>
             </div>
             <div class="print-divider"></div>
@@ -243,17 +226,15 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         
         printArea.innerHTML = billHtml;
-        window.print(); // Print preview popup
+        window.print(); 
 
-        // Parchi ban gayi, ab table ka khata clear karo
-        saveLocalCart(tableName, []); // Save empty array
+        // Parchi ban gayi, ab SIRF IS CUSTOMER KA khata clear karo
+        saveLocalCart([]); 
         currentCart = [];
-        renderCart(); // UI Khali karo
+        renderCart(); 
         
-        // 0.5 sec baad user ko wapas grid pe le jao (Print lagne ke baad)
         setTimeout(() => {
             backToTablesBtn.click();
         }, 500); 
     });
-
 });
