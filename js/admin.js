@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (localStorage.getItem('adminLoggedIn') === 'true') {
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('adminContent').style.display = 'flex';
-        loadSalesData('days', 1);
+        loadSalesData('days', 1); // Open dashboard directly
     }
 });
 
@@ -33,7 +33,7 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
 });
 
 // ==========================================
-// TAB SWITCHING (Attached to window for inline onclick)
+// TAB SWITCHING
 // ==========================================
 window.switchTab = function(tabName) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -44,7 +44,7 @@ window.switchTab = function(tabName) {
 }
 
 // ==========================================
-// SALES LOGIC & FIREBASE FETCH
+// SALES LOGIC & FIREBASE LIVE FETCH (UPDATED)
 // ==========================================
 let allSales = []; 
 
@@ -67,7 +67,8 @@ async function fetchAllSalesFromDB() {
 }
 
 window.loadSalesData = async function(filterType, filterValue) {
-    if (allSales.length === 0) await fetchAllSalesFromDB();
+    // NAYA: Har baar cloud se fresh live data load hoga, koi data cache block nahi hoga
+    await fetchAllSalesFromDB();
 
     const now = new Date();
     let filteredSales = [];
@@ -154,21 +155,17 @@ window.loadSalesData = async function(filterType, filterValue) {
     }
 }
 
-// ==========================================
-// ACTIONS (Delete, Refresh, Filters)
-// ==========================================
-
+// --- DELETE & REFRESH HANDLERS ---
 window.deleteSale = async function(saleId) {
     const confirmDelete = confirm("Are you sure you want to delete this bill? This cannot be undone.");
     if (confirmDelete) {
         try {
             await deleteDoc(doc(db, "sales_history", saleId));
-            allSales = []; // Force re-fetch
-            await fetchAllSalesFromDB();
             
+            // Immediately refresh calculations
             const activeBtn = document.querySelector('.filter-btn.active');
             if(activeBtn) {
-                activeBtn.click(); 
+                loadSalesData('days', parseInt(activeBtn.dataset.val)); 
             } else {
                 const dateVal = document.getElementById('customDateSearch').value;
                 loadSalesData('date', dateVal);
@@ -181,42 +178,38 @@ window.deleteSale = async function(saleId) {
     }
 }
 
-// REFRESH BUTTON LOGIC
+// Refresh Button click triggers fresh load
 document.getElementById('refreshBtn').addEventListener('click', async (e) => {
     const btn = e.target;
     btn.innerText = "🔄 Refreshing...";
     btn.disabled = true;
     
-    allSales = []; // Empty array to force fresh fetch
-    await fetchAllSalesFromDB();
-    
-    // Check what is currently active and reload that
     const activeBtn = document.querySelector('.filter-btn.active');
     if(activeBtn) {
-        loadSalesData('days', parseInt(activeBtn.dataset.val));
+        await loadSalesData('days', parseInt(activeBtn.dataset.val));
     } else {
         const dateVal = document.getElementById('customDateSearch').value;
-        if(dateVal) loadSalesData('date', dateVal);
-        else loadSalesData('days', 1); // fallback
+        if(dateVal) await loadSalesData('date', dateVal);
+        else await loadSalesData('days', 1);
     }
     
     btn.innerText = "🔄 Refresh Data";
     btn.disabled = false;
 });
 
-// FILTER BUTTON LISTENERS
+// Day buttons listeners
 document.querySelectorAll('.filter-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
         document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
-        
-        document.getElementById('customDateSearch').value = ''; // Clear date picker visually
+        document.getElementById('customDateSearch').value = ''; 
         
         const days = parseInt(e.target.dataset.val);
         loadSalesData('days', days);
     });
 });
 
+// Calendar input listener
 document.getElementById('customDateSearch').addEventListener('change', (e) => {
     if (e.target.value) {
         document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));

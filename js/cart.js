@@ -130,12 +130,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ==========================================
-    // ACTION BUTTONS (HOLD, KOT, BILL, SAVE & EXIT)
+    // ACTION BUTTONS LOGIC
     // ==========================================
     const holdBtn = document.getElementById('holdBtn');
     const kotBtn = document.getElementById('kotBtn');
     const checkoutBtn = document.getElementById('checkoutBtn');
-    const saveExitBtn = document.getElementById('saveExitBtn'); // Naya button
+    const saveExitBtn = document.getElementById('saveExitBtn'); 
     const printArea = document.getElementById('printArea');
     const backToTablesBtn = document.getElementById('backToTablesBtn');
 
@@ -184,71 +184,95 @@ document.addEventListener('DOMContentLoaded', () => {
         window.print();
     });
 
-    // 3. BILL & SETTLE
-    checkoutBtn.addEventListener('click', () => {
+    // 3. BILL & SETTLE (UPDATED: NOW SAVES TO FIREBASE DATABASE)
+    checkoutBtn.addEventListener('click', async () => {
         if (currentCart.length === 0) {
             alert("Cart empty hai!");
             return;
         }
 
-        let total = 0;
-        let billHtml = `
-            <div class="print-header">
-                <h2>NEW PIZZA HUT</h2>
-                <p style="font-size: 10px;">Live Cake | Salempur, Deoria</p>
-                <p style="margin-top:5px;">Bill: ${getDisplayTitle()}</p>
-                <p>Date: ${new Date().toLocaleDateString()}</p>
-            </div>
-            <div class="print-divider"></div>
-            <div class="print-item" style="font-weight: bold;">
-                <span style="flex:2;">Item</span>
-                <span style="flex:1; text-align:center;">Qty</span>
-                <span style="flex:1; text-align:right;">Amt</span>
-            </div>
-            <div class="print-divider"></div>
-        `;
-        
-        currentCart.forEach(item => {
-            let amt = item.price * item.qty;
-            total += amt;
+        const tableName = getCurrentTable();
+        const customerName = getCurrentCustomer();
+        const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+
+        checkoutBtn.innerText = "Processing...";
+        checkoutBtn.disabled = true;
+
+        try {
+            // NAYA: Bill Settle karte hi data seedha Firestore Cloud me permanent save hoga
+            await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
+                table: tableName,
+                customer: customerName,
+                items: currentCart,
+                total: total,
+                timestamp: new Date().toISOString()
+            });
+
+            // HTML Bill Design for Thermal Printer
+            let billHtml = `
+                <div class="print-header">
+                    <h2>NEW PIZZA HUT</h2>
+                    <p style="font-size: 10px;">Live Cake | Salempur, Deoria</p>
+                    <p style="margin-top:5px;">Bill: ${getDisplayTitle()}</p>
+                    <p>Date: ${new Date().toLocaleDateString()}</p>
+                </div>
+                <div class="print-divider"></div>
+                <div class="print-item" style="font-weight: bold;">
+                    <span style="flex:2;">Item</span>
+                    <span style="flex:1; text-align:center;">Qty</span>
+                    <span style="flex:1; text-align:right;">Amt</span>
+                </div>
+                <div class="print-divider"></div>
+            `;
+            
+            currentCart.forEach(item => {
+                let amt = item.price * item.qty;
+                billHtml += `
+                    <div class="print-item">
+                        <span style="flex:2; padding-right: 5px;">${item.name}</span>
+                        <span style="flex:1; text-align:center;">${item.qty}</span>
+                        <span style="flex:1; text-align:right;">${amt}</span>
+                    </div>
+                `;
+            });
+            
             billHtml += `
-                <div class="print-item">
-                    <span style="flex:2; padding-right: 5px;">${item.name}</span>
-                    <span style="flex:1; text-align:center;">${item.qty}</span>
-                    <span style="flex:1; text-align:right;">${amt}</span>
+                <div class="print-divider"></div>
+                <div class="print-total">
+                    <span>TOTAL</span>
+                    <span>Rs ${total}</span>
+                </div>
+                <div style="text-align:center; margin-top:15px; font-size:10px;">
+                    Thank you for visiting!
                 </div>
             `;
-        });
-        
-        billHtml += `
-            <div class="print-divider"></div>
-            <div class="print-total">
-                <span>TOTAL</span>
-                <span>Rs ${total}</span>
-            </div>
-            <div style="text-align:center; margin-top:15px; font-size:10px;">
-                Thank you for visiting!
-            </div>
-        `;
-        
-        printArea.innerHTML = billHtml;
-        window.print(); 
+            
+            printArea.innerHTML = billHtml;
+            window.print(); // Trigger Print Preview
 
-        // Parchi ban gayi, ab SIRF IS CUSTOMER KA khata clear karo
-        saveLocalCart([]); 
-        currentCart = [];
-        renderCart(); 
-        
-        setTimeout(() => {
-            backToTablesBtn.click();
-        }, 500); 
+            // Clear this specific cart from everywhere
+            saveLocalCart([]); 
+            currentCart = [];
+            renderCart(); 
+            
+            setTimeout(() => {
+                backToTablesBtn.click();
+            }, 500); 
+
+        } catch (error) {
+            console.error("Firebase save error on checkout:", error);
+            alert("Database error! Internet check karein.");
+        } finally {
+            checkoutBtn.innerText = "Bill & Settle";
+            checkoutBtn.disabled = false;
+        }
     });
 
-    // 4. SAVE & EXIT (Bina print ke DB me save karo)
+    // 4. SAVE & EXIT (Saves to DB without printing)
     if (saveExitBtn) {
         saveExitBtn.addEventListener('click', async () => {
             if (currentCart.length === 0) {
-                backToTablesBtn.click(); // Agar khali hai toh sidha bahar jao
+                backToTablesBtn.click(); 
                 return;
             }
 
@@ -256,29 +280,27 @@ document.addEventListener('DOMContentLoaded', () => {
             const customerName = getCurrentCustomer();
             const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
             
-            const originalText = saveExitBtn.innerText;
             saveExitBtn.innerText = "Saving...";
             saveExitBtn.disabled = true;
 
             try {
-                // Firebase Database ke "sales_history" me record banao
                 await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
+                    table: tableName,
                     customer: customerName,
                     items: currentCart,
                     total: total,
                     timestamp: new Date().toISOString()
                 });
 
-                // Save hone ke baad table khali karo aur bahar aao
                 saveLocalCart([]); 
                 currentCart = [];
                 renderCart();
                 backToTablesBtn.click();
             } catch (e) {
                 console.error("Sale Error: ", e);
-                alert("Database me save nahi ho paya. Internet connection check karo.");
+                alert("Database me save nahi ho paya.");
             } finally {
-                saveExitBtn.innerText = originalText;
+                saveExitBtn.innerText = "SAVE & EXIT";
                 saveExitBtn.disabled = false;
             }
         });
