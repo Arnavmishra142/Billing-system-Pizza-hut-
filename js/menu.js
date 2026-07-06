@@ -390,4 +390,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    
+    function clearGlobalForm() {
+        document.getElementById('globalItemName').value = '';
+        document.getElementById('globalItemPrice').value = '';
+        document.getElementById('globalItemCategory').value = '';
+    }
+});
