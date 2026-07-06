@@ -263,7 +263,6 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 // Firebase Database ke "sales_history" me record banao
                 await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
-                    table: tableName,
                     customer: customerName,
                     items: currentCart,
                     total: total,
