@@ -7,28 +7,37 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-
     <div id="screen-home" class="screen active">
-        <header class="top-nav" style="justify-content: center;">
-            <h1>New Pizza Hut & Live Cake - POS</h1>
-        </header>
+        <div class="welcome-banner">
+            <h2>NEW PIZZA HUT & LIVE CAKE</h2>
+            <p>Salempur, Deoria | POS Billing Dashboard</p>
+        </div>
         
-        <div class="home-options">
-            <button id="btn-tables" class="home-btn">
-                🍽️ <br> Dine-In (Tables)
+        <div class="home-grid">
+            <button class="menu-big-btn" id="btn-tables" style="background: linear-gradient(135deg, #4f46e5, #6366f1);">
+                <span class="icon">🪑</span>
+                <span class="title">Dine-In Tables</span>
             </button>
-            <button id="btn-parcel" class="home-btn parcel-btn">
-                🛍️ <br> Takeaway (Parcel)
+            
+            <button class="menu-big-btn" id="btn-parcel" style="background: linear-gradient(135deg, #0ea5e9, #38bdf8);">
+                <span class="icon">📦</span>
+                <span class="title">Takeaway Parcel</span>
+            </button>
+
+            <button class="menu-big-btn" id="btn-direct-sale" style="background: linear-gradient(135deg, #10b981, #34d399); grid-column: span 2;">
+                <span class="icon">⚡</span>
+                <span class="title">Quick Sale Entry</span>
             </button>
         </div>
 
-        <div class="running-orders-section">
-            <h3>🔥 Active Orders</h3>
-            <div class="running-wrapper" id="runningOrdersContainer">
-            </div>
+        <div style="margin-top: 40px; padding: 0 20px;">
+            <h3 style="color: #4b5563; margin-bottom: 15px;">Running Orders (Hold / Active)</h3>
+            <div class="running-orders-grid" id="runningOrdersContainer">
+                </div>
         </div>
     </div>
 
+      
     <div id="screen-grid" class="screen hidden">
         <header class="top-nav">
             <button id="backToHomeBtn" class="back-btn">⬅ Back</button>

@@ -14,12 +14,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const btnTables = document.getElementById('btn-tables');
     const btnParcel = document.getElementById('btn-parcel');
+    const btnDirectSale = document.getElementById('btn-direct-sale'); // Naya button
     const backToHomeBtn = document.getElementById('backToHomeBtn');
     const backToTablesBtn = document.getElementById('backToTablesBtn');
 
-    // ==========================================
-    // 1. GENERATE GRID LOGIC
-    // ==========================================
+    // Generate Grid (Tables / Parcels)
     function loadGrid(type) {
         dynamicGrid.innerHTML = ''; 
         let totalCount = 10;
@@ -30,7 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
         for (let i = 1; i <= totalCount; i++) {
             const card = document.createElement('div');
             
-            // Check if ANY customer on this table has a running order
             let isOccupied = false;
             for (let j = 0; j < localStorage.length; j++) {
                 if (localStorage.key(j).startsWith(`cart_${prefix} ${i}_`)) {
@@ -58,6 +56,13 @@ document.addEventListener('DOMContentLoaded', () => {
     btnTables.addEventListener('click', () => loadGrid('table'));
     btnParcel.addEventListener('click', () => loadGrid('parcel'));
 
+    // NAYA: DIRECT EXPRESS ENTRY LOGIC (Bypasses Table Grid)
+    if(btnDirectSale) {
+        btnDirectSale.addEventListener('click', () => {
+            openPOS('Direct Entry', 'C1');
+        });
+    }
+
     backToHomeBtn.addEventListener('click', () => {
         screenGrid.classList.remove('active');
         screenGrid.classList.add('hidden');
@@ -65,16 +70,16 @@ document.addEventListener('DOMContentLoaded', () => {
         screenHome.classList.add('active');
     });
 
-
-    // ==========================================
-    // 2. OPEN POS SCREEN LOGIC
-    // ==========================================
+    // Open POS Screen
     function openPOS(name, targetTab = 'C1') {
         activeTableName.innerText = name;
-        activeTableName.dataset.customer = targetTab; // Store active customer
+        activeTableName.dataset.customer = targetTab; 
         
-        // Hide tabs if it's a Parcel
-        if (name.includes('Parcel')) {
+        // Signal grid/cart types to check for button hides
+        window.dispatchEvent(new CustomEvent('pos-opened', { detail: { name: name } }));
+        
+        // Hide tabs for Parcel or Direct Entry
+        if (name.includes('Parcel') || name === 'Direct Entry') {
             customerTabsContainer.style.display = 'none';
         } else {
             customerTabsContainer.style.display = 'flex';
@@ -88,7 +93,9 @@ document.addEventListener('DOMContentLoaded', () => {
         screenPos.classList.remove('hidden');
         screenPos.classList.add('active');
         
-        resetTabs(targetTab); 
+        if (name !== 'Direct Entry') {
+            resetTabs(targetTab);
+        }
         window.dispatchEvent(new Event('load-table-cart'));
     }
 
@@ -96,31 +103,32 @@ document.addEventListener('DOMContentLoaded', () => {
         screenPos.classList.remove('active');
         screenPos.classList.add('hidden');
         
-        const isTable = gridTitle.innerText.includes('Table');
-        loadGrid(isTable ? 'table' : 'parcel');
+        if(activeTableName.innerText === 'Direct Entry') {
+            // Direct sale se sidha home screen par wapas jao
+            screenHome.classList.remove('hidden');
+            screenHome.classList.add('active');
+            renderRunningOrders();
+        } else {
+            const isTable = gridTitle.innerText.includes('Table');
+            loadGrid(isTable ? 'table' : 'parcel');
+        }
     });
 
-
-    // ==========================================
-    // 3. CUSTOMER TABS LOGIC (SMART TABS)
-    // ==========================================
+    // Customer Tabs Generator
     let customerCount = 1;
-
     function handleTabClick(e) {
         if(e.target.id === 'addCustomerBtn') return; 
-        
         document.querySelectorAll('.customer-tabs .tab').forEach(t => t.classList.remove('active'));
         e.target.classList.add('active');
-        
         activeTableName.dataset.customer = e.target.dataset.id;
-        window.dispatchEvent(new Event('load-table-cart')); // Reload cart for new customer
+        window.dispatchEvent(new Event('load-table-cart'));
     }
 
     function resetTabs(targetTab = 'C1') {
         const tableName = activeTableName.innerText;
+        if(tableName === 'Direct Entry') return;
+
         let maxC = 1;
-        
-        // Find how many customers are already active for this table in LocalStorage
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
             if (key.startsWith(`cart_${tableName}_C`)) {
@@ -135,7 +143,6 @@ document.addEventListener('DOMContentLoaded', () => {
         customerCount = maxC;
         customerTabsContainer.innerHTML = '';
         
-        // Generate tabs up to maxC
         for(let i = 1; i <= maxC; i++) {
             const btn = document.createElement('button');
             btn.className = `tab ${targetTab === 'C'+i ? 'active' : ''}`;
@@ -145,7 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
             customerTabsContainer.appendChild(btn);
         }
         
-        // Add the "+" button
         const addBtn = document.createElement('button');
         addBtn.className = 'tab add-tab-btn';
         addBtn.id = 'addCustomerBtn';
@@ -153,47 +159,41 @@ document.addEventListener('DOMContentLoaded', () => {
         addBtn.addEventListener('click', () => {
             customerCount++;
             const newTabId = `C${customerCount}`;
-            
             const newTab = document.createElement('button');
             newTab.className = 'tab';
             newTab.dataset.id = newTabId;
             newTab.innerText = `Customer ${customerCount}`;
             newTab.addEventListener('click', handleTabClick);
-            
             customerTabsContainer.insertBefore(newTab, document.getElementById('addCustomerBtn'));
             newTab.click(); 
         });
         customerTabsContainer.appendChild(addBtn);
     }
 
-    // ==========================================
-    // 4. RUNNING ORDERS (HOME SCREEN) LOGIC
-    // ==========================================
+    // Render Running Orders List
     function renderRunningOrders() {
         const container = document.getElementById('runningOrdersContainer');
         if(!container) return;
-        
         container.innerHTML = ''; 
         let hasRunningOrders = false;
 
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            
             if (key.startsWith('cart_')) {
-                const parts = key.split('_'); // [cart, Table 3, C2]
+                const parts = key.split('_'); 
                 if(parts.length !== 3) continue;
 
                 const tableName = parts[1];
                 const customerId = parts[2];
-                const cartData = JSON.parse(localStorage.getItem(key));
+                
+                if(tableName === 'Direct Entry') continue; // Direct entry carts ignore karo home orders screen par
 
+                const cartData = JSON.parse(localStorage.getItem(key));
                 if (cartData && cartData.length > 0) {
                     hasRunningOrders = true;
-                    
                     let total = cartData.reduce((sum, item) => sum + (item.price * item.qty), 0);
                     let itemCount = cartData.reduce((sum, item) => sum + item.qty, 0);
                     
-                    // Parcel me sirf Parcel 1, Tables me Table 3 (C2)
                     let displayName = tableName;
                     if (!tableName.includes('Parcel')) {
                         displayName += ` (${customerId})`; 
@@ -206,18 +206,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="rc-amount">₹${total.toFixed(2)}</span>
                         <span class="rc-items">${itemCount} Items</span>
                     `;
-
                     card.addEventListener('click', () => {
                         openPOS(tableName, customerId);
                     });
-
                     container.appendChild(card);
                 }
             }
         }
-
         if (!hasRunningOrders) {
-            container.innerHTML = `<span style="color: #6b7280; padding-left: 10px; font-style: italic;">No active orders right now.</span>`;
+            container.innerHTML = `<span style="color: #6b7280; font-style: italic;">No active table orders right now.</span>`;
         }
     }
 

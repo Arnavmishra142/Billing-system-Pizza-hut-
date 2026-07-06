@@ -296,8 +296,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- QUICK ADD MODALS ---
-    quickAddBtn.addEventListener('click', () => quickAddChoiceModal.classList.remove('hidden'));
+      // --- QUICK ADD MODALS ---
+    quickAddBtn.addEventListener('click', () => {
+        const activeTableName = document.getElementById('activeTableName').innerText;
+        
+        if (activeTableName === 'Direct Entry') {
+            // Direct entry ke time choice modal chupa kar seedha 'Bill Only' wala modal kholo
+            quickAddChoiceModal.classList.add('hidden');
+            billOnlyModal.classList.remove('hidden');
+        } else {
+            // Normal table/parcel par pehle ki tarah choice modal dikhao
+            quickAddChoiceModal.classList.remove('hidden');
+        }
+    });
+
     document.getElementById('closeChoiceModalBtn').addEventListener('click', () => quickAddChoiceModal.classList.add('hidden'));
 
     document.getElementById('btnAddToBillOnly').addEventListener('click', () => {

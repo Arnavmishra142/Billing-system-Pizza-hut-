@@ -1,6 +1,3 @@
-// ==========================================
-// 1. FIREBASE IMPORTS (Sabse upar)
-// ==========================================
 import { db } from './firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
@@ -11,14 +8,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentCart = [];
 
-    // Helper functions for names
     const getCurrentTable = () => activeTableNameEl.innerText;
     const getCurrentCustomer = () => activeTableNameEl.dataset.customer || 'C1';
     
-    // Key Table+Customer ke naam se banegi (e.g. cart_Table 3_C2)
     const getCartKey = () => `cart_${getCurrentTable()}_${getCurrentCustomer()}`;
 
-    // LocalStorage Helpers
     const getLocalCart = () => {
         const data = localStorage.getItem(getCartKey());
         return data ? JSON.parse(data) : [];
@@ -34,54 +28,67 @@ document.addEventListener('DOMContentLoaded', () => {
         window.dispatchEvent(new Event('cart-updated'));
     };
 
-    // Jab Menu se item add ho
+    // UI Updates based on POS mode (Direct Entry vs Table)
+    window.addEventListener('pos-opened', (e) => {
+        const name = e.detail.name;
+        const holdBtn = document.getElementById('holdBtn');
+        const kotBtn = document.getElementById('kotBtn');
+        const saveExitBtn = document.getElementById('saveExitBtn');
+
+        if (name === 'Direct Entry') {
+            if(holdBtn) holdBtn.style.display = 'none';
+            if(kotBtn) kotBtn.style.display = 'none';
+            if(saveExitBtn) {
+                saveExitBtn.innerText = "SAVE ENTRY"; // Professional text
+                saveExitBtn.style.gridColumn = "span 2"; // Full row coverage
+            }
+        } else {
+            if(holdBtn) holdBtn.style.display = 'block';
+            if(kotBtn) kotBtn.style.display = 'block';
+            if(saveExitBtn) {
+                saveExitBtn.innerText = "SAVE & EXIT";
+                saveExitBtn.style.gridColumn = "auto";
+            }
+        }
+    });
+
     window.addEventListener('add-to-cart', (e) => {
         const item = e.detail;
         currentCart = getLocalCart();
-
         const existingItem = currentCart.find(i => i.id === item.id);
         if (existingItem) {
             existingItem.qty += 1;
         } else {
             currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
         }
-        
         saveLocalCart(currentCart);
         renderCart();
     });
 
-    // Jab Quick Add -> "Add to Bill Only" se item aaye
     window.addEventListener('add-custom-item-to-bill', (e) => {
         const item = e.detail;
         currentCart = getLocalCart();
         currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
-        
         saveLocalCart(currentCart);
         renderCart();
     });
 
-    // Quantity Update (+/-)
     function updateQuantity(id, delta) {
         currentCart = getLocalCart();
         const itemIndex = currentCart.findIndex(item => item.id === id);
-        
         if (itemIndex > -1) {
             currentCart[itemIndex].qty += delta;
-            if (currentCart[itemIndex].qty <= 0) {
-                currentCart.splice(itemIndex, 1);
-            }
+            if (currentCart[itemIndex].qty <= 0) currentCart.splice(itemIndex, 1);
             saveLocalCart(currentCart);
             renderCart();
         }
     }
 
-    // Jab Table/Customer badle, toh uska specific cart render ho
     window.addEventListener('load-table-cart', () => {
         currentCart = getLocalCart();
         renderCart();
     });
 
-    // Render UI
     function renderCart() {
         cartItemsContainer.innerHTML = '';
         let totalAmount = 0;
@@ -129,9 +136,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ==========================================
-    // ACTION BUTTONS LOGIC
-    // ==========================================
     const holdBtn = document.getElementById('holdBtn');
     const kotBtn = document.getElementById('kotBtn');
     const checkoutBtn = document.getElementById('checkoutBtn');
@@ -141,65 +145,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const getDisplayTitle = () => {
         const tName = getCurrentTable();
+        if(tName === 'Direct Entry') return tName;
         return tName.includes('Parcel') ? tName : `${tName} [${getCurrentCustomer()}]`;
     };
 
-    // 1. HOLD
-    holdBtn.addEventListener('click', () => {
-        backToTablesBtn.click();
-    });
+    holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
-    // 2. KOT
     kotBtn.addEventListener('click', () => {
-        if (currentCart.length === 0) {
-            alert("Cart empty hai! Pehle item add karo.");
-            return;
-        }
-        
+        if (currentCart.length === 0) return;
         let kotHtml = `
-            <div class="print-header">
-                <h2>K.O.T</h2>
-                <p>${getDisplayTitle()}</p>
-                <p>Time: ${new Date().toLocaleTimeString()}</p>
-            </div>
+            <div class="print-header"><h2>K.O.T</h2><p>${getDisplayTitle()}</p><p>Time: ${new Date().toLocaleTimeString()}</p></div>
             <div class="print-divider"></div>
-            <div class="print-item" style="font-weight: bold;">
-                <span style="flex:1;">Item</span>
-                <span style="width: 30px; text-align: right;">Qty</span>
-            </div>
+            <div class="print-item" style="font-weight: bold;"><span style="flex:1;">Item</span><span style="width: 30px; text-align: right;">Qty</span></div>
             <div class="print-divider"></div>
         `;
-        
         currentCart.forEach(item => {
-            kotHtml += `
-                <div class="print-item">
-                    <span style="flex:1; padding-right: 5px;">${item.name}</span>
-                    <span style="width: 30px; text-align: right;">x${item.qty}</span>
-                </div>
-            `;
+            kotHtml += `<div class="print-item"><span style="flex:1; padding-right: 5px;">${item.name}</span><span style="width: 30px; text-align: right;">x${item.qty}</span></div>`;
         });
-        kotHtml += `<div class="print-divider"></div>`;
-        
         printArea.innerHTML = kotHtml;
         window.print();
     });
 
-    // 3. BILL & SETTLE (UPDATED: NOW SAVES TO FIREBASE DATABASE)
     checkoutBtn.addEventListener('click', async () => {
-        if (currentCart.length === 0) {
-            alert("Cart empty hai!");
-            return;
-        }
-
+        if (currentCart.length === 0) return;
         const tableName = getCurrentTable();
         const customerName = getCurrentCustomer();
         const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-
         checkoutBtn.innerText = "Processing...";
         checkoutBtn.disabled = true;
 
         try {
-            // NAYA: Bill Settle karte hi data seedha Firestore Cloud me permanent save hoga
             await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
                 table: tableName,
                 customer: customerName,
@@ -208,78 +183,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 timestamp: new Date().toISOString()
             });
 
-            // HTML Bill Design for Thermal Printer
             let billHtml = `
-                <div class="print-header">
-                    <h2>NEW PIZZA HUT</h2>
-                    <p style="font-size: 10px;">Live Cake | Salempur, Deoria</p>
-                    <p style="margin-top:5px;">Bill: ${getDisplayTitle()}</p>
-                    <p>Date: ${new Date().toLocaleDateString()}</p>
-                </div>
+                <div class="print-header"><h2>NEW PIZZA HUT</h2><p style="font-size: 10px;">Live Cake | Salempur, Deoria</p><p style="margin-top:5px;">Bill: ${getDisplayTitle()}</p><p>Date: ${new Date().toLocaleDateString()}</p></div>
                 <div class="print-divider"></div>
-                <div class="print-item" style="font-weight: bold;">
-                    <span style="flex:2;">Item</span>
-                    <span style="flex:1; text-align:center;">Qty</span>
-                    <span style="flex:1; text-align:right;">Amt</span>
-                </div>
+                <div class="print-item" style="font-weight: bold;"><span style="flex:2;">Item</span><span style="flex:1; text-align:center;">Qty</span><span style="flex:1; text-align:right;">Amt</span></div>
                 <div class="print-divider"></div>
             `;
-            
             currentCart.forEach(item => {
-                let amt = item.price * item.qty;
-                billHtml += `
-                    <div class="print-item">
-                        <span style="flex:2; padding-right: 5px;">${item.name}</span>
-                        <span style="flex:1; text-align:center;">${item.qty}</span>
-                        <span style="flex:1; text-align:right;">${amt}</span>
-                    </div>
-                `;
+                billHtml += `<div class="print-item"><span style="flex:2; padding-right: 5px;">${item.name}</span><span style="flex:1; text-align:center;">${item.qty}</span><span style="flex:1; text-align:right;">${item.price * item.qty}</span></div>`;
             });
-            
-            billHtml += `
-                <div class="print-divider"></div>
-                <div class="print-total">
-                    <span>TOTAL</span>
-                    <span>Rs ${total}</span>
-                </div>
-                <div style="text-align:center; margin-top:15px; font-size:10px;">
-                    Thank you for visiting!
-                </div>
-            `;
+            billHtml += `<div class="print-divider"></div><div class="print-total"><span>TOTAL</span><span>Rs ${total}</span></div>`;
             
             printArea.innerHTML = billHtml;
-            window.print(); // Trigger Print Preview
+            window.print();
 
-            // Clear this specific cart from everywhere
             saveLocalCart([]); 
             currentCart = [];
             renderCart(); 
-            
-            setTimeout(() => {
-                backToTablesBtn.click();
-            }, 500); 
-
+            setTimeout(() => backToTablesBtn.click(), 500); 
         } catch (error) {
-            console.error("Firebase save error on checkout:", error);
-            alert("Database error! Internet check karein.");
+            alert("Database error!");
         } finally {
             checkoutBtn.innerText = "Bill & Settle";
             checkoutBtn.disabled = false;
         }
     });
 
-    // 4. SAVE & EXIT (Saves to DB without printing)
     if (saveExitBtn) {
         saveExitBtn.addEventListener('click', async () => {
             if (currentCart.length === 0) {
                 backToTablesBtn.click(); 
                 return;
             }
-
             const tableName = getCurrentTable();
             const customerName = getCurrentCustomer();
             const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
             
+            const textBackup = saveExitBtn.innerText;
             saveExitBtn.innerText = "Saving...";
             saveExitBtn.disabled = true;
 
@@ -291,16 +231,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     total: total,
                     timestamp: new Date().toISOString()
                 });
-
                 saveLocalCart([]); 
                 currentCart = [];
                 renderCart();
                 backToTablesBtn.click();
             } catch (e) {
-                console.error("Sale Error: ", e);
-                alert("Database me save nahi ho paya.");
+                alert("Database save fail!");
             } finally {
-                saveExitBtn.innerText = "SAVE & EXIT";
+                saveExitBtn.innerText = textBackup;
                 saveExitBtn.disabled = false;
             }
         });
