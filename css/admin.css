@@ -55,11 +55,35 @@ input[type="date"]:focus { border-color: #38bdf8; }
 .section-header { font-size: 1.2rem; margin-bottom: 15px; color: #e2e8f0; font-weight: bold; }
 .dashed-top { border-top: 1px dashed #334155; padding-top: 25px; margin-top: 40px; }
 
-/* Table Mobile Responsiveness */
-.table-responsive { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 12px; background: #1e293b; margin-bottom: 20px; }
-.data-table { width: 100%; border-collapse: collapse; min-width: 600px; /* Forces scroll on small screens */ }
-.data-table th, .data-table td { padding: 15px; text-align: left; border-bottom: 1px solid #334155; }
-.data-table th { background: #0f172a; color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; }
+/* =========================================
+   BULLETPROOF TABLE RESPONSIVENESS
+   ========================================= */
+.table-responsive { 
+    width: 100%; 
+    overflow-x: auto; 
+    -webkit-overflow-scrolling: touch; 
+    border-radius: 12px; 
+    background: #1e293b; 
+    margin-bottom: 20px; 
+    display: block; /* Ensures container stretches */
+}
+.data-table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    min-width: 700px; /* Forces table to be wide enough to scroll */
+    white-space: nowrap; /* Stops text from wrapping to next line */
+}
+.data-table th, .data-table td { 
+    padding: 15px; 
+    text-align: left; 
+    border-bottom: 1px solid #334155; 
+}
+.data-table th { 
+    background: #0f172a; 
+    color: #94a3b8; 
+    font-size: 0.9rem; 
+    text-transform: uppercase; 
+}
 .data-table tr:hover { background: #334155; }
 
 /* Helpers */
@@ -79,12 +103,12 @@ input[type="date"]:focus { border-color: #38bdf8; }
     .main-workspace { padding: 15px; }
     
     .filter-controls { flex-direction: column; align-items: stretch; }
-    .filter-row { justify-content: center; width: 100%; }
+    .filter-row { justify-content: flex-start; width: 100%; overflow-x: auto; padding-bottom: 10px; flex-wrap: nowrap; } /* Makes filters swipeable */
     .btn-refresh { width: 100%; text-align: center; margin-top: 10px; }
     
     .divider { display: none; }
-    .date-label { display: block; width: 100%; text-align: center; margin: 10px 0 5px 0; }
-    input[type="date"] { width: 100%; }
+    .date-label { display: none; }
+    input[type="date"] { width: 100%; flex-shrink: 0; }
     
     .stat-card .value { font-size: 2rem; }
 }

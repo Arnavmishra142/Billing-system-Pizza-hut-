@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (localStorage.getItem('adminLoggedIn') === 'true') {
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('adminContent').style.display = 'flex';
-        loadSalesData('days', 1); // Open dashboard directly
+        loadSalesData('days', 1);
     }
 });
 
@@ -32,9 +32,6 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
     document.getElementById('pinInput').value = ''; 
 });
 
-// ==========================================
-// TAB SWITCHING
-// ==========================================
 window.switchTab = function(tabName) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -44,7 +41,7 @@ window.switchTab = function(tabName) {
 }
 
 // ==========================================
-// SALES LOGIC & FIREBASE LIVE FETCH (UPDATED)
+// SALES LOGIC & FIREBASE FETCH
 // ==========================================
 let allSales = []; 
 
@@ -67,13 +64,15 @@ async function fetchAllSalesFromDB() {
 }
 
 window.loadSalesData = async function(filterType, filterValue) {
-    // NAYA: Har baar cloud se fresh live data load hoga, koi data cache block nahi hoga
     await fetchAllSalesFromDB();
 
     const now = new Date();
     let filteredSales = [];
 
     allSales.forEach(sale => {
+        // Fallback in case timestamp is missing
+        if(!sale.timestamp) return; 
+
         const saleDate = new Date(sale.timestamp);
         
         if (filterType === 'date') {
@@ -104,35 +103,54 @@ window.loadSalesData = async function(filterType, filterValue) {
 
     if (filteredSales.length === 0) {
         billsTbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:#64748b;">No bills found for this period.</td></tr>';
+    } else {
+        filteredSales.forEach(sale => {
+            // SAFETY CHECKS (Ye loop crash hone se bachaenge)
+            const saleTotal = Number(sale.total) || 0;
+            totalRevenue += saleTotal;
+            
+            const itemsArray = sale.items || [];
+            
+            itemsArray.forEach(item => {
+                const itemName = item.name || 'Unknown Item';
+                const itemQty = Number(item.qty) || 0;
+                const itemPrice = Number(item.price) || 0;
+
+                if (!itemStats[itemName]) itemStats[itemName] = { qty: 0, rev: 0 };
+                itemStats[itemName].qty += itemQty;
+                itemStats[itemName].rev += (itemQty * itemPrice);
+            });
+
+            // Date formatting
+            let timeString = 'Unknown Time';
+            if(sale.timestamp) {
+                timeString = new Date(sale.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
+            }
+
+            // Table Name formatting
+            let tableName = sale.table || 'Unknown';
+            if(!tableName.includes('Parcel')) {
+                tableName = `${tableName} [${sale.customer || 'C1'}]`;
+            }
+            
+            billsTbody.innerHTML += `
+                <tr>
+                    <td style="color: #94a3b8; white-space: nowrap;">${timeString}</td>
+                    <td style="font-weight: bold; color: #f8fafc; white-space: nowrap;">${tableName}</td>
+                    <td class="text-right" style="color: #10b981; font-weight: bold; white-space: nowrap;">₹${saleTotal.toFixed(2)}</td>
+                    <td class="text-center" style="white-space: nowrap;">
+                        <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.9rem;" onclick="deleteSale('${sale.id}')">🗑️ Delete</button>
+                    </td>
+                </tr>
+            `;
+        });
     }
 
-    filteredSales.forEach(sale => {
-        totalRevenue += sale.total;
-        
-        sale.items.forEach(item => {
-            if (!itemStats[item.name]) itemStats[item.name] = { qty: 0, rev: 0 };
-            itemStats[item.name].qty += item.qty;
-            itemStats[item.name].rev += (item.qty * item.price);
-        });
-
-        const timeString = new Date(sale.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
-        const tableName = sale.table.includes('Parcel') ? sale.table : `${sale.table} [${sale.customer}]`;
-        
-        billsTbody.innerHTML += `
-            <tr>
-                <td style="color: #94a3b8; white-space: nowrap;">${timeString}</td>
-                <td style="font-weight: bold; color: #f8fafc; white-space: nowrap;">${tableName}</td>
-                <td class="text-right" style="color: #10b981; font-weight: bold;">₹${sale.total}</td>
-                <td class="text-center">
-                    <button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.9rem;" onclick="deleteSale('${sale.id}')">🗑️ Delete</button>
-                </td>
-            </tr>
-        `;
-    });
-
-    document.getElementById('totalRevenueBox').innerText = `₹${totalRevenue}`;
+    // UPDATE STATS
+    document.getElementById('totalRevenueBox').innerText = `₹${totalRevenue.toFixed(2)}`;
     document.getElementById('totalOrdersBox').innerText = filteredSales.length;
 
+    // UPDATE ITEM TABLE
     const salesTbody = document.getElementById('salesTableBody');
     salesTbody.innerHTML = '';
 
@@ -146,23 +164,24 @@ window.loadSalesData = async function(filterType, filterValue) {
         sortedItems.forEach(stat => {
             salesTbody.innerHTML += `
                 <tr>
-                    <td style="font-weight: bold; color: #f8fafc;">${stat.name}</td>
-                    <td class="text-right" style="color: #38bdf8; font-weight: bold;">${stat.qty}</td>
-                    <td class="text-right" style="color: #10b981; font-weight: bold;">₹${stat.rev}</td>
+                    <td style="font-weight: bold; color: #f8fafc; white-space: nowrap;">${stat.name}</td>
+                    <td class="text-right" style="color: #38bdf8; font-weight: bold; white-space: nowrap;">${stat.qty}</td>
+                    <td class="text-right" style="color: #10b981; font-weight: bold; white-space: nowrap;">₹${stat.rev.toFixed(2)}</td>
                 </tr>
             `;
         });
     }
 }
 
-// --- DELETE & REFRESH HANDLERS ---
+// ==========================================
+// ACTIONS
+// ==========================================
 window.deleteSale = async function(saleId) {
     const confirmDelete = confirm("Are you sure you want to delete this bill? This cannot be undone.");
     if (confirmDelete) {
         try {
             await deleteDoc(doc(db, "sales_history", saleId));
             
-            // Immediately refresh calculations
             const activeBtn = document.querySelector('.filter-btn.active');
             if(activeBtn) {
                 loadSalesData('days', parseInt(activeBtn.dataset.val)); 
@@ -170,7 +189,6 @@ window.deleteSale = async function(saleId) {
                 const dateVal = document.getElementById('customDateSearch').value;
                 loadSalesData('date', dateVal);
             }
-            alert("Bill successfully deleted!");
         } catch (error) {
             console.error("Error deleting document: ", error);
             alert("Delete karne mein problem aayi.");
@@ -178,7 +196,6 @@ window.deleteSale = async function(saleId) {
     }
 }
 
-// Refresh Button click triggers fresh load
 document.getElementById('refreshBtn').addEventListener('click', async (e) => {
     const btn = e.target;
     btn.innerText = "🔄 Refreshing...";
@@ -197,7 +214,6 @@ document.getElementById('refreshBtn').addEventListener('click', async (e) => {
     btn.disabled = false;
 });
 
-// Day buttons listeners
 document.querySelectorAll('.filter-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
         document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -209,7 +225,6 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
     });
 });
 
-// Calendar input listener
 document.getElementById('customDateSearch').addEventListener('change', (e) => {
     if (e.target.value) {
         document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
