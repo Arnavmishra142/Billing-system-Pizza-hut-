@@ -1,62 +1,82 @@
 document.addEventListener('DOMContentLoaded', () => {
     const cartItemsContainer = document.getElementById('cartItems');
     const cartTotalElement = document.getElementById('cartTotal');
+    const activeTableNameEl = document.getElementById('activeTableName');
 
-    // Cart array jisme saare selected items rahenge
-    let cart = [];
+    let currentCart = [];
 
-    // 1. LISTEN FOR CLICKS FROM MENU.JS
-    // Jab menu.js me item par click hoga, wo ek signal bhejega jo hum yahan catch kar rahe hain
+    // Table ka naam laane ka helper
+    const getCurrentTable = () => activeTableNameEl.innerText;
+
+    // LocalStorage se fetch karne ka helper
+    const getLocalCart = (tableName) => {
+        const data = localStorage.getItem(`cart_${tableName}`);
+        return data ? JSON.parse(data) : [];
+    };
+
+    // LocalStorage me save karne ka helper
+    const saveLocalCart = (tableName, cartData) => {
+        if (cartData.length === 0) {
+            localStorage.removeItem(`cart_${tableName}`);
+        } else {
+            localStorage.setItem(`cart_${tableName}`, JSON.stringify(cartData));
+        }
+        // Signal bhejo ki cart update hua hai taaki Home screen pe active cards update ho
+        window.dispatchEvent(new Event('cart-updated'));
+    };
+
+    // 1. Jab Menu se item add ho
     window.addEventListener('add-to-cart', (e) => {
         const item = e.detail;
-        addToCart(item);
-    });
+        const tableName = getCurrentTable();
+        
+        // Pehle current table ka updated cart fetch karo
+        currentCart = getLocalCart(tableName);
 
-    // 2. ADD TO CART LOGIC (Handle 1x, 2x, 3x)
-    function addToCart(newItem) {
-        // Check karo ki item pehle se cart me hai kya (ID ke base par)
-        const existingItem = cart.find(item => item.id === newItem.id);
-
+        const existingItem = currentCart.find(i => i.id === item.id);
         if (existingItem) {
-            // Agar pehle se hai, toh sirf quantity badhao
             existingItem.qty += 1;
         } else {
-            // Agar naya hai, toh array me naya object push karo with qty: 1
-            cart.push({
-                id: newItem.id,
-                name: newItem.name,
-                price: newItem.price,
+            currentCart.push({
+                id: item.id,
+                name: item.name,
+                price: item.price,
                 qty: 1
             });
         }
         
-        // Cart UI ko update karo
+        saveLocalCart(tableName, currentCart);
         renderCart();
-    }
+    });
 
-    // 3. INCREASE / DECREASE QUANTITY LOGIC (+ / - Buttons)
+    // 2. Quantity Update (+/-)
     function updateQuantity(id, delta) {
-        const itemIndex = cart.findIndex(item => item.id === id);
+        const tableName = getCurrentTable();
+        currentCart = getLocalCart(tableName);
+        const itemIndex = currentCart.findIndex(item => item.id === id);
         
         if (itemIndex > -1) {
-            cart[itemIndex].qty += delta;
-            
-            // Agar quantity 0 ya usse kam ho jaye, toh item ko cart se hata do
-            if (cart[itemIndex].qty <= 0) {
-                cart.splice(itemIndex, 1);
+            currentCart[itemIndex].qty += delta;
+            if (currentCart[itemIndex].qty <= 0) {
+                currentCart.splice(itemIndex, 1);
             }
-            
+            saveLocalCart(tableName, currentCart);
             renderCart();
         }
     }
 
-    // 4. RENDER CART ON SCREEN
+    // 3. Jab Table badle, toh uska specific cart render ho
+    window.addEventListener('load-table-cart', () => {
+        currentCart = getLocalCart(getCurrentTable());
+        renderCart();
+    });
+
+    // 4. Render UI
     function renderCart() {
-        cartItemsContainer.innerHTML = ''; // Pehle purana HTML clear karo
+        cartItemsContainer.innerHTML = '';
         let totalAmount = 0;
 
-        // Agar cart khali hai toh ek simple message dikhao
-        if (cart.length === 0) {
+        if (currentCart.length === 0) {
             cartItemsContainer.innerHTML = `
                 <div style="text-align: center; color: #9ca3af; margin-top: 50px; font-weight: bold;">
                     Cart is empty <br> <span style="font-size: 0.8rem; font-weight: normal;">Click items to add</span>
@@ -66,14 +86,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Cart ke har item ka HTML box generate karo
-        cart.forEach(item => {
+        currentCart.forEach(item => {
             const itemTotal = item.price * item.qty;
             totalAmount += itemTotal;
 
             const cartItemDiv = document.createElement('div');
             cartItemDiv.className = 'cart-item';
-            
             cartItemDiv.innerHTML = `
                 <div class="cart-item-header">
                     <span>${item.name}</span>
@@ -81,7 +99,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="cart-item-controls">
                     <span style="color: #6b7280; font-size: 0.85rem;">₹${item.price} x ${item.qty}</span>
-                    
                     <div class="quantity-control">
                         <button class="qty-btn qty-minus" data-id="${item.id}">-</button>
                         <span style="font-weight: bold;">${item.qty}</span>
@@ -89,27 +106,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
             `;
-            
             cartItemsContainer.appendChild(cartItemDiv);
         });
 
-        // Niche Grand Total update karo
         cartTotalElement.innerText = `₹${totalAmount.toFixed(2)}`;
 
-        // Naye generated + aur - buttons par click event lagao
+        // Button Events Attach Karo
         document.querySelectorAll('.qty-minus').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                updateQuantity(e.target.dataset.id, -1);
-            });
+            btn.addEventListener('click', (e) => updateQuantity(e.target.dataset.id, -1));
         });
-
         document.querySelectorAll('.qty-plus').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                updateQuantity(e.target.dataset.id, 1);
-            });
+            btn.addEventListener('click', (e) => updateQuantity(e.target.dataset.id, 1));
         });
     }
-
-    // Load hote hi ek baar khali cart render kar do
-    renderCart();
 });

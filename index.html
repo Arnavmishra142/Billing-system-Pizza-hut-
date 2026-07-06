@@ -3,23 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>POS System</title>
+    <title>POS System - New Pizza Hut & Live Cake</title>
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-    <div id="screen-tables" class="screen active">
-        <header class="top-nav">
-            <h1>Select Table / Packing</h1>
+    <div id="screen-home" class="screen active">
+        <header class="top-nav" style="justify-content: center;">
+            <h1>New Pizza Hut & Live Cake - POS</h1>
         </header>
-        <div class="table-grid" id="tableGrid">
+        
+        <div class="home-options">
+            <button id="btn-tables" class="home-btn">
+                🍽️ <br> Dine-In (Tables)
+            </button>
+            <button id="btn-parcel" class="home-btn parcel-btn">
+                🛍️ <br> Takeaway (Parcel)
+            </button>
+        </div>
+
+        <div class="running-orders-section">
+            <h3>🔥 Active Orders</h3>
+            <div class="running-wrapper" id="runningOrdersContainer">
             </div>
+        </div>
+    </div>
+
+    <div id="screen-grid" class="screen hidden">
+        <header class="top-nav">
+            <button id="backToHomeBtn" class="back-btn">⬅ Back</button>
+            <h2 id="gridTitle">Select Option</h2>
+        </header>
+        <div class="table-grid" id="dynamicGrid">
+        </div>
     </div>
 
     <div id="screen-pos" class="screen hidden">
         <header class="top-nav pos-header">
-            <button id="backToTablesBtn" class="back-btn">⬅ Back</button>
-            <h2 id="activeTableName">Table 5</h2>
+            <button id="backToTablesBtn" class="back-btn">⬅ Back to Grid</button>
+            <h2 id="activeTableName">Table / Parcel</h2>
             
             <div class="customer-tabs" id="customerTabsContainer">
                 <button class="tab active" data-id="C1">Customer 1</button>
@@ -29,32 +51,31 @@
 
         <div class="pos-layout">
             <aside class="sidebar" id="categoryList">
-                </aside>
+            </aside>
 
             <main class="main-content">
                 <div class="search-bar">
                     <input type="text" id="searchInput" placeholder="Search items...">
                 </div>
                 <div class="items-grid" id="itemsGrid">
-                    </div>
+                </div>
             </main>
 
             <aside class="cart-panel">
                 <div class="cart-items" id="cartItems">
-                    </div>
+                </div>
                 
                 <div class="billing-section">
                     <div class="total-row">
                         <span>Total:</span>
-                        <span id="cartTotal">₹0.00</span>
+                        <span id="cartTotal" class="total-amount">₹0.00</span>
                     </div>
-                   <div class="action-grid">
-    <button class="btn btn-hold" id="holdBtn">HOLD</button>
-    <button class="btn btn-kot" id="kotBtn">KOT</button>
-    <button class="btn btn-details" id="detailsBtn">Details</button>
-    <button class="btn btn-checkout" id="checkoutBtn">Bill & Settle</button>
-</div>
-
+                    <div class="action-grid">
+                        <button class="btn btn-hold" id="holdBtn">HOLD</button>
+                        <button class="btn btn-kot" id="kotBtn">KOT</button>
+                        <button class="btn btn-details" id="detailsBtn">Details</button>
+                        <button class="btn btn-checkout" id="checkoutBtn">Bill & Settle</button>
+                    </div>
                 </div>
             </aside>
         </div>
@@ -62,7 +83,7 @@
 
     <div id="checkoutModal" class="modal hidden">
         <div class="modal-content">
-            <h3>Enter Customer Details (Optional)</h3>
+            <h3>Enter Customer Details</h3>
             <input type="number" id="customerPhone" placeholder="Phone Number">
             <input type="text" id="customerName" placeholder="Name">
             <div class="modal-actions">
@@ -76,4 +97,5 @@
     <script type="module" src="js/tables.js"></script>
     <script type="module" src="js/menu.js"></script>
     <script type="module" src="js/cart.js"></script>
-    <script type="module" src="js/checkout.js"></scrip</html>
+</body>
+</html>

@@ -10,7 +10,7 @@
 
 body { 
     background: #f3f4f6; 
-    height: 100dvh; /* Dynamic viewport height to prevent bottom cut-off */
+    height: 100dvh; 
     overflow: hidden; 
 }
 
@@ -19,53 +19,105 @@ body {
 .screen.active { display: flex; flex-direction: column; }
 .hidden { display: none !important; }
 
+/* =========================================
+   SCREEN 1: HOME SCREEN (NEW)
+   ========================================= */
+.home-options {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-grow: 1;
+    gap: 50px;
+    padding: 20px;
+    background: #eef2ff;
+}
+
+.home-btn {
+    width: 280px;
+    height: 280px;
+    border-radius: 24px;
+    border: none;
+    font-size: 1.8rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: #4f46e5;
+    color: white;
+    box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.4);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+    line-height: 1.4;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.home-btn.parcel-btn {
+    background: #10b981;
+    box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.4);
+}
+
+.home-btn:hover {
+    transform: translateY(-8px) scale(1.02);
+    box-shadow: 0 20px 30px -5px rgba(0, 0, 0, 0.2);
+}
+
+.home-btn:active {
+    transform: scale(0.95);
+}
 
 /* =========================================
-   SCREEN 1: TABLE GRID
+   SCREEN 2: TABLE / PARCEL GRID
    ========================================= */
 .table-grid { 
     display: grid; 
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); 
-    gap: 20px; 
-    padding: 30px; 
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); 
+    gap: 25px; 
+    padding: 40px; 
     overflow-y: auto; 
     flex-grow: 1;
+    background: #f9fafb;
 }
 
 .table-card { 
     background: white; 
-    padding: 30px 20px; 
+    padding: 40px 20px; 
     text-align: center; 
-    border-radius: 10px; 
+    border-radius: 12px; 
     font-weight: bold; 
-    font-size: 1.2rem; 
+    font-size: 1.4rem; 
     cursor: pointer; 
-    border: 2px solid transparent; 
+    border: 2px solid #e5e7eb; 
     box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
     transition: all 0.2s ease; 
+    color: #374151;
 }
 
 .table-card:hover { 
     border-color: #4f46e5; 
-    transform: translateY(-2px); 
+    transform: translateY(-4px); 
+    box-shadow: 0 10px 15px rgba(0,0,0,0.1);
+    color: #4f46e5;
 }
 
-.status-empty { border-left: 5px solid #10b981; }
-.status-occupied { border-left: 5px solid #ef4444; }
-.status-hold { border-left: 5px solid #f59e0b; }
-
+.status-empty { border-left: 6px solid #10b981; }
+.status-occupied { border-left: 6px solid #ef4444; }
+.status-hold { border-left: 6px solid #f59e0b; }
 
 /* =========================================
-   SCREEN 2: TOP NAV & TABS
+   TOP NAV & TABS
    ========================================= */
 .top-nav { 
     background: #1f2937; 
     color: white; 
-    padding: 15px 20px; 
+    padding: 15px 25px; 
     display: flex; 
     align-items: center; 
     gap: 20px; 
     flex-shrink: 0;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .customer-tabs { 
@@ -75,19 +127,20 @@ body {
 }
 
 .tab { 
-    padding: 8px 15px; 
+    padding: 8px 18px; 
     background: #374151; 
     color: white; 
     border: none; 
-    border-radius: 4px; 
+    border-radius: 6px; 
     cursor: pointer; 
-    font-weight: 500;
+    font-weight: 600;
     transition: 0.2s;
 }
 
 .tab.active { 
     background: #4f46e5; 
     font-weight: bold; 
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .tab:active { transform: scale(0.95); }
@@ -96,26 +149,26 @@ body {
     background: #ef4444; 
     color: white; 
     border: none; 
-    padding: 8px 15px; 
-    border-radius: 4px; 
+    padding: 10px 18px; 
+    border-radius: 6px; 
     cursor: pointer; 
     font-weight: bold; 
+    transition: background 0.2s;
 }
-
+.back-btn:hover { background: #dc2626; }
 
 /* =========================================
-   SCREEN 2: POS MAIN LAYOUT
+   POS MAIN LAYOUT
    ========================================= */
 .pos-layout { 
     display: flex; 
     flex-grow: 1; 
-    height: calc(100dvh - 65px); /* Header height removed */
+    height: calc(100dvh - 66px);
     overflow: hidden; 
 }
 
-/* Left Sidebar (Categories) */
 .sidebar { 
-    width: 20%; 
+    width: 22%; 
     background: #fff; 
     border-right: 1px solid #e5e7eb; 
     overflow-y: auto; 
@@ -123,9 +176,8 @@ body {
     flex-direction: column; 
 }
 
-/* Middle Content (Items) */
 .main-content { 
-    width: 50%; 
+    width: 48%; 
     display: flex; 
     flex-direction: column; 
     background: #f9fafb; 
@@ -139,20 +191,20 @@ body {
 
 .search-bar input { 
     width: 100%; 
-    padding: 10px 15px; 
+    padding: 12px 15px; 
     border: 1px solid #d1d5db; 
-    border-radius: 6px; 
+    border-radius: 8px; 
     outline: none; 
-    font-size: 1rem;
+    font-size: 1.05rem;
+    transition: border-color 0.2s;
 }
 
-.search-bar input:focus { border-color: #4f46e5; }
+.search-bar input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
 
-/* Item Cards Grid */
 .items-grid { 
     padding: 15px; 
     display: grid; 
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); 
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); 
     gap: 15px; 
     overflow-y: auto; 
     flex-grow: 1; 
@@ -162,7 +214,7 @@ body {
 .item-card { 
     background: #fff; 
     border: 1px solid #e5e7eb; 
-    border-radius: 10px; 
+    border-radius: 12px; 
     padding: 15px; 
     cursor: pointer; 
     text-align: center; 
@@ -173,28 +225,29 @@ body {
 }
 
 .item-card:active { transform: scale(0.95); }
+.item-card:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.1); border-color: #d1d5db; }
 
 .item-image { 
     height: 80px; 
     background: #f3f4f6; 
     border-radius: 8px; 
-    margin-bottom: 10px; 
+    margin-bottom: 12px; 
 }
 
 .item-title { 
-    font-size: 0.9rem; 
+    font-size: 0.95rem; 
     font-weight: 700; 
     color: #1f2937; 
-    margin-bottom: 5px; 
-    line-height: 1.2; 
+    margin-bottom: 8px; 
+    line-height: 1.3; 
 }
 
 .item-price { 
     color: #4f46e5; 
     font-weight: 800; 
+    font-size: 1.1rem;
     margin-top: auto; 
 }
-
 
 /* =========================================
    CART PANEL & BILLING (RIGHT SIDE)
@@ -215,22 +268,21 @@ body {
     background: #f9fafb; 
 }
 
-/* Individual Cart Item (For cart.js) */
 .cart-item { 
     background: #fff; 
-    padding: 12px; 
-    border-radius: 8px; 
+    padding: 15px; 
+    border-radius: 10px; 
     border: 1px solid #e5e7eb; 
-    margin-bottom: 10px; 
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05); 
+    margin-bottom: 12px; 
+    box-shadow: 0 2px 4px rgba(0,0,0,0.03); 
 }
 
 .cart-item-header { 
     display: flex; 
     justify-content: space-between; 
     font-weight: bold; 
-    margin-bottom: 8px; 
-    font-size: 0.95rem; 
+    margin-bottom: 10px; 
+    font-size: 1rem; 
     color: #1f2937; 
 }
 
@@ -242,73 +294,84 @@ body {
 
 .quantity-control { 
     background: #f3f4f6; 
-    border-radius: 4px; 
-    padding: 4px 8px; 
+    border-radius: 6px; 
+    padding: 4px; 
     display: flex; 
-    gap: 15px; 
+    gap: 12px; 
     align-items: center; 
 }
 
 .qty-btn { 
     border: none; 
-    background: none; 
+    background: #e5e7eb; 
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
     font-weight: bold; 
     font-size: 1.2rem; 
-    cursor: pointer; 
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
 }
-
+.qty-btn:active { transform: scale(0.9); }
 .qty-minus { color: #ef4444; }
 .qty-plus { color: #10b981; }
 
-/* Bottom Billing Section */
 .billing-section { 
-    padding: 15px 15px 25px 15px; /* Extra bottom padding for tablets */
+    padding: 20px; 
     border-top: 1px solid #e5e7eb; 
     background: #fff; 
     flex-shrink: 0; 
+    box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.02);
 }
 
 .total-row { 
     display: flex; 
     justify-content: space-between; 
-    font-size: 1.5rem; 
+    font-size: 1.6rem; 
     font-weight: 800; 
-    margin-bottom: 15px; 
+    margin-bottom: 20px; 
     color: #1f2937; 
 }
 
 .total-amount { color: #10b981; }
 
-/* 2x2 Button Grid */
 .action-grid { 
     display: grid; 
     grid-template-columns: 1fr 1fr; 
-    gap: 10px; 
+    gap: 12px; 
 }
 
 .btn { 
-    padding: 15px 10px; 
+    padding: 15px; 
     border: none; 
     border-radius: 8px; 
     font-weight: bold; 
-    font-size: 1rem; 
+    font-size: 1.05rem; 
     cursor: pointer; 
     color: white; 
-    transition: opacity 0.2s, transform 0.1s; 
+    transition: all 0.2s; 
     text-align: center; 
+    text-transform: uppercase;
 }
 
 .btn:active { transform: scale(0.96); }
 
-/* Button Colors */
 .btn-hold { background: #f59e0b; }
-.btn-kot { background: #4f46e5; }
-.btn-details { background: #3b82f6; } /* The new details button */
-.btn-checkout { background: #10b981; }
+.btn-hold:hover { background: #d97706; }
 
+.btn-kot { background: #4f46e5; }
+.btn-kot:hover { background: #4338ca; }
+
+.btn-details { background: #3b82f6; } 
+.btn-details:hover { background: #2563eb; }
+
+.btn-checkout { background: #10b981; }
+.btn-checkout:hover { background: #059669; }
 
 /* =========================================
-   CHECKOUT MODAL (POPUP)
+   CHECKOUT MODAL
    ========================================= */
 .modal { 
     position: fixed; 
@@ -318,42 +381,97 @@ body {
     justify-content: center; 
     align-items: center; 
     z-index: 1000; 
-    backdrop-filter: blur(2px); 
+    backdrop-filter: blur(4px); 
 }
 
 .modal-content { 
     background: white; 
     padding: 30px; 
-    border-radius: 12px; 
+    border-radius: 16px; 
     width: 90%; 
-    max-width: 400px; 
+    max-width: 420px; 
     display: flex; 
     flex-direction: column; 
     gap: 15px; 
-    box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); 
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25); 
 }
 
 .modal-content h3 { 
     color: #1f2937; 
     text-align: center; 
-    margin-bottom: 5px; 
+    margin-bottom: 10px; 
+    font-size: 1.4rem;
 }
 
 .modal-content input { 
-    padding: 12px; 
+    padding: 14px; 
     border: 1px solid #d1d5db; 
     border-radius: 8px; 
     font-size: 1rem; 
     outline: none;
+    transition: border 0.2s;
 }
 
-.modal-content input:focus { border-color: #4f46e5; }
+.modal-content input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
 
 .modal-actions { 
     display: flex; 
-    gap: 10px; 
-    margin-top: 10px; 
+    gap: 15px; 
+    margin-top: 15px; 
 }
 
 .btn-cancel { background: #6b7280; flex: 1; }
+.btn-cancel:hover { background: #4b5563; }
 .btn-print { background: #10b981; flex: 1; }
+.btn-print:hover { background: #059669; }
+/* =========================================
+   RUNNING ORDERS (HORIZONTAL SCROLL)
+   ========================================= */
+.running-orders-section {
+    padding: 20px;
+    background: #eef2ff;
+    border-top: 2px solid #e5e7eb;
+}
+
+.running-orders-section h3 {
+    color: #1f2937;
+    margin-bottom: 15px;
+    font-size: 1.2rem;
+    padding-left: 10px;
+}
+
+.running-wrapper {
+    display: flex;
+    gap: 15px;
+    overflow-x: auto; /* Left to right scroll */
+    padding-bottom: 15px;
+    scroll-behavior: smooth;
+    /* Hide scrollbar completely */
+    -ms-overflow-style: none;  
+    scrollbar-width: none;  
+}
+
+.running-wrapper::-webkit-scrollbar { 
+    display: none; 
+}
+
+.running-card {
+    min-width: 150px;
+    background: #fff;
+    padding: 15px;
+    border-radius: 12px;
+    border-left: 5px solid #f59e0b; /* Yellow for hold/running */
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    flex-shrink: 0;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    white-space: nowrap; /* Taki text do line me toot kar kate na */
+    transition: transform 0.2s;
+}
+
+.running-card:active { transform: scale(0.95); }
+.running-card .rc-title { font-weight: bold; font-size: 1.1rem; color: #1f2937; }
+.running-card .rc-amount { color: #10b981; font-weight: 800; font-size: 1rem; }
+.running-card .rc-items { font-size: 0.85rem; color: #6b7280; }
