@@ -152,31 +152,6 @@ document.addEventListener('DOMContentLoaded', () => {
     holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
     // =====================================
-    // RAWBT K.O.T PRINT LOGIC
-    // =====================================
-    kotBtn.addEventListener('click', () => {
-        if (currentCart.length === 0) return;
-        
-        let kotText = "<c><b>------- K.O.T -------</b></c>\n";
-        kotText += `<c>Table: ${getDisplayTitle()}</c>\n`;
-        kotText += `<c>Time: ${new Date().toLocaleTimeString('en-IN')}</c>\n`;
-        kotText += "--------------------------------\n";
-        kotText += "Item                         Qty\n";
-        kotText += "--------------------------------\n";
-        
-        currentCart.forEach(item => {
-            let n = item.name.length > 24 ? item.name.substring(0, 22) + ".." : item.name.padEnd(24, " ");
-            let q = String(item.qty).padStart(3, " ") + "x";
-            kotText += `<b>${n}</b>    ${q}\n`;
-        });
-        
-        kotText += "--------------------------------\n";
-        kotText += "\n\n\n"; 
-        
-        window.location.href = "rawbt:" + encodeURIComponent(kotText);
-    });
-
-     // =====================================
     // RAWBT ALIGNMENT HELPERS (The Math)
     // =====================================
     const centerText = (text) => {
@@ -262,12 +237,12 @@ document.addEventListener('DOMContentLoaded', () => {
             billText += "--------------------------------\n";
             billText += centerText("Thank You! Visit Again") + "\n\n";
             
-            // Text UPI ID instead of QR for maximum speed
+            // UPI Details centered properly
             billText += centerText("--- UPI PAYMENT ---") + "\n";
             billText += centerText("6393349498@fam") + "\n";
             billText += centerText("(Pay via PhonePe/GPay)") + "\n";
             
-            billText += "\n\n\n\n";
+            billText += "\n\n\n\n"; // Paper cutting margin
             
             window.location.href = "rawbt:" + encodeURIComponent(billText);
 
@@ -282,3 +257,42 @@ document.addEventListener('DOMContentLoaded', () => {
             checkoutBtn.disabled = false;
         }
     });
+
+    // =====================================
+    // SAVE & EXIT LOGIC
+    // =====================================
+    if (saveExitBtn) {
+        saveExitBtn.addEventListener('click', async () => {
+            if (currentCart.length === 0) {
+                backToTablesBtn.click(); 
+                return;
+            }
+            const tableName = getCurrentTable();
+            const customerName = getCurrentCustomer();
+            const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+            
+            const textBackup = saveExitBtn.innerText;
+            saveExitBtn.innerText = "Saving...";
+            saveExitBtn.disabled = true;
+
+            try {
+                await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
+                    table: tableName,
+                    customer: customerName,
+                    items: currentCart,
+                    total: total,
+                    timestamp: new Date().toISOString()
+                });
+                saveLocalCart([]); 
+                currentCart = [];
+                renderCart();
+                backToTablesBtn.click();
+            } catch (e) {
+                alert("Database save fail!");
+            } finally {
+                saveExitBtn.innerText = textBackup;
+                saveExitBtn.disabled = false;
+            }
+        });
+    }
+});
