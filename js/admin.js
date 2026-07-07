@@ -1,31 +1,4 @@
-let deferredPrompt;
-const pwaBtn = document.getElementById('pwaDownloadBtn');
 
-// 1. Browser check karega ki PWA install ho sakta hai ya nahi
-window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    pwaBtn.style.display = 'block'; // Button dikhao
-});
-
-// 2. Button click handle karo
-pwaBtn.addEventListener('click', () => {
-    if (deferredPrompt) {
-        deferredPrompt.prompt();
-        deferredPrompt.userChoice.then((choiceResult) => {
-            if (choiceResult.outcome === 'accepted') {
-                console.log('User installed PWA');
-            }
-            deferredPrompt = null;
-            pwaBtn.style.display = 'none'; // Install hone ke baad button hata do
-        });
-    }
-});
-
-// 3. Agar pehle se install hai toh check karo
-window.addEventListener('appinstalled', () => {
-    pwaBtn.style.display = 'none';
-});
 
 import { db, storage } from './firebase-config.js';
 import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
@@ -589,3 +562,31 @@ if(refreshExpBtn) {
         btn.disabled = false;
     });
 }
+let deferredPrompt;
+const pwaBtn = document.getElementById('pwaDownloadBtn');
+
+// 1. Browser check karega ki PWA install ho sakta hai ya nahi
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    pwaBtn.style.display = 'block'; // Button dikhao
+});
+
+// 2. Button click handle karo
+pwaBtn.addEventListener('click', () => {
+    if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+                console.log('User installed PWA');
+            }
+            deferredPrompt = null;
+            pwaBtn.style.display = 'none'; // Install hone ke baad button hata do
+        });
+    }
+});
+
+// 3. Agar pehle se install hai toh check karo
+window.addEventListener('appinstalled', () => {
+    pwaBtn.style.display = 'none';
+});
