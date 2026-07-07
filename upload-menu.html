@@ -156,7 +156,7 @@
                     { name: "Mashroom Chilli (Half)", price: 100, category: "Chinese Starter", inStock: true, image: null },
                     { name: "Mashroom Chilli (Full)", price: 180, category: "Chinese Starter", inStock: true, image: null },
 
-                    // --- NOODLES ---
+                  // --- NOODLES ---
                     { name: "Hakka Noodles (Half)", price: 60, category: "Noodles", inStock: true, image: null },
                     { name: "Hakka Noodles (Full)", price: 110, category: "Noodles", inStock: true, image: null },
                     { name: "Singapuri Noodles (Half)", price: 70, category: "Noodles", inStock: true, image: null },
@@ -267,4 +267,89 @@
                     { name: "Tandoori Pizza (Large)", price: 380, category: "Pizza", inStock: true, image: null },
                     { name: "Paneer Tikka Pizza (Regular)", price: 160, category: "Pizza", inStock: true, image: null },
                     { name: "Paneer Tikka Pizza (Medium)", price: 280, category: "Pizza", inStock: true, image: null },
-                    { name: "Paneer Tikk
+                    { name: "Paneer Tikka Pizza (Large)", price: 390, category: "Pizza", inStock: true, image: null },
+
+                    // --- EXTRA TOPPING ---
+                    { name: "Extra Cheese", price: 50, category: "Extra Topping", inStock: true, image: null },
+                    { name: "Extra Veggies", price: 50, category: "Extra Topping", inStock: true, image: null },
+
+                   // --- PASTRY ---
+                    { name: "Pineapple Pastry", price: 50, category: "Pastry", inStock: true, image: null },
+                    { name: "Strawberry Pastry", price: 50, category: "Pastry", inStock: true, image: null },
+                    { name: "Butterscotch Pastry", price: 50, category: "Pastry", inStock: true, image: null },
+                    { name: "White Forest Pastry", price: 50, category: "Pastry", inStock: true, image: null },
+                    { name: "Choco Chips Pastry", price: 60, category: "Pastry", inStock: true, image: null },
+                    { name: "Chocolate Flax Pastry", price: 60, category: "Pastry", inStock: true, image: null },
+
+                    // --- GARLIC BREAD ---
+                    { name: "Plain Garlic Bread", price: 50, category: "Garlic Bread", inStock: true, image: null },
+                    { name: "Stuffed Garlic Bread", price: 60, category: "Garlic Bread", inStock: true, image: null },
+                    { name: "Cheese Garlic Bread", price: 70, category: "Garlic Bread", inStock: true, image: null },
+
+                    // --- CAKE ---
+                    { name: "Black Forest Cake", price: 300, category: "Cake", inStock: true, image: null },
+                    { name: "White Forest Cake", price: 350, category: "Cake", inStock: true, image: null },
+                    { name: "Chocolate Chips Cake", price: 350, category: "Cake", inStock: true, image: null },
+                    { name: "Chocolate Flex Cake", price: 350, category: "Cake", inStock: true, image: null },
+                    { name: "Chocolate Munch Cake", price: 380, category: "Cake", inStock: true, image: null },
+                    { name: "Kit-Kat Cake", price: 400, category: "Cake", inStock: true, image: null },
+                    { name: "Chocolate Vanilla Cake", price: 300, category: "Cake", inStock: true, image: null },
+                    { name: "Chocolate Oreo Cake", price: 300, category: "Cake", inStock: true, image: null },
+                    { name: "Red Velvet Cake", price: 450, category: "Cake", inStock: true, image: null },
+                    { name: "Chocolate Truffles Cake", price: 500, category: "Cake", inStock: true, image: null },
+                    { name: "Pineapple Cake", price: 300, category: "Cake", inStock: true, image: null },
+                    { name: "Strawberry Cake", price: 300, category: "Cake", inStock: true, image: null },
+                    { name: "Butter Scotch Cake", price: 300, category: "Cake", inStock: true, image: null },
+                    { name: "Mixed Fruit Cake", price: 350, category: "Cake", inStock: true, image: null },
+                    { name: "Real Fruit Cake", price: 450, category: "Cake", inStock: true, image: null },
+                    { name: "3D Cake", price: 750, category: "Cake", inStock: true, image: null },
+
+                    // --- COMBO ---
+                    { name: "Combo 1 (Margherita+Fry+Burger+Coldrink)", price: 200, category: "Combo", inStock: true, image: null },
+                    { name: "Combo 2 (Noodle+Manchurian+Pastry+Coldrink)", price: 200, category: "Combo", inStock: true, image: null }
+                ];
+
+                uploadBtn.addEventListener('click', async () => {
+                    uploadBtn.disabled = true;
+                    uploadBtn.innerText = "Uploading... Do not close ⏳";
+                    
+                    progressBar.style.display = 'block';
+                    progressBar.max = menuItems.length;
+                    progressBar.value = 0;
+                    
+                    logBox.innerHTML = '';
+                    logToScreen("▶ Starting upload sequence...", "info");
+
+                    let successCount = 0;
+                    let errorCount = 0;
+
+                    for (let i = 0; i < menuItems.length; i++) {
+                        const item = menuItems[i];
+                        try {
+                            await addDoc(collection(db, "menu_items"), item);
+                            successCount++;
+                            logToScreen(`✅ [${successCount}/${menuItems.length}] Uploaded: ${item.name}`);
+                        } catch (e) {
+                            errorCount++;
+                            logToScreen(`❌ Failed: ${item.name} (${e.message})`, "error");
+                        }
+                        progressBar.value = i + 1;
+                    }
+
+                    if (errorCount === 0) {
+                        logToScreen(`\n🎉 DONE! All ${successCount} items successfully uploaded to Firestore.`, "info");
+                        uploadBtn.innerText = "Upload Complete ✅";
+                    } else {
+                        logToScreen(`\n⚠️ FINISHED. Uploaded ${successCount} items, but ${errorCount} failed.`, "error");
+                        uploadBtn.innerText = "Finished with errors";
+                    }
+                });
+
+            } catch (e) {
+                logToScreen(`❌ Failed to load Firebase: ${e.message}`, "error");
+                uploadBtn.innerText = "Setup Failed!";
+            }
+        })();
+    </script>
+</body>
+</html>
