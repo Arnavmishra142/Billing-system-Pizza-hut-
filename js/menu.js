@@ -1,9 +1,6 @@
 import { db } from './firebase-config.js';
 import { collection, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-// Tu cart.js me item bhejne ke liye global window function use kar raha hoga (Assuming addToCart is in cart.js)
-// Agar nahi, toh error aayega, par abhi menu load pe focus karte hain.
-
 let allItems = [];
 let categories = ['All'];
 let currentCategory = 'All';
@@ -35,11 +32,38 @@ export async function fetchMenuFromCloud() {
             }
         });
 
+        // ==========================================
+        // SMART SORTING LOGIC (Base Name + Size Rank)
+        // ==========================================
+        allItems.sort((a, b) => {
+            // Bracket ke pehle ka naam nikalo (Base Name)
+            const getBase = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
+            
+            // Size ke hisaab se rank assign karo
+            const getRank = (name) => {
+                let n = name.toLowerCase();
+                if (n.includes('(half)') || n.includes('(regular)')) return 1;
+                if (n.includes('(full)') || n.includes('(medium)')) return 2;
+                if (n.includes('(large)')) return 3;
+                return 0; // Default rank for items without brackets
+            };
+
+            let baseA = getBase(a.name);
+            let baseB = getBase(b.name);
+
+            // Rule 1: Pehle Base Name (Parivar) ke hisaab se sort karo A-Z
+            if (baseA < baseB) return -1;
+            if (baseA > baseB) return 1;
+
+            // Rule 2: Agar Base Name same hai, toh unke Size (Rank) ke hisaab se sort karo
+            return getRank(a.name) - getRank(b.name);
+        });
+
         categories = Array.from(catSet);
         
         loadCategories();
         loadItems('All');
-        updateDatalist(); // Quick Add me categories dikhane ke liye
+        updateDatalist(); 
         
     } catch (e) {
         console.error("Menu fetch error:", e);
@@ -58,7 +82,6 @@ function loadCategories() {
         btn.className = 'category-btn';
         btn.innerText = cat;
         
-        // CSS matching for active state
         btn.style.width = "100%";
         btn.style.padding = "15px";
         btn.style.marginBottom = "5px";
@@ -106,7 +129,7 @@ function loadItems(categoryFilter) {
             <div class="item-price" style="padding:5px 10px 10px; color:#10b981; font-weight:bold;">₹${item.price}</div>
         `;
         
-                     card.onclick = () => {
+        card.onclick = () => {
             window.dispatchEvent(new CustomEvent('add-to-cart', { detail: item }));
         };
 
@@ -115,7 +138,7 @@ function loadItems(categoryFilter) {
 }
 
 
-// 4. QUICK ADD LOGIC (Tere HTML Popups ke sath)
+// 4. QUICK ADD LOGIC
 function setupQuickAddPopups() {
     const mainBtn = document.getElementById('qckAddBtn');
     const choiceModal = document.getElementById('quickAddChoiceModal');
@@ -123,11 +146,9 @@ function setupQuickAddPopups() {
     
     if(!mainBtn || !choiceModal || !globalModal) return;
 
-    // Open Choice Modal
     mainBtn.onclick = () => choiceModal.classList.remove('hidden');
     document.getElementById('closeChoiceModalBtn').onclick = () => choiceModal.classList.add('hidden');
 
-    // Choice -> Global Menu Modal
     document.getElementById('btnAddToMenu').onclick = () => {
         choiceModal.classList.add('hidden');
         globalModal.classList.remove('hidden');
@@ -135,46 +156,12 @@ function setupQuickAddPopups() {
     
     document.getElementById('cancelGlobalBtn').onclick = () => globalModal.classList.add('hidden');
 
-    // Choice -> Bill Only Modal (Optional for now)
     document.getElementById('btnAddToBillOnly').onclick = () => {
         choiceModal.classList.add('hidden');
         document.getElementById('billOnlyModal').classList.remove('hidden');
     };
     document.getElementById('cancelBillOnlyBtn').onclick = () => document.getElementById('billOnlyModal').classList.add('hidden');
-        // ==========================================
-    // SAVE TO BILL ONLY LOGIC (Direct to Cart)
-    // ==========================================
-    const saveToBillBtn = document.getElementById('saveToBillBtn'); 
-    
-    if (saveToBillBtn) {
-        saveToBillBtn.onclick = () => {
-            // Tere HTML wali exact IDs
-            const name = document.getElementById('tempItemName').value.trim(); 
-            const price = document.getElementById('tempItemPrice').value.trim(); 
 
-            if (!name || !price) {
-                alert("Bhai naam aur price dono daalna zaroori hai!");
-                return;
-            }
-
-            // Custom item ka ek temporary object banao
-            const customItem = {
-                id: 'CUSTOM_' + Date.now(), // Fake ID taaki cart.js isko pehchan sake
-                name: name,
-                price: Number(price)
-            };
-
-            // cart.js ko signal bhejo aur item pass karo
-            window.dispatchEvent(new CustomEvent('add-custom-item-to-bill', { detail: customItem }));
-
-            // Modal ke inputs saaf karo aur modal chupao
-            document.getElementById('tempItemName').value = '';
-            document.getElementById('tempItemPrice').value = '';
-            document.getElementById('billOnlyModal').classList.add('hidden');
-        };
-    }
-
-    
     // SAVE TO GLOBAL FIREBASE
     document.getElementById('saveGlobalBtn').onclick = async () => {
         const name = document.getElementById('globalItemName').value.trim();
@@ -205,7 +192,6 @@ function setupQuickAddPopups() {
             
             globalModal.classList.add('hidden');
             
-            // Grid refresh karo
             await fetchMenuFromCloud();
 
         } catch(e) {
@@ -216,6 +202,35 @@ function setupQuickAddPopups() {
             btn.disabled = false;
         }
     };
+
+    // ==========================================
+    // SAVE TO BILL ONLY LOGIC (Fixed)
+    // ==========================================
+    const saveToBillBtn = document.getElementById('saveToBillBtn'); 
+    
+    if (saveToBillBtn) {
+        saveToBillBtn.onclick = () => {
+            const name = document.getElementById('tempItemName').value.trim(); 
+            const price = document.getElementById('tempItemPrice').value.trim(); 
+
+            if (!name || !price) {
+                alert("Bhai naam aur price dono daalna zaroori hai!");
+                return;
+            }
+
+            const customItem = {
+                id: 'CUSTOM_' + Date.now(), 
+                name: name,
+                price: Number(price)
+            };
+
+            window.dispatchEvent(new CustomEvent('add-custom-item-to-bill', { detail: customItem }));
+
+            document.getElementById('tempItemName').value = '';
+            document.getElementById('tempItemPrice').value = '';
+            document.getElementById('billOnlyModal').classList.add('hidden');
+        };
+    }
 }
 
 function updateDatalist() {
@@ -226,6 +241,7 @@ function updateDatalist() {
         if(cat !== 'All') datalist.innerHTML += `<option value="${cat}">`;
     });
 }
+
 // ==========================================
 // SEARCH LOGIC
 // ==========================================
@@ -238,13 +254,11 @@ function setupSearch() {
         const grid = document.getElementById('itemsGrid');
         grid.innerHTML = '';
 
-        // Agar search box khali hai, toh current category ke items wapas load kar do
         if (searchTerm === '') {
             loadItems(currentCategory);
             return;
         }
 
-        // Search term ke hisaab se allItems ko filter karo
         let searchedItems = allItems.filter(item => 
             item.name.toLowerCase().includes(searchTerm)
         );
@@ -254,7 +268,6 @@ function setupSearch() {
             return;
         }
 
-        // Filtered items ko grid mein dikhao
         searchedItems.forEach(item => {
             let card = document.createElement('div');
             card.className = 'item-card';
