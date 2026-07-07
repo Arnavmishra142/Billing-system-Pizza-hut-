@@ -647,3 +647,23 @@ body {
     margin-top: 10px; background: #0ea5e9; color: white; border: none;
     padding: 8px; border-radius: 5px; cursor: pointer; width: 100%; font-weight: bold;
 }
+.btn-delete-ghost {
+    background: #ef4444; 
+    color: white; 
+    border: none;
+    padding: 8px 12px; 
+    border-radius: 5px; 
+    cursor: pointer; 
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+}
+.btn-delete-ghost:hover {
+    background: #dc2626;
+}
+/* Existing reprint button ka thoda margin clear kiya */
+.btn-reprint {
+    margin-top: 0 !important; 
+}

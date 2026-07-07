@@ -227,7 +227,6 @@ window.saveToGhostHistory = function(orderNumber, totalAmount, cartItems) {
     history.unshift(newBill); // Naya bill sabse upar
     localStorage.setItem('pos_24h_history', JSON.stringify(history));
 }
-
 function renderHistoryBills() {
     const list = document.getElementById('historyList');
     let history = JSON.parse(localStorage.getItem('pos_24h_history')) || [];
@@ -236,7 +235,7 @@ function renderHistoryBills() {
 
     // 24 ghante se purane bills ko filter karke hata do
     history = history.filter(bill => (now - bill.timestamp) <= twentyFourHours);
-    localStorage.setItem('pos_24h_history', JSON.stringify(history)); // Updated list save kar do
+    localStorage.setItem('pos_24h_history', JSON.stringify(history));
 
     list.innerHTML = "";
     if (history.length === 0) {
@@ -250,11 +249,28 @@ function renderHistoryBills() {
                 <p><strong>Order No:</strong> ${bill.id}</p>
                 <p><strong>Time:</strong> ${bill.timeStr}</p>
                 <p><strong>Amount:</strong> ₹${bill.total}</p>
-                <button class="btn-reprint" onclick="reprintGhostBill('${bill.id}')">🖨️ Ghost Print</button>
+                <div style="display: flex; gap: 8px; margin-top: 10px;">
+                    <button class="btn-reprint" style="flex: 1;" onclick="reprintGhostBill('${bill.id}')">🖨️ Ghost Print</button>
+                    <button class="btn-delete-ghost" onclick="deleteGhostBill('${bill.id}')">🗑️</button>
+                </div>
             </div>
         `;
     });
 }
+// TESTING KE LIYE DELETE OPTION
+window.deleteGhostBill = function(billId) {
+    if(confirm("Testing: Is bill ko history se delete karna hai?")) {
+        let history = JSON.parse(localStorage.getItem('pos_24h_history')) || [];
+        // Jo ID match karegi usko filter karke hata denge
+        history = history.filter(bill => bill.id !== billId);
+        localStorage.setItem('pos_24h_history', JSON.stringify(history));
+        
+        // List ko turant refresh kar do
+        renderHistoryBills();
+    }
+}
+
+
 
 window.reprintGhostBill = function(billId) {
     // Yahan tera Ezo Printer ka code aayega!
