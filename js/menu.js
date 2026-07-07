@@ -141,7 +141,40 @@ function setupQuickAddPopups() {
         document.getElementById('billOnlyModal').classList.remove('hidden');
     };
     document.getElementById('cancelBillOnlyBtn').onclick = () => document.getElementById('billOnlyModal').classList.add('hidden');
+        // ==========================================
+    // SAVE TO BILL ONLY LOGIC (Direct to Cart)
+    // ==========================================
+    const saveToBillBtn = document.getElementById('saveToBillBtn'); 
+    
+    if (saveToBillBtn) {
+        saveToBillBtn.onclick = () => {
+            // Tere HTML wali exact IDs
+            const name = document.getElementById('tempItemName').value.trim(); 
+            const price = document.getElementById('tempItemPrice').value.trim(); 
 
+            if (!name || !price) {
+                alert("Bhai naam aur price dono daalna zaroori hai!");
+                return;
+            }
+
+            // Custom item ka ek temporary object banao
+            const customItem = {
+                id: 'CUSTOM_' + Date.now(), // Fake ID taaki cart.js isko pehchan sake
+                name: name,
+                price: Number(price)
+            };
+
+            // cart.js ko signal bhejo aur item pass karo
+            window.dispatchEvent(new CustomEvent('add-custom-item-to-bill', { detail: customItem }));
+
+            // Modal ke inputs saaf karo aur modal chupao
+            document.getElementById('tempItemName').value = '';
+            document.getElementById('tempItemPrice').value = '';
+            document.getElementById('billOnlyModal').classList.add('hidden');
+        };
+    }
+
+    
     // SAVE TO GLOBAL FIREBASE
     document.getElementById('saveGlobalBtn').onclick = async () => {
         const name = document.getElementById('globalItemName').value.trim();
