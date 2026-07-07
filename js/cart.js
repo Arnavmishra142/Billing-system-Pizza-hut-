@@ -176,6 +176,48 @@ document.addEventListener('DOMContentLoaded', () => {
         window.location.href = "rawbt:" + encodeURIComponent(kotText);
     });
 
+     // =====================================
+    // RAWBT ALIGNMENT HELPERS (The Math)
+    // =====================================
+    const centerText = (text) => {
+        if (text.length >= 32) return text.substring(0, 32);
+        const spaces = Math.floor((32 - text.length) / 2);
+        return " ".repeat(spaces) + text;
+    };
+
+    const rightText = (text) => {
+        if (text.length >= 32) return text.substring(0, 32);
+        const spaces = 32 - text.length;
+        return " ".repeat(spaces) + text;
+    };
+
+    // =====================================
+    // RAWBT K.O.T PRINT LOGIC
+    // =====================================
+    kotBtn.addEventListener('click', () => {
+        if (currentCart.length === 0) return;
+        
+        let kotText = "\n";
+        kotText += centerText("------- K.O.T -------") + "\n";
+        kotText += centerText(`Table: ${getDisplayTitle()}`) + "\n";
+        kotText += centerText(`Time: ${new Date().toLocaleTimeString('en-IN')}`) + "\n";
+        kotText += "--------------------------------\n";
+        kotText += "Item                         Qty\n";
+        kotText += "--------------------------------\n";
+        
+        currentCart.forEach(item => {
+            // 25 chars for name, 3 for spacing, 4 for qty = 32 Total
+            let n = item.name.length > 25 ? item.name.substring(0, 23) + ".." : item.name.padEnd(25, " ");
+            let q = String(item.qty).padStart(2, " ") + "x ";
+            kotText += `${n}  ${q}\n`;
+        });
+        
+        kotText += "--------------------------------\n";
+        kotText += "\n\n\n"; 
+        
+        window.location.href = "rawbt:" + encodeURIComponent(kotText);
+    });
+
     // =====================================
     // RAWBT CHECKOUT BILL LOGIC
     // =====================================
@@ -196,33 +238,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 timestamp: new Date().toISOString()
             });
 
-            let billText = "<c><b>NEW PIZZA HUT</b></c>\n";
-            billText += "<c>Live Cake | Salempur</c>\n";
+            // Bill Layout - Pure Spacing Math!
+            let billText = "\n";
+            billText += centerText("NEW PIZZA HUT") + "\n";
+            billText += centerText("Live Cake | Salempur") + "\n";
             billText += "--------------------------------\n";
             billText += `Bill: ${getDisplayTitle()}\n`;
             billText += `Date: ${new Date().toLocaleString('en-IN')}\n`;
             billText += "--------------------------------\n";
-            billText += "Item               Qty       Amt\n";
+            billText += "Item                Qty      Amt\n";
             billText += "--------------------------------\n";
             
             currentCart.forEach(item => {
+                // 16 name + 4 space + 3 qty + 3 space + 6 amt = 32 Total
                 let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
-                let q = String(item.qty).padStart(3, " ") + "x";
-                let a = String(item.price * item.qty).padStart(7, " ");
-                billText += `${n} ${q}    ${a}\n`;
+                let q = String(item.qty).padStart(2, " ") + "x";
+                let a = String(item.price * item.qty).padStart(6, " ");
+                billText += `${n}    ${q}   ${a}\n`;
             });
             
             billText += "--------------------------------\n";
-            billText += `<r><b>TOTAL: Rs ${total}</b></r>\n`;
+            billText += rightText(`TOTAL: Rs ${total}`) + "\n";
             billText += "--------------------------------\n";
-            billText += "<c>Thank You! Visit Again</c>\n";
+            billText += centerText("Thank You! Visit Again") + "\n\n";
             
-            // THE QR CODE MAGIC
-            let qrData = `upi://pay?pa=6393349498@fam&pn=NewPizzaHut&am=${total}`; 
-            billText += `<c><qr>${qrData}</qr></c>\n`;
-            billText += "<c>(Scan to pay directly)</c>\n";
+            // Text UPI ID instead of QR for maximum speed
+            billText += centerText("--- UPI PAYMENT ---") + "\n";
+            billText += centerText("6393349498@fam") + "\n";
+            billText += centerText("(Pay via PhonePe/GPay)") + "\n";
             
-            billText += "\n\n\n";
+            billText += "\n\n\n\n";
             
             window.location.href = "rawbt:" + encodeURIComponent(billText);
 
@@ -237,39 +282,3 @@ document.addEventListener('DOMContentLoaded', () => {
             checkoutBtn.disabled = false;
         }
     });
-
-    if (saveExitBtn) {
-        saveExitBtn.addEventListener('click', async () => {
-            if (currentCart.length === 0) {
-                backToTablesBtn.click(); 
-                return;
-            }
-            const tableName = getCurrentTable();
-            const customerName = getCurrentCustomer();
-            const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-            
-            const textBackup = saveExitBtn.innerText;
-            saveExitBtn.innerText = "Saving...";
-            saveExitBtn.disabled = true;
-
-            try {
-                await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
-                    table: tableName,
-                    customer: customerName,
-                    items: currentCart,
-                    total: total,
-                    timestamp: new Date().toISOString()
-                });
-                saveLocalCart([]); 
-                currentCart = [];
-                renderCart();
-                backToTablesBtn.click();
-            } catch (e) {
-                alert("Database save fail!");
-            } finally {
-                saveExitBtn.innerText = textBackup;
-                saveExitBtn.disabled = false;
-            }
-        });
-    }
-});
