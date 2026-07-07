@@ -1,5 +1,5 @@
 import { db, storage } from './firebase-config.js';
-import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
 
 // ==========================================
@@ -578,47 +578,52 @@ const bulkMenuItems = [
     { name: "3D Cake", price: 750, category: "Cake" }
 ];
 
-const magicBtn = document.getElementById('magicUploadBtn');
+    const magicBtn = document.getElementById('magicUploadBtn');
 if(magicBtn) {
     magicBtn.addEventListener('click', async () => {
         const totalItems = bulkMenuItems.length;
-        const confirmUpload = confirm(`Kya tum sach mein in ${totalItems} items ko database mein daalna chahte ho?`);
+        const confirmUpload = confirm(`Kya tum sach mein in ${totalItems} items ko ek saath upload karna chahte ho?`);
         
         if (confirmUpload) {
-            magicBtn.innerText = `STARTING UPLOAD... 0 / ${totalItems} ⏳`;
+            magicBtn.innerText = `PACKING ${totalItems} ITEMS... ⏳`;
             magicBtn.disabled = true;
-            magicBtn.style.background = "#eab308"; // Yellow color
+            magicBtn.style.background = "#eab308"; // Yellow
             
             try {
-                let successCount = 0;
-
-                // Seedha loop chalao, upar wale static imports ka use karke!
+                // Ek naya dibba (Batch) banao
+                const batch = writeBatch(db);
+                
+                // Saare items dibbe mein daalo (Bina internet use kiye)
                 for (let i = 0; i < totalItems; i++) {
                     const item = bulkMenuItems[i];
-                    await addDoc(collection(db, "menu_items"), {
+                    // Har item ke liye ek khali document ID banao
+                    const docRef = doc(collection(db, "menu_items"));
+                    
+                    batch.set(docRef, {
                         name: item.name,
                         price: Number(item.price),
                         category: item.category,
                         image: null, 
                         inStock: true
                     });
-                    
-                    successCount++;
-                    magicBtn.innerText = `UPLOADING... ${successCount} / ${totalItems} ⏳`;
                 }
                 
-                magicBtn.style.background = "#10b981"; // Green color
+                magicBtn.innerText = "SENDING TO CLOUD... 🚀";
+                
+                // Pura dibba ek hi baar me Firebase bhej do!
+                await batch.commit();
+                
+                magicBtn.style.background = "#10b981"; // Green
                 magicBtn.innerText = "✅ DONE! (Now Delete Me)";
-                alert(`🎉 SUCCESS! Poore ${successCount} items safely database mein save ho gaye!`);
+                alert(`🎉 BOOM! Ek hi shot mein saare ${totalItems} items upload ho gaye!`);
                 
                 loadMenuData(); 
                 
             } catch (error) {
-                // Ab agar fail hua, toh screen pe theek theek bata dega kyun fail hua
-                console.error("Bulk Upload Error:", error);
-                magicBtn.style.background = "#ef4444"; // Red color
+                console.error("Batch Upload Error:", error);
+                magicBtn.style.background = "#ef4444"; // Red
                 magicBtn.innerText = "❌ FAILED!";
-                alert(`⚠️ UPLOAD FAIL HOGAYA!\nError: ${error.message}`);
+                alert(`⚠️ ERROR AAYI:\n${error.message}`);
             }
         }
     });
