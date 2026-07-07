@@ -502,6 +502,7 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
 
         querySnapshot.forEach((docSnap) => {
             let exp = docSnap.data();
+            exp.id = docSnap.id;
             const expDate = new Date(exp.timestamp);
             const diffDays = Math.ceil(Math.abs(now - expDate) / (1000 * 60 * 60 * 24)); 
             
@@ -532,6 +533,9 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
                         <td style="color:#94a3b8;">${timeString}</td>
                         <td style="font-weight:bold; color:white; text-transform: capitalize;">${exp.note}</td>
                         <td class="text-right" style="color:#ef4444; font-weight:bold;">₹${exp.amount}</td>
+                        <td class="text-center">
+                            <button class="btn btn-danger" onclick="deleteExpense('${exp.id}')" style="padding: 5px 10px; font-size: 0.9rem;">🗑️</button>
+                        </td>
                     </tr>
                 `;
             });
@@ -602,3 +606,24 @@ if(pwaBtn) {
 window.addEventListener('appinstalled', () => {
     if(pwaBtn) pwaBtn.style.display = 'none';
 });
+
+// ==========================================
+// EXPENSE DELETE LOGIC
+// ==========================================
+window.deleteExpense = async function(expenseId) {
+    if(!confirm("Pakka delete karna hai ye kharcha?")) return;
+    
+    try {
+        await deleteDoc(doc(db, "daily_expenses", expenseId));
+        
+        // Refresh the table after deletion
+        const activeBtn = document.querySelector('#expenseSection .filter-btn.active');
+        let days = 1;
+        if(activeBtn) days = parseInt(activeBtn.dataset.val);
+        
+        await loadAdminExpenses('days', days);
+    } catch (error) {
+        console.error("Delete error: ", error);
+        alert("Delete nahi hua. Internet check kar!");
+    }
+}
