@@ -23,6 +23,7 @@
             <div class="nav-tabs">
                 <button class="nav-btn active" onclick="switchTab('sales')">📊 Sales</button>
                 <button class="nav-btn" onclick="switchTab('menu')">🍔 Menu Edit</button>
+                <button class="nav-btn" onclick="switchTab('expense')">📉 Expenses</button>
             </div>
             <div class="topbar-actions">
                 <button class="btn btn-lock" id="logoutBtn">🔒 Lock</button>
@@ -33,7 +34,39 @@
         <main class="main-workspace">
             
             <div id="salesSection" class="section active">
-                
+                            <!-- EXPENSE SECTION -->
+            <div id="expenseSection" class="section">
+                <div class="filter-controls">
+                    <div class="filter-row">
+                        <button class="filter-btn active" data-filter="days" data-val="1" onclick="loadAdminExpenses('days', 1, this)">1 Day (Today)</button>
+                        <button class="filter-btn" data-filter="days" data-val="7" onclick="loadAdminExpenses('days', 7, this)">1 Week</button>
+                        <button class="filter-btn" data-filter="days" data-val="30" onclick="loadAdminExpenses('days', 30, this)">1 Month</button>
+                    </div>
+                </div>
+
+                <div class="stats-grid" style="grid-template-columns: 1fr;">
+                    <div class="stat-card">
+                        <h3>Total Expenses</h3>
+                        <div class="value" id="totalExpenseBox" style="color: #ef4444;">₹0</div>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Time / Date</th>
+                                <th>Note</th>
+                                <th class="text-right">Amount (₹)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="expenseTableBody">
+                            <tr><td colspan="3" class="loading">Loading Expenses...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
                 <div class="filter-controls">
                     <div class="filter-row">
                         <button class="filter-btn active" data-filter="days" data-val="1">1 Day (Today)</button>
