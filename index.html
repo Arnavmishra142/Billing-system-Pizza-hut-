@@ -257,26 +257,65 @@ function renderHistoryBills() {
         `;
     });
 }
-// TESTING KE LIYE DELETE OPTION
-window.deleteGhostBill = function(billId) {
-    if(confirm("Testing: Is bill ko history se delete karna hai?")) {
-        let history = JSON.parse(localStorage.getItem('pos_24h_history')) || [];
-        // Jo ID match karegi usko filter karke hata denge
-        history = history.filter(bill => bill.id !== billId);
-        localStorage.setItem('pos_24h_history', JSON.stringify(history));
-        
-        // List ko turant refresh kar do
-        renderHistoryBills();
-    }
-}
-
-
 
 window.reprintGhostBill = function(billId) {
-    // Yahan tera Ezo Printer ka code aayega!
-    // Database mein kuch nahi jayega, sidha print hoga.
-    alert("🖨️ Printing Bill " + billId + "...\n(No database update)");
+    // 1. History se exact bill ka data nikalna
+    let history = JSON.parse(localStorage.getItem('pos_24h_history')) || [];
+    const bill = history.find(b => b.id === billId);
+
+    if (!bill) {
+        alert("Error: Bill data nahi mila!");
+        return;
+    }
+
+    // 2. Alignment Helpers (Jo humne cart.js me banaye the)
+    const centerText = (text) => {
+        if (text.length >= 32) return text.substring(0, 32);
+        const spaces = Math.floor((32 - text.length) / 2);
+        return " ".repeat(spaces) + text;
+    };
+
+    const rightText = (text) => {
+        if (text.length >= 32) return text.substring(0, 32);
+        const spaces = 32 - text.length;
+        return " ".repeat(spaces) + text;
+    };
+
+    // 3. Bill Layout Design Karna
+    let billText = "\n";
+    billText += centerText("NEW PIZZA HUT") + "\n";
+    billText += centerText("Live Cake | Salempur") + "\n";
+    billText += centerText("(DUPLICATE BILL)") + "\n"; // Duplicate tag
+    billText += "--------------------------------\n";
+    billText += `Order: ${bill.id}\n`;
+    billText += `Date: ${bill.timeStr}\n`;
+    billText += "--------------------------------\n";
+    billText += "Item                Qty      Amt\n";
+    billText += "--------------------------------\n";
+    
+    // Items ko loop karke add karna
+    bill.items.forEach(item => {
+        let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
+        let q = String(item.qty).padStart(2, " ") + "x";
+        let a = String(item.price * item.qty).padStart(6, " ");
+        billText += `${n}    ${q}   ${a}\n`;
+    });
+    
+    billText += "--------------------------------\n";
+    billText += rightText(`TOTAL: Rs ${bill.total}`) + "\n";
+    billText += "--------------------------------\n";
+    billText += centerText("Thank You! Visit Again") + "\n\n";
+    
+    billText += centerText("--- UPI PAYMENT ---") + "\n";
+    billText += centerText("6393349498@fam") + "\n";
+    billText += centerText("(Pay via PhonePe/GPay)") + "\n";
+    
+    billText += "\n\n\n\n"; // Paper cutting margin
+    
+    // 4. RawBT App ko direct print command bhejna (No Popup)
+    window.location.href = "rawbt:" + encodeURIComponent(billText);
 }
+
 </script>
 <!-- 🕒 24-HOUR HISTORY DRAWER -->
 <div id="historyOverlay" class="drawer-overlay" onclick="closeHistoryDrawer()"></div>
