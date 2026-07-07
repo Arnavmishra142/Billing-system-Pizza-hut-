@@ -112,3 +112,47 @@ input[type="date"]:focus { border-color: #38bdf8; }
     
     .stat-card .value { font-size: 2rem; }
 }
+/* =========================================
+   MENU MANAGEMENT & MODALS
+   ========================================= */
+.menu-header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px; }
+
+/* Item Thumbnail in Table */
+.menu-thumb { width: 50px; height: 50px; border-radius: 8px; object-fit: cover; border: 1px solid #334155; background: #0f172a; }
+
+/* Pro Toggle Switch (In Stock) */
+.switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #475569; transition: .4s; border-radius: 24px; }
+.slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+input:checked + .slider { background-color: #10b981; }
+input:checked + .slider:before { transform: translateX(20px); }
+
+/* Action Buttons (Edit / Delete) */
+.action-btn { padding: 8px 12px; border-radius: 6px; border: none; cursor: pointer; color: white; font-weight: bold; font-size: 0.9rem; margin: 0 2px; }
+.btn-edit { background: #38bdf8; }
+.btn-delete { background: #ef4444; }
+
+/* Modal Overlay (Background Blur) */
+.modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 1000; backdrop-filter: blur(4px); }
+.modal-overlay.hidden { display: none; }
+
+/* Modal Box (The Popup) */
+.modal-box { background: #1e293b; padding: 30px; border-radius: 12px; width: 90%; max-width: 450px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); border: 1px solid #334155; animation: slideUp 0.3s ease-out; }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.modal-box h2 { color: #f8fafc; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 10px; font-size: 1.4rem; }
+
+/* Forms Inside Modal */
+.form-group { margin-bottom: 15px; width: 100%; }
+.form-group-row { display: flex; gap: 15px; }
+.form-group label { display: block; color: #94a3b8; margin-bottom: 5px; font-size: 0.9rem; font-weight: bold; }
+.form-group input, .form-group select { width: 100%; padding: 12px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: white; outline: none; font-size: 1rem; }
+.form-group input:focus, .form-group select:focus { border-color: #38bdf8; }
+
+/* Image Upload Preview Box */
+.image-upload-group { display: flex; justify-content: center; margin-bottom: 25px; }
+.image-preview { width: 120px; height: 120px; border-radius: 12px; border: 2px dashed #475569; background-color: #0f172a; background-size: cover; background-position: center; display: flex; justify-content: center; align-items: center; cursor: pointer; transition: 0.2s; position: relative; }
+.image-preview:hover { border-color: #38bdf8; background-color: #1e293b; }
+#imagePreviewText { color: #94a3b8; font-size: 0.85rem; text-align: center; padding: 10px; pointer-events: none; }
+
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px; }

@@ -90,17 +90,76 @@
                 </div>
             </div>
 
+                   <!-- B. MENU EDIT SECTION -->
             <div id="menuSection" class="section">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <div class="section-header" style="margin: 0; border: none;">Menu Management</div>
-                    <button class="btn" style="background: #10b981;">+ Add New Item</button>
+                <div class="menu-header-bar">
+                    <h2 class="section-header" style="margin: 0; border: none;">🍔 Menu Management</h2>
+                    <button class="btn" id="magicUploadBtn" style="background: #ef4444; color: white; margin-left: 10px;">🔴 MAGIC UPLOAD MENU</button>
+
+                    <button class="btn" id="addNewItemBtn" style="background: #10b981; color: white;">+ Add New Item</button>
                 </div>
-                <div class="loading">Menu Edit feature coming next! 🚧</div>
+
+                <!-- Menu Items Table -->
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th width="70px">Image</th>
+                                <th>Item Name</th>
+                                <th>Category</th>
+                                <th>Price</th>
+                                <th class="text-center">In Stock</th>
+                                <th class="text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="menuTableBody">
+                            <!-- Data will be injected here via JS -->
+                            <tr><td colspan="6" class="loading">Loading Menu Layout... ⚙️</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
         </main>
     </div>
 
+        <div id="itemModal" class="modal-overlay hidden">
+        <div class="modal-box">
+            <h2 id="modalTitle">Add New Item</h2>
+            
+            <div class="form-group image-upload-group">
+                <div class="image-preview" id="imagePreview">
+                    <span id="imagePreviewText">Tap to Upload<br>Photo</span>
+                </div>
+                <input type="file" id="itemImageInput" accept="image/*" hidden>
+            </div>
+
+            <div class="form-group">
+                <label>Item Name</label>
+                <input type="text" id="itemNameInput" placeholder="e.g. Farmhouse Pizza">
+            </div>
+
+            <div class="form-group-row">
+                <div class="form-group">
+                    <label>Price (₹)</label>
+                    <input type="number" id="itemPriceInput" placeholder="e.g. 150">
+                </div>
+                
+                <div class="form-group">
+                    <label>Category</label>
+                    <select id="itemCategoryInput">
+                        </select>
+                    <input type="text" id="newCategoryInput" class="hidden" placeholder="Type new category..." style="margin-top: 10px; border-color: #10b981;">
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn" id="closeModalBtn" style="background: #64748b; color: white;">Cancel</button>
+                <button class="btn" id="saveItemBtn" style="background: #10b981; color: white;">Save Item</button>
+            </div>
+        </div>
+    </div>
+                 
     <script type="module" src="js/admin.js"></script>
 </body>
 </html>
