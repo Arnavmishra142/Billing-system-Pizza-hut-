@@ -2,20 +2,65 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Full Menu Uploader - New Pizza Hut</title>
     <style>
-        body { font-family: sans-serif; padding: 40px; background: #0f172a; color: white; text-align: center; }
-        .box { background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; max-width: 800px;}
-        .status { margin-top: 20px; font-weight: bold; color: #10b981; font-size: 1.2rem; }
+        * { box-sizing: border-box; }
+        body { font-family: sans-serif; padding: 15px; background: #0f172a; color: white; text-align: center; margin: 0; }
+        .box { background: #1e293b; padding: 20px; border-radius: 12px; width: 100%; max-width: 600px; margin: 0 auto; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        h2 { margin-top: 0; font-size: 1.4rem; color: #f8fafc; }
+        p { color: #94a3b8; font-size: 0.9rem; margin-bottom: 20px; }
+        
+        button { 
+            padding: 15px 20px; 
+            background: #38bdf8; 
+            color: #0f172a;
+            border: none; 
+            border-radius: 8px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            font-size: 1.1rem; 
+            width: 100%; 
+            touch-action: manipulation; /* Fixes mobile tap delay */
+            transition: 0.2s;
+        }
+        button:active { transform: scale(0.96); opacity: 0.8; }
+        button:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; transform: none; }
+        
+        /* Progress Bar Styles */
+        progress { width: 100%; height: 25px; margin-top: 20px; border-radius: 10px; overflow: hidden; display: none; }
+        progress::-webkit-progress-bar { background-color: #334155; }
+        progress::-webkit-progress-value { background-color: #10b981; }
+        
+        /* On-Screen Terminal Logs */
+        #logBox { 
+            background: #000; 
+            color: #10b981; 
+            font-family: monospace; 
+            height: 350px; 
+            overflow-y: auto; 
+            text-align: left; 
+            padding: 15px; 
+            margin-top: 15px; 
+            border-radius: 8px; 
+            font-size: 0.85rem; 
+            border: 1px solid #334155;
+            display: none;
+        }
+        .log-error { color: #ef4444; }
+        .log-success { color: #10b981; }
+        .log-info { color: #38bdf8; }
     </style>
 </head>
 <body>
     <div class="box">
-        <h2>🍕 Full Menu Uploader - Firebase</h2>
-        <p>Press `F12` to open the console and see the upload progress. Wahan tumhe saare 140+ items upload hote hue dikhenge.</p>
-        <button id="uploadBtn" style="padding: 10px 20px; background: #38bdf8; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px;">Start Full Menu Upload</button>
-        <div id="statusText" class="status"></div>
+        <h2>🍕 Firebase Menu Uploader</h2>
+        <p>Live progress will appear on your screen below.</p>
+        
+        <button id="uploadBtn">Start Full Menu Upload</button>
+        
+        <progress id="progressBar" value="0" max="100"></progress>
+        <div id="logBox"></div>
     </div>
 
     <script type="module">
@@ -35,7 +80,6 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // A-Z FULL MENU DATA
         const menuItems = [
             // --- SANDWICH ---
             { name: "Classic Sandwich", price: 60, category: "Sandwich", inStock: true, image: null },
@@ -221,35 +265,4 @@
             { name: "Strawberry Cake", price: 300, category: "Cake", inStock: true, image: null },
             { name: "Butter Scotch Cake", price: 300, category: "Cake", inStock: true, image: null },
             { name: "Mixed Fruit Cake", price: 350, category: "Cake", inStock: true, image: null },
-            { name: "Real Fruit Cake", price: 450, category: "Cake", inStock: true, image: null },
-            { name: "3D Cake", price: 750, category: "Cake", inStock: true, image: null },
-
-            // --- COMBO ---
-            { name: "Combo 1 (Margherita+Fry+Burger+Coldrink)", price: 200, category: "Combo", inStock: true, image: null },
-            { name: "Combo 2 (Noodle+Manchurian+Pastry+Coldrink)", price: 200, category: "Combo", inStock: true, image: null }
-        ];
-
-        document.getElementById('uploadBtn').addEventListener('click', async () => {
-            const statusText = document.getElementById('statusText');
-            const btn = document.getElementById('uploadBtn');
-            
-            btn.disabled = true;
-            btn.innerText = "Uploading 140+ Items... ⏳";
-            statusText.innerText = "Check Console (F12) for live progress. Please wait, this will take a few seconds...";
-
-            let successCount = 0;
-            let errorCount = 0;
-
-            for (let item of menuItems) {
-                try {
-                    await addDoc(collection(db, "menu_items"), item);
-                    console.log(`✅ Uploaded: ${item.name}`);
-                    successCount++;
-                } catch (e) {
-                    console.error(`❌ Failed: ${item.name}`, e);
-                    errorCount++;
-                }
-            }
-
-            if (errorCount === 0) {
-                statusText.innerText = `🎉 Done! Successfully uploaded all ${successCount} items to Firest
+            { name: "Real Fruit Cake", price: 450, category: "Cake", in
