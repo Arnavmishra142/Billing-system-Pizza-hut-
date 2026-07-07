@@ -201,17 +201,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const tableName = getCurrentTable();
         const customerName = getCurrentCustomer();
         const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+        
+        // 🕒 NAYA: Ek common Order ID bana li
+        const orderId = `SALE_${Date.now()}`; 
+        
         checkoutBtn.innerText = "Processing...";
         checkoutBtn.disabled = true;
 
         try {
-            await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
+            await setDoc(doc(db, "sales_history", orderId), {
                 table: tableName,
                 customer: customerName,
                 items: currentCart,
                 total: total,
                 timestamp: new Date().toISOString()
             });
+
+            // 🕒 NAYA: Database me save hote hi History me bhi daal do!
+            window.saveToGhostHistory(orderId, total, currentCart);
 
             // Bill Layout - Pure Spacing Math!
             let billText = "\n";
@@ -271,18 +278,25 @@ document.addEventListener('DOMContentLoaded', () => {
             const customerName = getCurrentCustomer();
             const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
             
+            // 🕒 NAYA: Ek common Order ID bana li
+            const orderId = `SALE_${Date.now()}`;
+
             const textBackup = saveExitBtn.innerText;
             saveExitBtn.innerText = "Saving...";
             saveExitBtn.disabled = true;
 
             try {
-                await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
+                await setDoc(doc(db, "sales_history", orderId), {
                     table: tableName,
                     customer: customerName,
                     items: currentCart,
                     total: total,
                     timestamp: new Date().toISOString()
                 });
+
+                // 🕒 NAYA: Database me save hote hi History me bhi daal do!
+                window.saveToGhostHistory(orderId, total, currentCart);
+
                 saveLocalCart([]); 
                 currentCart = [];
                 renderCart();

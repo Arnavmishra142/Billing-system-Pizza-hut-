@@ -14,7 +14,10 @@
                 <h2>NEW PIZZA HUT & LIVE CAKE</h2>
                 <p>Billing Dashboard</p>
             </div>
-            
+            <button id="historyBtn" onclick="openHistoryDrawer()" style="background: #f59e0b; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-right: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    🕒 Recent Bills
+</button>
+
             <!-- INSTALL BUTTON -->
             <button id="posPwaBtn" style="display: none; background: #8b5cf6; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
                 ⬇️ Install POS App
@@ -194,6 +197,82 @@
             if(posBtn) posBtn.style.display = 'none';
         });
     </script>
+    <script>// ==========================================
+// 🕒 24-HOUR HISTORY LOGIC (GLOBAL)
+// ==========================================
+
+window.openHistoryDrawer = function() {
+    document.getElementById('historyDrawer').classList.add('open');
+    document.getElementById('historyOverlay').classList.add('open');
+    renderHistoryBills();
+}
+
+window.closeHistoryDrawer = function() {
+    document.getElementById('historyDrawer').classList.remove('open');
+    document.getElementById('historyOverlay').classList.remove('open');
+}
+
+// Ye function tere kisi bhi page/script se call ho sakta hai bill save karne ke liye
+window.saveToGhostHistory = function(orderNumber, totalAmount, cartItems) {
+    let history = JSON.parse(localStorage.getItem('pos_24h_history')) || [];
+    
+    const newBill = {
+        id: orderNumber || "ORD-" + Math.floor(Math.random() * 10000),
+        timeStr: new Date().toLocaleString('en-IN', { hour12: true }),
+        timestamp: Date.now(),
+        total: totalAmount,
+        items: cartItems // Tere items ka array
+    };
+
+    history.unshift(newBill); // Naya bill sabse upar
+    localStorage.setItem('pos_24h_history', JSON.stringify(history));
+}
+
+function renderHistoryBills() {
+    const list = document.getElementById('historyList');
+    let history = JSON.parse(localStorage.getItem('pos_24h_history')) || [];
+    const now = Date.now();
+    const twentyFourHours = 24 * 60 * 60 * 1000;
+
+    // 24 ghante se purane bills ko filter karke hata do
+    history = history.filter(bill => (now - bill.timestamp) <= twentyFourHours);
+    localStorage.setItem('pos_24h_history', JSON.stringify(history)); // Updated list save kar do
+
+    list.innerHTML = "";
+    if (history.length === 0) {
+        list.innerHTML = "<p style='text-align:center; color:#94a3b8;'>Koi recent bills nahi hain.</p>";
+        return;
+    }
+
+    history.forEach(bill => {
+        list.innerHTML += `
+            <div class="history-card">
+                <p><strong>Order No:</strong> ${bill.id}</p>
+                <p><strong>Time:</strong> ${bill.timeStr}</p>
+                <p><strong>Amount:</strong> ₹${bill.total}</p>
+                <button class="btn-reprint" onclick="reprintGhostBill('${bill.id}')">🖨️ Ghost Print</button>
+            </div>
+        `;
+    });
+}
+
+window.reprintGhostBill = function(billId) {
+    // Yahan tera Ezo Printer ka code aayega!
+    // Database mein kuch nahi jayega, sidha print hoga.
+    alert("🖨️ Printing Bill " + billId + "...\n(No database update)");
+}
+</script>
+<!-- 🕒 24-HOUR HISTORY DRAWER -->
+<div id="historyOverlay" class="drawer-overlay" onclick="closeHistoryDrawer()"></div>
+<div id="historyDrawer" class="history-drawer">
+    <div class="drawer-header">
+        <h3 style="margin: 0; color: #1e293b;">📜 Recent Bills (24h)</h3>
+        <button onclick="closeHistoryDrawer()" class="close-btn">❌</button>
+    </div>
+    <div class="drawer-content" id="historyList">
+        <!-- Bills dynamically yahan aayenge -->
+    </div>
+</div>
 
 </body>
 </html>
