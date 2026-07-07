@@ -1,0 +1,405 @@
+import { db, storage } from './firebase-config.js';
+import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
+
+// ==========================================
+// LOGIN & SESSION LOGIC
+// ==========================================
+document.addEventListener('DOMContentLoaded', () => {
+    if (localStorage.getItem('adminLoggedIn') === 'true') {
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('adminContent').style.display = 'flex';
+        loadSalesData('days', 1);
+    }
+});
+
+document.getElementById('loginBtn').addEventListener('click', () => {
+    const pin = document.getElementById('pinInput').value;
+    if(pin === "1414") { 
+        localStorage.setItem('adminLoggedIn', 'true');
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('adminContent').style.display = 'flex';
+        loadSalesData('days', 1); 
+    } else {
+        alert("Incorrect PIN!");
+        document.getElementById('pinInput').value = '';
+    }
+});
+
+document.getElementById('logoutBtn').addEventListener('click', () => {
+    localStorage.removeItem('adminLoggedIn');
+    document.getElementById('adminContent').style.display = 'none';
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('pinInput').value = ''; 
+});
+
+window.switchTab = function(tabName) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    
+    document.getElementById(tabName + 'Section').classList.add('active');
+    event.target.classList.add('active');
+
+    if(tabName === 'menu') {
+        loadMenuData();
+    }
+}
+
+// ==========================================
+// SALES LOGIC
+// ==========================================
+let allSales = []; 
+async function fetchAllSalesFromDB() {
+    try {
+        const querySnapshot = await getDocs(collection(db, "sales_history"));
+        allSales = [];
+        querySnapshot.forEach((docSnap) => {
+            let data = docSnap.data(); data.id = docSnap.id; allSales.push(data);
+        });
+    } catch (error) { console.error(error); }
+}
+
+window.loadSalesData = async function(filterType, filterValue) {
+    document.getElementById('salesTableBody').innerHTML = '<tr><td colspan="3" class="loading">Loading...</td></tr>';
+    await fetchAllSalesFromDB();
+    const now = new Date();
+    let filteredSales = [];
+
+    allSales.forEach(sale => {
+        if(!sale.timestamp) return; 
+        const saleDate = new Date(sale.timestamp);
+        if (filterType === 'date') {
+            if (saleDate.toDateString() === new Date(filterValue).toDateString()) filteredSales.push(sale);
+        } else if (filterType === 'days') {
+            const diffDays = Math.ceil(Math.abs(now - saleDate) / (1000 * 60 * 60 * 24)); 
+            if (filterValue === 1 && saleDate.toDateString() === now.toDateString()) filteredSales.push(sale);
+            else if (filterValue !== 1 && diffDays <= filterValue) filteredSales.push(sale);
+        }
+    });
+
+    filteredSales.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    let totalRevenue = 0; let itemStats = {}; 
+    const billsTbody = document.getElementById('billsTableBody'); billsTbody.innerHTML = '';
+
+    if (filteredSales.length === 0) {
+        billsTbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:#64748b;">No bills found.</td></tr>';
+    } else {
+        filteredSales.forEach(sale => {
+            const saleTotal = Number(sale.total) || 0; totalRevenue += saleTotal;
+            (sale.items || []).forEach(item => {
+                const itemName = item.name || 'Unknown Item';
+                if (!itemStats[itemName]) itemStats[itemName] = { qty: 0, rev: 0 };
+                itemStats[itemName].qty += Number(item.qty) || 0;
+                itemStats[itemName].rev += (Number(item.qty) || 0) * (Number(item.price) || 0);
+            });
+
+            let timeString = sale.timestamp ? new Date(sale.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : 'N/A';
+            let tableName = sale.table || 'Unknown';
+            if(!tableName.includes('Parcel')) tableName = `${tableName} [${sale.customer || 'C1'}]`;
+            
+            billsTbody.innerHTML += `
+                <tr>
+                    <td style="color:#94a3b8; white-space:nowrap;">${timeString}</td>
+                    <td style="font-weight:bold; color:white; white-space:nowrap;">${tableName}</td>
+                    <td class="text-right" style="color:#10b981; font-weight:bold;">₹${saleTotal.toFixed(2)}</td>
+                    <td class="text-center"><button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.9rem;" onclick="deleteSale('${sale.id}')">🗑️</button></td>
+                </tr>
+            `;
+        });
+    }
+
+    document.getElementById('totalRevenueBox').innerText = `₹${totalRevenue.toFixed(2)}`;
+    document.getElementById('totalOrdersBox').innerText = filteredSales.length;
+
+    const salesTbody = document.getElementById('salesTableBody'); salesTbody.innerHTML = '';
+    let sortedItems = Object.keys(itemStats).map(key => ({ name: key, qty: itemStats[key].qty, rev: itemStats[key].rev })).sort((a, b) => b.qty - a.qty);
+
+    if (sortedItems.length === 0) salesTbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:30px; color:#64748b;">No items sold.</td></tr>';
+    else sortedItems.forEach(stat => {
+        salesTbody.innerHTML += `<tr><td style="font-weight:bold; color:white;">${stat.name}</td><td class="text-right" style="color:#38bdf8; font-weight:bold;">${stat.qty}</td><td class="text-right" style="color:#10b981; font-weight:bold;">₹${stat.rev.toFixed(2)}</td></tr>`;
+    });
+}
+
+window.deleteSale = async function(saleId) {
+    if (confirm("Delete this bill?")) {
+        await deleteDoc(doc(db, "sales_history", saleId));
+        const activeBtn = document.querySelector('.filter-btn.active');
+        if(activeBtn) loadSalesData('days', parseInt(activeBtn.dataset.val)); 
+        else loadSalesData('date', document.getElementById('customDateSearch').value);
+    }
+}
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        document.getElementById('customDateSearch').value = ''; 
+        loadSalesData('days', parseInt(e.target.dataset.val));
+    });
+});
+document.getElementById('refreshBtn').addEventListener('click', async (e) => {
+    const btn = e.target; btn.innerText = "🔄..."; btn.disabled = true;
+    const activeBtn = document.querySelector('.filter-btn.active');
+    if(activeBtn) await loadSalesData('days', parseInt(activeBtn.dataset.val));
+    else await loadSalesData('date', document.getElementById('customDateSearch').value || new Date());
+    btn.innerText = "🔄 Refresh Data"; btn.disabled = false;
+});
+document.getElementById('customDateSearch').addEventListener('change', (e) => {
+    if (e.target.value) { document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active')); loadSalesData('date', e.target.value); }
+});
+
+// ==========================================
+// MENU MANAGEMENT & UI UPDATES
+// ==========================================
+const itemModal = document.getElementById('itemModal');
+const imagePreview = document.getElementById('imagePreview');
+const itemImageInput = document.getElementById('itemImageInput');
+const imagePreviewText = document.getElementById('imagePreviewText');
+
+let selectedImageFile = null; 
+let currentEditId = null; 
+let allMenuItems = []; 
+
+window.loadMenuData = async function() {
+    const tbody = document.getElementById('menuTableBody');
+    tbody.innerHTML = '<tr><td colspan="6" class="loading">Loading Menu from Cloud... ☁️</td></tr>';
+    
+    try {
+        const querySnapshot = await getDocs(collection(db, "menu_items"));
+        tbody.innerHTML = '';
+        allMenuItems = []; 
+        
+        if (querySnapshot.empty) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding:30px; color:#64748b;">Your menu is empty. Click "+ Add New Item".</td></tr>';
+            return;
+        }
+
+        querySnapshot.forEach((docSnap) => {
+            let item = docSnap.data();
+            item.id = docSnap.id;
+            allMenuItems.push(item); 
+        });
+
+        // NAYA LOGIC: Sorting by Category then by Name
+        allMenuItems.sort((a, b) => {
+            let catA = (a.category || "").toUpperCase();
+            let catB = (b.category || "").toUpperCase();
+            if (catA < catB) return -1;
+            if (catA > catB) return 1;
+            
+            let nameA = (a.name || "").toUpperCase();
+            let nameB = (b.name || "").toUpperCase();
+            if (nameA < nameB) return -1;
+            if (nameA > nameB) return 1;
+            return 0;
+        });
+
+        // Table mein print karna (Category wise format)
+        let currentCategoryTrack = "";
+
+        allMenuItems.forEach((item) => {
+            if(item.category !== currentCategoryTrack) {
+                currentCategoryTrack = item.category;
+                tbody.innerHTML += `
+                    <tr style="background: #334155;">
+                        <td colspan="6" style="color: #f8fafc; font-weight: 800; font-size: 1.1rem; padding: 10px 15px; letter-spacing: 1px; text-transform: uppercase;">
+                            📌 ${item.category}
+                        </td>
+                    </tr>
+                `;
+            }
+
+            let checked = item.inStock !== false ? 'checked' : '';
+            let imageTag = item.image ? `<img src="${item.image}" class="menu-thumb">` : `<div class="menu-thumb" style="display:flex;align-items:center;justify-content:center;font-size:10px;color:gray;">No Img</div>`;
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${imageTag}</td>
+                    <td style="font-weight: bold; color: white;">${item.name}</td>
+                    <td style="color: #38bdf8;">${item.category}</td>
+                    <td style="color: #10b981; font-weight: bold;">₹${item.price}</td>
+                    <td class="text-center">
+                        <label class="switch">
+                            <input type="checkbox" ${checked} onchange="toggleStock('${item.id}', this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </td>
+                    <td class="text-center" style="white-space: nowrap;">
+                        <button class="action-btn btn-edit" onclick="editMenuItem('${item.id}')">✏️</button>
+                        <button class="action-btn btn-delete" onclick="deleteMenuItem('${item.id}')">🗑️</button>
+                    </td>
+                </tr>
+            `;
+        });
+    } catch (e) {
+        console.error("Error loading menu:", e);
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="color:red;">Error loading menu. Internet check karo.</td></tr>';
+    }
+}
+
+// MISSING FUNCTIONS RESTORED
+window.toggleStock = async function(id, isStockStatus) {
+    try { await updateDoc(doc(db, "menu_items", id), { inStock: isStockStatus }); } 
+    catch(e) { alert("Stock update fail hua!"); }
+}
+
+window.deleteMenuItem = async function(id) {
+    if(confirm("Are you sure you want to delete this item permanently?")) {
+        await deleteDoc(doc(db, "menu_items", id));
+        loadMenuData(); 
+    }
+}
+
+function populateCategoryDropdown(selectedCategory = null) {
+    const select = document.getElementById('itemCategoryInput');
+    const newCatInput = document.getElementById('newCategoryInput');
+    select.innerHTML = '';
+    
+    const uniqueCategories = [...new Set(allMenuItems.map(item => item.category))].filter(Boolean);
+    
+    uniqueCategories.forEach(cat => {
+        select.innerHTML += `<option value="${cat}">${cat}</option>`;
+    });
+    
+    select.innerHTML += `<option value="NEW_CATEGORY" style="font-weight:bold; color:#10b981;">+ Add Custom Category</option>`;
+    
+    if(selectedCategory) {
+        select.value = selectedCategory;
+    }
+    
+    newCatInput.classList.add('hidden');
+    newCatInput.value = '';
+}
+
+document.getElementById('itemCategoryInput').addEventListener('change', (e) => {
+    if(e.target.value === 'NEW_CATEGORY') {
+        document.getElementById('newCategoryInput').classList.remove('hidden');
+        document.getElementById('newCategoryInput').focus();
+    } else {
+        document.getElementById('newCategoryInput').classList.add('hidden');
+    }
+});
+
+document.getElementById('addNewItemBtn').addEventListener('click', () => {
+    currentEditId = null; 
+    document.getElementById('modalTitle').innerText = 'Add New Item';
+    document.getElementById('saveItemBtn').innerText = 'Save Item';
+    
+    document.getElementById('itemNameInput').value = '';
+    document.getElementById('itemPriceInput').value = '';
+    
+    populateCategoryDropdown(); 
+    
+    imagePreview.style.backgroundImage = 'none';
+    imagePreviewText.style.display = 'block';
+    itemImageInput.value = '';
+    selectedImageFile = null;
+    
+    itemModal.classList.remove('hidden');
+});
+
+window.editMenuItem = function(id) {
+    const item = allMenuItems.find(i => i.id === id); 
+    if(!item) return;
+
+    currentEditId = id; 
+    selectedImageFile = null; 
+
+    document.getElementById('modalTitle').innerText = 'Edit Item';
+    document.getElementById('saveItemBtn').innerText = 'Update Item';
+    document.getElementById('itemNameInput').value = item.name;
+    document.getElementById('itemPriceInput').value = item.price;
+    
+    populateCategoryDropdown(item.category); 
+
+    if(item.image) {
+        imagePreview.style.backgroundImage = `url(${item.image})`;
+        imagePreviewText.style.display = 'none';
+    } else {
+        imagePreview.style.backgroundImage = 'none';
+        imagePreviewText.style.display = 'block';
+    }
+
+    itemImageInput.value = ''; 
+    itemModal.classList.remove('hidden');
+}
+
+document.getElementById('closeModalBtn').addEventListener('click', () => {
+    itemModal.classList.add('hidden');
+});
+
+imagePreview.addEventListener('click', () => itemImageInput.click());
+itemImageInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        selectedImageFile = file;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            imagePreview.style.backgroundImage = `url(${e.target.result})`;
+            imagePreviewText.style.display = 'none'; 
+        }
+        reader.readAsDataURL(file);
+    }
+});
+
+document.getElementById('saveItemBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('saveItemBtn');
+    const name = document.getElementById('itemNameInput').value.trim();
+    const price = document.getElementById('itemPriceInput').value.trim();
+    
+    let category = document.getElementById('itemCategoryInput').value;
+    if(category === 'NEW_CATEGORY') {
+        category = document.getElementById('newCategoryInput').value.trim();
+        if(!category) {
+            alert("Bhai nayi category ka naam toh daal!");
+            return;
+        }
+    }
+
+    if(!name || !price) {
+        alert("Bhai Name aur Price zaroori hain!");
+        return;
+    }
+
+    btn.innerText = "Saving... ⏳";
+    btn.disabled = true;
+
+    try {
+        let imageUrl = null;
+
+        if(selectedImageFile) {
+            const imageRef = ref(storage, `menu_images/${Date.now()}_${selectedImageFile.name}`);
+            await uploadBytes(imageRef, selectedImageFile);
+            imageUrl = await getDownloadURL(imageRef);
+        }
+
+        if(currentEditId) {
+            let updateData = {
+                name: name,
+                price: Number(price),
+                category: category
+            };
+            if(imageUrl) updateData.image = imageUrl;
+            
+            await updateDoc(doc(db, "menu_items", currentEditId), updateData);
+            
+        } else {
+            await addDoc(collection(db, "menu_items"), {
+                name: name,
+                price: Number(price),
+                category: category,
+                image: imageUrl,
+                inStock: true
+            });
+        }
+        itemModal.classList.add('hidden');
+        loadMenuData(); 
+
+    } catch (e) {
+        console.error("Save error: ", e);
+        alert("Error saving item! Internet check karo.");
+    } finally {
+        btn.innerText = currentEditId ? "Update Item" : "Save Item";
+        btn.disabled = false;
+    }
+});
