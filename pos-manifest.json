@@ -1,8 +1,9 @@
 {
   "name": "Pizza Hut POS Billing",
   "short_name": "POS System",
-  "id": "/pos-system",
-  "start_url": "/index.html",
+  "id": "/pos-system-v2",
+  "start_url": "/index.html?app=pos",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#38bdf8",
