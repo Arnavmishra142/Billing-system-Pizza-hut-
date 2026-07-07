@@ -151,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
-    // =====================================
+  // =====================================
     // RAWBT ALIGNMENT HELPERS (The Math)
     // =====================================
     const centerText = (text) => {
