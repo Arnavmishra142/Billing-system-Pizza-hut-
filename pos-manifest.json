@@ -1,0 +1,21 @@
+{
+  "name": "Pizza Hut POS Billing",
+  "short_name": "POS System",
+  "id": "/pos-system",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#38bdf8",
+  "icons": [
+    {
+      "src": "pos-logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "pos-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

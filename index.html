@@ -5,12 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POS System - New Pizza Hut & Live Cake</title>
     <link rel="stylesheet" href="css/style.css">
+    
+    <!-- YAHAN NAYA POS MANIFEST LINK KIYA HAI -->
+    <link rel="manifest" href="pos-manifest.json">
 </head>
 <body>
     <div id="screen-home" class="screen active">
-        <div class="welcome-banner">
-            <h2>NEW PIZZA HUT & LIVE CAKE</h2>
-            <p>Salempur, Deoria | POS Billing Dashboard</p>
+        <div class="welcome-banner" style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h2>NEW PIZZA HUT & LIVE CAKE</h2>
+                <p>Billing Dashboard</p>
+            </div>
+            
+            <!-- INSTALL BUTTON -->
+            <button id="posPwaBtn" style="display: none; background: #8b5cf6; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                ⬇️ Install POS App
+            </button>
         </div>
         
         <div class="home-grid">
@@ -28,7 +38,8 @@
                 <span class="icon">⚡</span>
                 <span class="title">Quick Sale Entry</span>
             </button>
-              <button-big-btn" onclick="window.location.href='expense.html'" style="background: linear-gradient(135deg, #f43f5e, #e11d48);">
+            
+            <button class="menu-big-btn" onclick="window.location.href='expense.html'" style="background: linear-gradient(135deg, #f43f5e, #e11d48);">
                 <span class="icon">💸</span><span class="title">Add Expense</span>
             </button>
         </div>
@@ -36,11 +47,10 @@
         <div style="margin-top: 40px; padding: 0 20px;">
             <h3 style="color: #4b5563; margin-bottom: 15px;">Running Orders (Hold / Active)</h3>
             <div class="running-orders-grid" id="runningOrdersContainer">
-                </div>
+            </div>
         </div>
     </div>
 
-      
     <div id="screen-grid" class="screen hidden">
         <header class="top-nav">
             <button id="backToHomeBtn" class="back-btn">⬅ Back</button>
@@ -66,12 +76,10 @@
             </aside>
 
             <main class="main-content">
-                                                                      <div class="search-bar" style="display: flex; gap: 10px;">
+                <div class="search-bar" style="display: flex; gap: 10px;">
                     <input type="text" id="searchInput" placeholder="Search items..." style="flex-grow: 1;">
-                    
                     <button id="qckAddBtn" class="btn btn-details" style="padding: 10px 15px; flex-shrink: 0; font-size: 0.9rem;">+ Quick Add</button>
                 </div>
-
 
                 <div class="items-grid" id="itemsGrid">
                 </div>
@@ -97,6 +105,7 @@
         </div>
     </div>
 
+    <!-- MODALS -->
     <div id="checkoutModal" class="modal hidden">
         <div class="modal-content">
             <h3>Enter Customer Details</h3>
@@ -108,7 +117,8 @@
             </div>
         </div>
     </div>
-      <div id="quickAddChoiceModal" class="modal hidden">
+    
+    <div id="quickAddChoiceModal" class="modal hidden">
         <div class="modal-content">
             <h3>Quick Add Option</h3>
             <p style="text-align: center; color: #6b7280; margin-bottom: 15px;">Kahan add karna hai?</p>
@@ -140,7 +150,7 @@
             
             <input list="categoryOptions" id="globalItemCategory" placeholder="Select or Type Category">
             <datalist id="categoryOptions">
-                </datalist>
+            </datalist>
 
             <div class="modal-actions">
                 <button id="cancelGlobalBtn" class="btn btn-cancel">Cancel</button>
@@ -155,5 +165,53 @@
     <script type="module" src="js/tables.js"></script>
     <script type="module" src="js/menu.js"></script>
     <script type="module" src="js/cart.js"></script>
+    
+    <!-- ADVANCED PWA INSTALL LOGIC FOR POS -->
+    <script>
+        let posDeferredPrompt;
+        const posPwaBtn = document.getElementById('posPwaBtn');
+
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+        if (isStandalone) {
+            console.log("App is already running as a PWA (Standalone).");
+            if(posPwaBtn) posPwaBtn.style.display = 'none';
+        } else {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js').then((reg) => {
+                    console.log("POS Service Worker Active! Scope:", reg.scope);
+                }).catch(err => console.log("SW Error:", err));
+            }
+
+            window.addEventListener('beforeinstallprompt', (e) => {
+                console.log("Browser allowed PWA Install!");
+                e.preventDefault();
+                posDeferredPrompt = e;
+                if(posPwaBtn) {
+                    posPwaBtn.style.display = 'block';
+                }
+            });
+
+            if(posPwaBtn) {
+                posPwaBtn.addEventListener('click', async () => {
+                    if (posDeferredPrompt) {
+                        posDeferredPrompt.prompt();
+                        const { outcome } = await posDeferredPrompt.userChoice;
+                        if (outcome === 'accepted') {
+                            console.log('POS App Installed by user!');
+                        }
+                        posDeferredPrompt = null;
+                        posPwaBtn.style.display = 'none'; 
+                    } else {
+                        alert("Bhai, Install prompt ready nahi hai. Ya toh tu 'Incognito' me hai, ya ye App pehle se tere phone me install ho chuki hai (App drawer check kar).");
+                    }
+                });
+            }
+
+            window.addEventListener('appinstalled', () => {
+                console.log("App installed successfully.");
+                if(posPwaBtn) posPwaBtn.style.display = 'none';
+            });
+        }
+    </script>
 </body>
 </html>
