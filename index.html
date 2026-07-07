@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POS System - New Pizza Hut & Live Cake</title>
     <link rel="stylesheet" href="css/style.css">
-    
-    <!-- YAHAN NAYA POS MANIFEST LINK KIYA HAI -->
-   <link rel="manifest" href="pos-manifest.json?v=2">
+   <link rel="manifest" href="manifest.json">
 </head>
 <body>
     <div id="screen-home" class="screen active">
@@ -166,52 +164,36 @@
     <script type="module" src="js/menu.js"></script>
     <script type="module" src="js/cart.js"></script>
     
-    <!-- ADVANCED PWA INSTALL LOGIC FOR POS -->
-    <script>
-        let posDeferredPrompt;
-        const posPwaBtn = document.getElementById('posPwaBtn');
+     <script>
+        let posPrompt;
+        const posBtn = document.getElementById('posPwaBtn');
 
-        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-        if (isStandalone) {
-            console.log("App is already running as a PWA (Standalone).");
-            if(posPwaBtn) posPwaBtn.style.display = 'none';
-        } else {
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('/sw.js').then((reg) => {
-                    console.log("POS Service Worker Active! Scope:", reg.scope);
-                }).catch(err => console.log("SW Error:", err));
-            }
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js');
+        }
 
-            window.addEventListener('beforeinstallprompt', (e) => {
-                console.log("Browser allowed PWA Install!");
-                e.preventDefault();
-                posDeferredPrompt = e;
-                if(posPwaBtn) {
-                    posPwaBtn.style.display = 'block';
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            posPrompt = e;
+            if(posBtn) posBtn.style.display = 'inline-block';
+        });
+
+        if(posBtn) {
+            posBtn.addEventListener('click', () => {
+                if(posPrompt) {
+                    posPrompt.prompt();
+                    posPrompt.userChoice.then(() => {
+                        posBtn.style.display = 'none';
+                        posPrompt = null;
+                    });
                 }
             });
-
-            if(posPwaBtn) {
-                posPwaBtn.addEventListener('click', async () => {
-                    if (posDeferredPrompt) {
-                        posDeferredPrompt.prompt();
-                        const { outcome } = await posDeferredPrompt.userChoice;
-                        if (outcome === 'accepted') {
-                            console.log('POS App Installed by user!');
-                        }
-                        posDeferredPrompt = null;
-                        posPwaBtn.style.display = 'none'; 
-                    } else {
-                        alert("Bhai, Install prompt ready nahi hai. Ya toh tu 'Incognito' me hai, ya ye App pehle se tere phone me install ho chuki hai (App drawer check kar).");
-                    }
-                });
-            }
-
-            window.addEventListener('appinstalled', () => {
-                console.log("App installed successfully.");
-                if(posPwaBtn) posPwaBtn.style.display = 'none';
-            });
         }
+
+        window.addEventListener('appinstalled', () => {
+            if(posBtn) posBtn.style.display = 'none';
+        });
     </script>
+
 </body>
 </html>

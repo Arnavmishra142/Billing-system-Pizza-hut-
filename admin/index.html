@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - New Pizza Hut</title>
-    <link rel="stylesheet" href="css/admin.css">
-  <link rel="manifest" href="pos-manifest.json?v=2">
+    <link rel="stylesheet" href="../css/admin.css">  
+    <link rel="manifest" href="manifest.json">=
 </head>
 <body>
 
@@ -28,10 +28,9 @@
             </div>
             <div class="topbar-actions">
                 <button class="btn btn-lock" id="logoutBtn">🔒 Lock</button>
-                 <button id="pwaDownloadBtn" class="btn" style="background: #8b5cf6; display: none;">⬇️ Iinstall App</button>
-
-                <button class="btn btn-danger" onclick="window.location.href='index.html'">Exit to POS</button>
-               
+                <button id="pwaDownloadBtn" class="btn" style="background: #8b5cf6; display: none;">⬇️ Install App</button>
+                <!-- FIXED: Exit button ka link wapas daal diya -->
+                <button class="btn btn-danger" onclick="window.location.href='../index.html'">Exit to POS</button>
             </div>
         </header>
 
@@ -141,7 +140,7 @@
                     </div>
                 </div>
 
-                                <div class="table-responsive">
+                <div class="table-responsive">
                     <table class="data-table">
                         <thead>
                             <tr>
@@ -156,7 +155,10 @@
                         </tbody>
                     </table>
                 </div>
+            </div> <!-- FIXED: Expense Section Yahan Close Hua -->
 
+        </main> <!-- FIXED: Main Workspace Yahan Close Hua -->
+    </div> <!-- FIXED: Admin Content Yahan Close Hua -->
 
     <!-- MODAL (Add/Edit Item) -->
     <div id="itemModal" class="modal-overlay hidden">
@@ -195,54 +197,36 @@
         </div>
     </div>
                  
-    <!-- Cache issue avoid karne ke liye version tag update kar diya -->
-    <script type="module" src="js/admin.js?v=12"></script>
-        <!-- ADVANCED PWA INSTALL LOGIC FOR ADMIN -->
+    <script type="module" src="../js/admin.js?v=15"></script>
     <script>
-        let adminDeferredPrompt;
-        const adminPwaBtn = document.getElementById('pwaDownloadBtn');
+        let adminPrompt;
+        const btn = document.getElementById('pwaDownloadBtn');
 
-        const isAdminStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-        
-        if (isAdminStandalone) {
-            console.log("Admin App is already running as a PWA.");
-            if(adminPwaBtn) adminPwaBtn.style.display = 'none';
-        } else {
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('/sw.js').then((reg) => {
-                    console.log("Admin SW Active! Scope:", reg.scope);
-                }).catch(err => console.log("SW Error:", err));
-            }
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('./sw.js');
+        }
 
-            window.addEventListener('beforeinstallprompt', (e) => {
-                e.preventDefault();
-                adminDeferredPrompt = e;
-                if(adminPwaBtn) {
-                    adminPwaBtn.style.display = 'inline-block'; // Button yahan show hoga
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            adminPrompt = e;
+            if(btn) btn.style.display = 'inline-block';
+        });
+
+        if(btn) {
+            btn.addEventListener('click', () => {
+                if(adminPrompt) {
+                    adminPrompt.prompt();
+                    adminPrompt.userChoice.then(() => {
+                        btn.style.display = 'none';
+                        adminPrompt = null;
+                    });
                 }
             });
-
-            if(adminPwaBtn) {
-                adminPwaBtn.addEventListener('click', async () => {
-                    if (adminDeferredPrompt) {
-                        adminDeferredPrompt.prompt();
-                        const { outcome } = await adminDeferredPrompt.userChoice;
-                        if (outcome === 'accepted') {
-                            console.log('Admin App Installed!');
-                        }
-                        adminDeferredPrompt = null;
-                        adminPwaBtn.style.display = 'none'; 
-                    } else {
-                        alert("Install prompt ready nahi hai. Dhyan de ki ye app pehle se installed na ho!");
-                    }
-                });
-            }
-
-            window.addEventListener('appinstalled', () => {
-                if(adminPwaBtn) adminPwaBtn.style.display = 'none';
-            });
         }
-    </script>
 
+        window.addEventListener('appinstalled', () => {
+            if(btn) btn.style.display = 'none';
+        });
+    </script>
 </body>
 </html>
