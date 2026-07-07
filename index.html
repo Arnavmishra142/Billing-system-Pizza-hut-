@@ -250,7 +250,7 @@ function renderHistoryBills() {
                 <p><strong>Time:</strong> ${bill.timeStr}</p>
                 <p><strong>Amount:</strong> ₹${bill.total}</p>
                 <div style="display: flex; gap: 8px; margin-top: 10px;">
-                    <button class="btn-reprint" style="flex: 1;" onclick="reprintGhostBill('${bill.id}')">🖨️ Ghost Print</button>
+                    <button class="btn-reprint" style="flex: 1;" onclick="reprintGhostBill('${bill.id}')">🖨️ Print</button>
                     <button class="btn-delete-ghost" onclick="deleteGhostBill('${bill.id}')">🗑️</button>
                 </div>
             </div>
