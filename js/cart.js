@@ -157,18 +157,20 @@ document.addEventListener('DOMContentLoaded', () => {
     kotBtn.addEventListener('click', () => {
         if (currentCart.length === 0) return;
         
-        let kotText = "------- K.O.T -------\n";
-        kotText += `Table: ${getDisplayTitle()}\n`;
-        kotText += `Time: ${new Date().toLocaleTimeString()}\n`;
-        kotText += "----------------------\n";
-        kotText += "Item              Qty\n";
-        kotText += "----------------------\n";
+        let kotText = "<center><b>------- K.O.T -------</b></center>\n";
+        kotText += `<center>Table: ${getDisplayTitle()}</center>\n`;
+        kotText += `<center>Time: ${new Date().toLocaleTimeString('en-IN')}</center>\n`;
+        kotText += "--------------------------------\n";
+        kotText += "Item                         Qty\n";
+        kotText += "--------------------------------\n";
         
         currentCart.forEach(item => {
-            kotText += `${item.name}\n                   x${item.qty}\n`;
+            let n = item.name.length > 24 ? item.name.substring(0, 22) + ".." : item.name.padEnd(24, " ");
+            let q = String(item.qty).padStart(3, " ");
+            kotText += `<b>${n}</b>     ${q}\n`;
         });
         
-        kotText += "----------------------\n";
+        kotText += "--------------------------------\n";
         kotText += "\n\n\n"; 
         
         window.location.href = "rawbt:" + encodeURIComponent(kotText);
@@ -194,25 +196,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 timestamp: new Date().toISOString()
             });
 
-            let billText = "   NEW PIZZA HUT\n";
-            billText += " Live Cake | Salempur\n";
-            billText += "--------------------------\n";
+            let billText = "<center><b>NEW PIZZA HUT</b></center>\n";
+            billText += "<center>Live Cake | Salempur</center>\n";
+            billText += "--------------------------------\n";
             billText += `Bill: ${getDisplayTitle()}\n`;
-            billText += `Date: ${new Date().toLocaleDateString()}\n`;
-            billText += "--------------------------\n";
-            billText += "Item          Qty    Amt\n";
-            billText += "--------------------------\n";
+            billText += `Date: ${new Date().toLocaleString('en-IN')}\n`;
+            billText += "--------------------------------\n";
+            billText += "Item              Qty      Amt\n";
+            billText += "--------------------------------\n";
             
             currentCart.forEach(item => {
-                let shortName = item.name.length > 14 ? item.name.substring(0, 12) + ".." : item.name.padEnd(14, " ");
-                let itemTotal = item.price * item.qty;
-                billText += `${shortName}  ${item.qty}    ${itemTotal}\n`;
+                let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
+                let q = String(item.qty).padStart(3, " ");
+                let a = String(item.price * item.qty).padStart(7, " ");
+                billText += `${n} ${q}     ${a}\n`;
             });
             
-            billText += "--------------------------\n";
-            billText += `TOTAL:            Rs ${total}\n`;
-            billText += "--------------------------\n";
-            billText += "  Thank You! Visit Again\n";
+            billText += "--------------------------------\n";
+            billText += `<right><b>TOTAL: Rs ${total}</b></right>\n`;
+            billText += "--------------------------------\n";
+            billText += "<center>Thank You! Visit Again</center>\n";
+            
+            // YAHAN APNI UPI ID DAAL DENA!
+            let qrData = `upi://pay?pa=YOUR_UPI_ID@bank&pn=NewPizzaHut&am=${total}`; 
+            billText += `<center><qr>${qrData}</qr></center>\n`;
+            billText += "<center>(Scan to pay directly)</center>\n";
+            
             billText += "\n\n\n";
             
             window.location.href = "rawbt:" + encodeURIComponent(billText);
