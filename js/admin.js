@@ -581,41 +581,50 @@ const bulkMenuItems = [
 const magicBtn = document.getElementById('magicUploadBtn');
 if(magicBtn) {
     magicBtn.addEventListener('click', async () => {
-        const confirmUpload = confirm(`Kkya tum sach mein in ${bulkMenuItems.length} items ko database mein daalna chahte ho? (Ye ek hi baar karna)`);
+        const totalItems = bulkMenuItems.length;
+        const confirmUpload = confirm(`Kya tum sach mein in ${totalItems} items ko database mein daalna chahte ho?`);
         
         if (confirmUpload) {
-            magicBtn.innerText = "UPLOADING... PLZ WAIT ⏳";
+            magicBtn.innerText = `STARTING UPLOAD... 0 / ${totalItems} ⏳`;
             magicBtn.disabled = true;
+            magicBtn.style.background = "#eab308"; // Yellow color for processing
             
             try {
                 // Import zaroori functions
                 const { collection, addDoc } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js");
                 
+                let successCount = 0;
+
                 // Ek-ek karke saare upload karo
-                for (let i = 0; i < bulkMenuItems.length; i++) {
+                for (let i = 0; i < totalItems; i++) {
                     const item = bulkMenuItems[i];
                     await addDoc(collection(db, "menu_items"), {
                         name: item.name,
                         price: Number(item.price),
                         category: item.category,
-                        image: null, // Photo abhi empty rahegi
+                        image: null, 
                         inStock: true
                     });
-                    console.log(`Uploaded: ${item.name}`);
+                    
+                    successCount++;
+                    // LIVE COUNTER UPDATE
+                    magicBtn.innerText = `UPLOADING... ${successCount} / ${totalItems} ⏳`;
                 }
                 
-                alert("🎉 BOOM! Saare items safely upload ho gaye!");
+                // FINAL SUCCESS
+                magicBtn.style.background = "#10b981"; // Green color for success
+                magicBtn.innerText = "✅ DONE! (Now Delete Me)";
+                alert(`🎉 SUCCESS! Poore ${successCount} items safely database mein save ho gaye!`);
+                
                 loadMenuData(); // Table refresh karo
                 
             } catch (error) {
+                // FAIL HANDLING
                 console.error("Bulk Upload Error:", error);
-                alert("Upload mein error aayi, internet check karo!");
-            } finally {
-                magicBtn.innerText = "✅ DONE! (Now Delete Me)";
+                magicBtn.style.background = "#ef4444"; // Red color for fail
+                magicBtn.innerText = "❌ FAILED! TRY AGAIN";
+                alert(`⚠️ UPLOAD FAIL HOGAYA!\nInternet connection check karo ya Firebase ke rules dekho.\nError: ${error.message}`);
             }
         }
     });
 }
-// ==========================================
-// 🔴 END MAGIC UPLOAD SCRIPT 🔴
-// ==========================================
