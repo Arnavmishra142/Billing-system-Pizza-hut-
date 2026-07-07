@@ -197,5 +197,52 @@
                  
     <!-- Cache issue avoid karne ke liye version tag update kar diya -->
     <script type="module" src="js/admin.js?v=12"></script>
+        <!-- ADVANCED PWA INSTALL LOGIC FOR ADMIN -->
+    <script>
+        let adminDeferredPrompt;
+        const adminPwaBtn = document.getElementById('pwaDownloadBtn');
+
+        const isAdminStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+        
+        if (isAdminStandalone) {
+            console.log("Admin App is already running as a PWA.");
+            if(adminPwaBtn) adminPwaBtn.style.display = 'none';
+        } else {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/sw.js').then((reg) => {
+                    console.log("Admin SW Active! Scope:", reg.scope);
+                }).catch(err => console.log("SW Error:", err));
+            }
+
+            window.addEventListener('beforeinstallprompt', (e) => {
+                e.preventDefault();
+                adminDeferredPrompt = e;
+                if(adminPwaBtn) {
+                    adminPwaBtn.style.display = 'inline-block'; // Button yahan show hoga
+                }
+            });
+
+            if(adminPwaBtn) {
+                adminPwaBtn.addEventListener('click', async () => {
+                    if (adminDeferredPrompt) {
+                        adminDeferredPrompt.prompt();
+                        const { outcome } = await adminDeferredPrompt.userChoice;
+                        if (outcome === 'accepted') {
+                            console.log('Admin App Installed!');
+                        }
+                        adminDeferredPrompt = null;
+                        adminPwaBtn.style.display = 'none'; 
+                    } else {
+                        alert("Install prompt ready nahi hai. Dhyan de ki ye app pehle se installed na ho!");
+                    }
+                });
+            }
+
+            window.addEventListener('appinstalled', () => {
+                if(adminPwaBtn) adminPwaBtn.style.display = 'none';
+            });
+        }
+    </script>
+
 </body>
 </html>
