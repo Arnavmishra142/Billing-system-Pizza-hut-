@@ -14,14 +14,16 @@
                 <h2>NEW PIZZA HUT & LIVE CAKE</h2>
                 <p>Billing Dashboard</p>
             </div>
-            <button id="historyBtn" onclick="openHistoryDrawer()" style="background: #f59e0b; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-right: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-    🕒 Recent Bills
-</button>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <button id="historyBtn" onclick="openHistoryDrawer()" style="background: #f59e0b; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    🕒 Recent Bills
+                </button>
 
-            <!-- INSTALL BUTTON -->
-            <button id="posPwaBtn" style="display: none; background: #8b5cf6; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                ⬇️ Install POS App
-            </button>
+                <!-- INSTALL BUTTON -->
+                <button id="posPwaBtn" style="display: none; background: #8b5cf6; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    ⬇️ Install POS App
+                </button>
+            </div>
         </div>
         
         <div class="home-grid">
@@ -201,6 +203,18 @@
 // 🕒 24-HOUR HISTORY LOGIC (GLOBAL)
 // ==========================================
 
+// Safe localStorage read - agar data corrupt hua toh crash nahi, empty array milega
+function getGhostHistory() {
+    try {
+        const raw = localStorage.getItem('pos_24h_history');
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        console.error("History data corrupt tha, reset kar diya:", e);
+        return [];
+    }
+}
+
 window.openHistoryDrawer = function() {
     document.getElementById('historyDrawer').classList.add('open');
     document.getElementById('historyOverlay').classList.add('open');
@@ -214,22 +228,23 @@ window.closeHistoryDrawer = function() {
 
 // Ye function tere kisi bhi page/script se call ho sakta hai bill save karne ke liye
 window.saveToGhostHistory = function(orderNumber, totalAmount, cartItems) {
-    let history = JSON.parse(localStorage.getItem('pos_24h_history')) || [];
+    let history = getGhostHistory();
     
     const newBill = {
         id: orderNumber || "ORD-" + Math.floor(Math.random() * 10000),
         timeStr: new Date().toLocaleString('en-IN', { hour12: true }),
         timestamp: Date.now(),
         total: totalAmount,
-        items: cartItems // Tere items ka array
+        items: cartItems || [] // Tere items ka array, fallback empty
     };
 
     history.unshift(newBill); // Naya bill sabse upar
     localStorage.setItem('pos_24h_history', JSON.stringify(history));
 }
+
 function renderHistoryBills() {
     const list = document.getElementById('historyList');
-    let history = JSON.parse(localStorage.getItem('pos_24h_history')) || [];
+    let history = getGhostHistory();
     const now = Date.now();
     const twentyFourHours = 24 * 60 * 60 * 1000;
 
@@ -258,13 +273,27 @@ function renderHistoryBills() {
     });
 }
 
+// FIX: Ye function pehle missing tha - delete button click pe crash ho raha tha
+window.deleteGhostBill = function(billId) {
+    let history = getGhostHistory();
+    history = history.filter(b => b.id !== billId);
+    localStorage.setItem('pos_24h_history', JSON.stringify(history));
+    renderHistoryBills(); // list refresh
+}
+
 window.reprintGhostBill = function(billId) {
     // 1. History se exact bill ka data nikalna
-    let history = JSON.parse(localStorage.getItem('pos_24h_history')) || [];
+    let history = getGhostHistory();
     const bill = history.find(b => b.id === billId);
 
     if (!bill) {
         alert("Error: Bill data nahi mila!");
+        return;
+    }
+
+    // FIX: items missing/corrupt hone pe crash na ho
+    if (!Array.isArray(bill.items) || bill.items.length === 0) {
+        alert("Is bill ke items save nahi hue the, print nahi ho sakta.");
         return;
     }
 
