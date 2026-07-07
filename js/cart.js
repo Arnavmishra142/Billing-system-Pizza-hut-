@@ -151,13 +151,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
-      // =====================================
+    // =====================================
     // RAWBT K.O.T PRINT LOGIC
     // =====================================
     kotBtn.addEventListener('click', () => {
         if (currentCart.length === 0) return;
         
-        // <c> = center, <b> = bold
         let kotText = "<c><b>------- K.O.T -------</b></c>\n";
         kotText += `<c>Table: ${getDisplayTitle()}</c>\n`;
         kotText += `<c>Time: ${new Date().toLocaleTimeString('en-IN')}</c>\n`;
@@ -166,7 +165,6 @@ document.addEventListener('DOMContentLoaded', () => {
         kotText += "--------------------------------\n";
         
         currentCart.forEach(item => {
-            // Perfect alignment for KOT (32 characters limit)
             let n = item.name.length > 24 ? item.name.substring(0, 22) + ".." : item.name.padEnd(24, " ");
             let q = String(item.qty).padStart(3, " ") + "x";
             kotText += `<b>${n}</b>    ${q}\n`;
@@ -198,7 +196,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 timestamp: new Date().toISOString()
             });
 
-            // Bill Layout with RawBT Short Tags
             let billText = "<c><b>NEW PIZZA HUT</b></c>\n";
             billText += "<c>Live Cake | Salempur</c>\n";
             billText += "--------------------------------\n";
@@ -209,11 +206,10 @@ document.addEventListener('DOMContentLoaded', () => {
             billText += "--------------------------------\n";
             
             currentCart.forEach(item => {
-                // Perfect 32 Character Spacing Math
                 let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
                 let q = String(item.qty).padStart(3, " ") + "x";
                 let a = String(item.price * item.qty).padStart(7, " ");
-                billText += `${n} ${q}   ${a}\n`;
+                billText += `${n} ${q}    ${a}\n`;
             });
             
             billText += "--------------------------------\n";
@@ -221,14 +217,12 @@ document.addEventListener('DOMContentLoaded', () => {
             billText += "--------------------------------\n";
             billText += "<c>Thank You! Visit Again</c>\n";
             
-            // =========================================
-            // THE QR CODE MAGIC (UPI ID UPDATED)
-            // =========================================
+            // THE QR CODE MAGIC
             let qrData = `upi://pay?pa=6393349498@fam&pn=NewPizzaHut&am=${total}`; 
             billText += `<c><qr>${qrData}</qr></c>\n`;
             billText += "<c>(Scan to pay directly)</c>\n";
             
-            billText += "\n\n\n"; // Paper cutting margin
+            billText += "\n\n\n";
             
             window.location.href = "rawbt:" + encodeURIComponent(billText);
 
@@ -243,3 +237,39 @@ document.addEventListener('DOMContentLoaded', () => {
             checkoutBtn.disabled = false;
         }
     });
+
+    if (saveExitBtn) {
+        saveExitBtn.addEventListener('click', async () => {
+            if (currentCart.length === 0) {
+                backToTablesBtn.click(); 
+                return;
+            }
+            const tableName = getCurrentTable();
+            const customerName = getCurrentCustomer();
+            const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+            
+            const textBackup = saveExitBtn.innerText;
+            saveExitBtn.innerText = "Saving...";
+            saveExitBtn.disabled = true;
+
+            try {
+                await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
+                    table: tableName,
+                    customer: customerName,
+                    items: currentCart,
+                    total: total,
+                    timestamp: new Date().toISOString()
+                });
+                saveLocalCart([]); 
+                currentCart = [];
+                renderCart();
+                backToTablesBtn.click();
+            } catch (e) {
+                alert("Database save fail!");
+            } finally {
+                saveExitBtn.innerText = textBackup;
+                saveExitBtn.disabled = false;
+            }
+        });
+    }
+});
