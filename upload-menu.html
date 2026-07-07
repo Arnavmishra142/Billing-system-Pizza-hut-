@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Menu Uploader - New Pizza Hut</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+        .box { background: #1e293b; padding: 40px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; max-width: 600px; width: 90%; }
+        h1 { color: #38bdf8; margin-top: 0; }
+        .btn { background: #10b981; color: white; font-size: 1.2rem; padding: 15px 30px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; margin: 20px 0; transition: 0.3s; }
+        .btn:disabled { background: #64748b; cursor: not-allowed; }
+        .progress-container { width: 100%; background: #334155; border-radius: 10px; margin-top: 20px; overflow: hidden; height: 25px; }
+        .progress-bar { width: 0%; height: 100%; background: linear-gradient(90deg, #3b82f6, #06b6d4); transition: width 0.3s; }
+        #statusText { margin-top: 15px; font-size: 1.1rem; color: #cbd5e1; }
+        #errorBox { margin-top: 20px; color: #ef4444; font-weight: bold; display: none; background: #fee2e2; padding: 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+    <div class="box">
+        <h1>🚀 Superfast Menu Uploader</h1>
+        <p>This will safely upload all items to Firebase.</p>
+        
+        <button id="startBtn" class="btn">START UPLOAD (0%)</button>
+
+        <div class="progress-container">
+            <div id="progressBar" class="progress-bar"></div>
+        </div>
+
+        <div id="statusText">Waiting to start...</div>
+        <div id="errorBox"></div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+        // ==========================================
+        // 🔴 BHAI YAHAN APNA FIREBASE CONFIG DAAL 🔴
+        // ==========================================
+        const firebaseConfig = {
+            // Yahan apne firebase-config.js wale code ki keys paste kar dena
+            // apiKey: "...",
+            // authDomain: "...",
+            // projectId: "...",
+            // storageBucket: "...",
+            // messagingSenderId: "...",
+            // appId: "..."
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Tera poora menu data
+        const bulkMenuItems = [
+            { name: "Margherita Pizza (Regular)", price: 75, category: "Pizza" },
+            { name: "Margherita Pizza (Medium)", price: 160, category: "Pizza" },
+            { name: "Margherita Pizza (Large)", price: 240, category: "Pizza" },
+            { name: "O.C.T Pizza (Regular)", price: 100, category: "Pizza" },
+            { name: "O.C.T Pizza (Medium)", price: 200, category: "Pizza" },
+            { name: "O.C.T Pizza (Large)", price: 300, category: "Pizza" },
+            { name: "Cheese & Paneer Pizza (Regular)", price: 110, category: "Pizza" },
+            { name: "Cheese & Paneer Pizza (Medium)", price: 210, category: "Pizza" },
+            { name: "Cheese & Paneer Pizza (Large)", price: 300, category: "Pizza" },
+            { name: "Italiano Pizza (Regular)", price: 120, category: "Pizza" },
+            { name: "Italiano Pizza (Medium)", price: 210, category: "Pizza" },
+            { name: "Italiano Pizza (Large)", price: 320, category: "Pizza" },
+            { name: "Farmhouse Pizza (Regular)", price: 120, category: "Pizza" },
+            { name: "Farmhouse Pizza (Medium)", price: 250, category: "Pizza" },
+            { name: "Farmhouse Pizza (Large)", price: 350, category: "Pizza" },
+            { name: "Peri Peri Pizza (Regular)", price: 130, category: "Pizza" },
+            { name: "Peri Peri Pizza (Medium)", price: 240, category: "Pizza" },
+            { name: "Peri Peri Pizza (Large)", price: 340, category: "Pizza" },
+            { name: "Cheese & Mushroom Pizza (Regular)", price: 140, category: "Pizza" },
+            { name: "Cheese & Mushroom Pizza (Medium)", price: 220, category: "Pizza" },
+            { name: "Cheese & Mushroom Pizza (Large)", price: 320, category: "Pizza" },
+            { name: "Cheese Overload Pizza (Regular)", price: 140, category: "Pizza" },
+            { name: "Cheese Overload Pizza (Medium)", price: 260, category: "Pizza" },
+            { name: "Cheese Overload Pizza (Large)", price: 360, category: "Pizza" },
+            { name: "Paneer Schezwan Pizza (Regular)", price: 150, category: "Pizza" },
+            { name: "Paneer Schezwan Pizza (Medium)", price: 260, category: "Pizza" },
+            { name: "Paneer Schezwan Pizza (Large)", price: 360, category: "Pizza" },
+            { name: "Country Pizza (Regular)", price: 150, category: "Pizza" },
+            { name: "Country Pizza (Medium)", price: 260, category: "Pizza" },
+            { name: "Country Pizza (Large)", price: 360, category: "Pizza" },
+            { name: "Paneer Makhani Pizza (Regular)", price: 150, category: "Pizza" },
+            { name: "Paneer Makhani Pizza (Medium)", price: 260, category: "Pizza" },
+            { name: "Paneer Makhani Pizza (Large)", price: 360, category: "Pizza" },
+            { name: "Tandoori Pizza (Regular)", price: 150, category: "Pizza" },
+            { name: "Tandoori Pizza (Medium)", price: 270, category: "Pizza" },
+            { name: "Tandoori Pizza (Large)", price: 380, category: "Pizza" },
+            { name: "Paneer Tikka Pizza (Regular)", price: 160, category: "Pizza" },
+            { name: "Paneer Tikka Pizza (Medium)", price: 280, category: "Pizza" },
+            { name: "Paneer Tikka Pizza (Large)", price: 390, category: "Pizza" },
+            { name: "Extra Cheese", price: 50, category: "Extra Topping" },
+            { name: "Extra Veggies", price: 50, category: "Extra Topping" },
+            { name: "Classic Sandwich", price: 60, category: "Sandwich" },
+            { name: "Maxican Sandwich", price: 70, category: "Sandwich" },
+            { name: "Cheese Overload Sandwich", price: 90, category: "Sandwich" },
+            { name: "Paneer Sandwich", price: 110, category: "Sandwich" },
+            { name: "French Fry", price: 50, category: "French Fries" },
+            { name: "Masala Fresh Fry", price: 60, category: "French Fries" },
+            { name: "Peri Peri Fry", price: 70, category: "French Fries" },
+            { name: "Veg Burger", price: 50, category: "Burger" },
+            { name: "Maxican Burger", price: 60, category: "Burger" },
+            { name: "Cheese Burger", price: 70, category: "Burger" },
+            { name: "Double Decker Burger", price: 100, category: "Burger" },
+            { name: "Soya Chilli (Half)", price: 70, category: "Chinese Starter" },
+            { name: "Soya Chilli (Full)", price: 150, category: "Chinese Starter" },
+            { name: "Veg Manchurian (Half)", price: 80, category: "Chinese Starter" },
+            { name: "Veg Manchurian (Full)", price: 150, category: "Chinese Starter" },
+            { name: "Honey Chilli Patato (Half)", price: 90, category: "Chinese Starter" },
+            { name: "Honey Chilli Patato (Full)", price: 160, category: "Chinese Starter" },
+            { name: "Chilli Patato (Half)", price: 90, category: "Chinese Starter" },
+            { name: "Chilli Patato (Full)", price: 160, category: "Chinese Starter" },
+            { name: "Crispy Corn (Half)", price: 90, category: "Chinese Starter" },
+            { name: "Crispy Corn (Full)", price: 170, category: "Chinese Starter" },
+            { name: "Paneer Garlic (Half)", price: 90, category: "Chinese Starter" },
+            { name: "Paneer Garlic (Full)", price: 180, category: "Chinese Starter" },
+            { name: "Panner Chilli (Half)", price: 100, category: "Chinese Starter" },
+            { name: "Panner Chilli (Full)", price: 180, category: "Chinese Starter" },
+            { name: "Baby Corn Chilli (Half)", price: 100, category: "Chinese Starter" },
+            { name: "Baby Corn Chilli (Full)", price: 180, category: "Chinese Starter" },
+            { name: "Mashroom Salt And Chilli (Half)", price: 100, category: "Chinese Starter" },
+            { name: "Mashroom Salt And Chilli (Full)", price: 180, category: "Chinese Starter" },
+            { name: "Mashroom Chilli (Half)", price: 100, category: "Chinese Starter" },
+            { name: "Mashroom Chilli (Full)", price: 180, category: "Chinese Starter" },
+            { name: "Hakka Noodles (Half)", price: 60, category: "Noodles" },
+            { name: "Hakka Noodles (Full)", price: 110, category: "Noodles" },
+            { name: "Singapuri Noodles (Half)", price: 70, category: "Noodles" },
+            { name: "Singapuri Noodles (Full)", price: 110, category: "Noodles" },
+            { name: "Schezwan Noodles (Half)", price: 80, category: "Noodles" },
+            { name: "Schezwan Noodles (Full)", price: 120, category: "Noodles" },
+            { name: "Hong Kong Noodles (Half)", price: 90, category: "Noodles" },
+            { name: "Hong Kong Noodles (Full)", price: 130, category: "Noodles" },
+            { name: "Paneer Noodles (Half)", price: 100, category: "Noodles" },
+            { name: "Paneer Noodles (Full)", price: 150, category: "Noodles" },
+            { name: "Veg Fried Rice (Half)", price: 50, category: "Fried Rice" },
+            { name: "Veg Fried Rice (Full)", price: 90, category: "Fried Rice" },
+            { name: "Schezwan Fried Rice (Half)", price: 70, category: "Fried Rice" },
+            { name: "Schezwan Fried Rice (Full)", price: 110, category: "Fried Rice" },
+            { name: "Paneer Fried Rice (Half)", price: 80, category: "Fried Rice" },
+            { name: "Paneer Fried Rice (Full)", price: 140, category: "Fried Rice" },
+            { name: "Veg Manchow Soup", price: 60, category: "Soup" },
+            { name: "Golden Garlic Soup", price: 50, category: "Soup" },
+            { name: "Hot & Sour Soup", price: 55, category: "Soup" },
+            { name: "Lemon Coriander Soup", price: 40, category: "Soup" },
+            { name: "Sweet Corn Soup", price: 45, category: "Soup" },
+            { name: "Spring Roll", price: 60, category: "Roll" },
+            { name: "Kathi Roll", price: 50, category: "Roll" },
+            { name: "Cheese Corn Roll", price: 90, category: "Roll" },
+            { name: "Paneer Roll", price: 100, category: "Roll" },
+            { name: "Pav Bhaji", price: 60, category: "Pav Bhaji" },
+            { name: "Extra Pav (1 Pcs)", price: 20, category: "Pav Bhaji" },
+            { name: "Extra Bhaji", price: 20, category: "Pav Bhaji" },
+            { name: "Masala Maggie", price: 50, category: "Maggie" },
+            { name: "Paneer Maggie", price: 70, category: "Maggie" },
+            { name: "Sweetcorn Maggie", price: 70, category: "Maggie" },
+            { name: "Cheese Maggie", price: 70, category: "Maggie" },
+            { name: "Espresso (Cold Coffee)", price: 70, category: "Coffee" },
+            { name: "Americano (Cold Coffee)", price: 80, category: "Coffee" },
+            { name: "Coffee", price: 40, category: "Coffee" },
+            { name: "Chocolate Shake", price: 80, category: "Shake" },
+            { name: "Oreo Shake", price: 90, category: "Shake" },
+            { name: "Kit-Kat Shake", price: 90, category: "Shake" },
+            { name: "Vanilla Shake", price: 90, category: "Shake" },
+            { name: "Strawberry Shake", price: 90, category: "Shake" },
+            { name: "Pineapple Shake", price: 90, category: "Shake" },
+            { name: "Butterscotch Shake", price: 90, category: "Shake" },
+            { name: "Veg Steamed Momo (Half)", price: 50, category: "Momo's" },
+            { name: "Veg Steamed Momo (Full)", price: 90, category: "Momo's" },
+            { name: "Paneer Steamed Momo (Half)", price: 70, category: "Momo's" },
+            { name: "Paneer Steamed Momo (Full)", price: 130, category: "Momo's" },
+            { name: "Fried Veg Momo (Half)", price: 60, category: "Momo's" },
+            { name: "Fried Veg Momo (Full)", price: 110, category: "Momo's" },
+            { name: "Fried Panner Momo (Half)", price: 80, category: "Momo's" },
+            { name: "Fried Panner Momo (Full)", price: 140, category: "Momo's" },
+            { name: "Veg Kurkure Momo (Half)", price: 70, category: "Momo's" },
+            { name: "Veg Kurkure Momo (Full)", price: 120, category: "Momo's" },
+            { name: "Panner Kurkure Momo (Half)", price: 90, category: "Momo's" },
+            { name: "Panner Kurkure Momo (Full)", price: 140, category: "Momo's" },
+            { name: "Pineapple Pastry", price: 50, category: "Pastry" },
+            { name: "Strawberry Pastry", price: 50, category: "Pastry" },
+            { name: "Butterscotch Pastry", price: 50, category: "Pastry" },
+            { name: "White Forest Pastry", price: 50, category: "Pastry" },
+            { name: "Choco Chips Pastry", price: 60, category: "Pastry" },
+            { name: "Chocolate Flax Pastry", price: 60, category: "Pastry" },
+            { name: "Plain Garlic Bread", price: 50, category: "Garlic Bread" },
+            { name: "Stuffed Garlic Bread", price: 60, category: "Garlic Bread" },
+            { name: "Cheese Garlic Bread", price: 70, category: "Garlic Bread" },
+            { name: "Combo: Margherita + Fries + Veg Burger + Coldrink", price: 200, category: "Combo" },
+            { name: "Combo: Hakka Noodle + Veg Manchurian + Pastry + Coldrink", price: 200, category: "Combo" },
+            { name: "Black Forest Cake", price: 300, category: "Cake" },
+            { name: "White Forest Cake", price: 350, category: "Cake" },
+            { name: "Chocolate Chips Cake", price: 350, category: "Cake" },
+            { name: "Chocolate Flex Cake", price: 350, category: "Cake" },
+            { name: "Chocolate Munch Cake", price: 380, category: "Cake" },
+            { name: "Kit-Kat Cake", price: 400, category: "Cake" },
+            { name: "Chocolate Vanilla Cake", price: 300, category: "Cake" },
+            { name: "Chocolate Oreo Cake", price: 300, category: "Cake" },
+            { name: "Red Velvet Cake", price: 450, category: "Cake" },
+            { name: "Chocolate Truffles Cake", price: 500, category: "Cake" },
+            { name: "Pineapple Cake", price: 300, category: "Cake" },
+            { name: "Strawberry Cake", price: 300, category: "Cake" },
+            { name: "Butter Scotch Cake", price: 300, category: "Cake" },
+            { name: "Mixed Fruit Cake", price: 350, category: "Cake" },
+            { name: "Real Fruit Cake", price: 450, category: "Cake" },
+            { name: "3D Cake", price: 750, category: "Cake" }
+        ];
+
+        const startBtn = document.getElementById('startBtn');
+        const progressBar = document.getElementById('progressBar');
+        const statusText = document.getElementById('statusText');
+        const errorBox = document.getElementById('errorBox');
+
+        startBtn.addEventListener('click', async () => {
+            const totalItems = bulkMenuItems.length;
+            const confirmUpload = confirm(`Kkya tum ${totalItems} items upload karna chahte ho?`);
+            
+            if (!confirmUpload) return;
+
+            startBtn.disabled = true;
+            errorBox.style.display = 'none';
+            let successCount = 0;
+
+            try {
+                // Ek-ek karke upload chalega taaki progress bar update ho sake
+                for (let i = 0; i < totalItems; i++) {
+                    const item = bulkMenuItems[i];
+                    
+                    // UI Update
+                    statusText.innerText = `Uploading: ${item.name}...`;
+                    
+                    // Firebase Upload
+                    await addDoc(collection(db, "menu_items"), {
+                        name: item.name,
+                        price: Number(item.price),
+                        category: item.category,
+                        image: null, 
+                        inStock: true
+                    });
+                    
+                    successCount++;
+                    
+                    // Percentage Calculation
+                    const percentage = Math.round((successCount / totalItems) * 100);
+                    progressBar.style.width = `${percentage}%`;
+                    startBtn.innerText = `UPLOADING... ${percentage}%`;
+                }
+                
+                // Upload Complete
+                startBtn.innerText = "✅ 100% COMPLETE!";
+                startBtn.style.background = "#059669";
+                statusText.innerHTML = `🎉 BOOM! Saare ${successCount} items successfully database mein save ho gaye!<br><br><b>Ab is file ko delete kar de aur apna Admin/POS panel refresh kar.</b>`;
+                
+            } catch (error) {
+                // Agar internet kata ya rule block hua toh yahan fasega
+                console.error("Upload Error:", error);
+                startBtn.innerText = "❌ FAILED!";
+                startBtn.style.background = "#ef4444";
+                errorBox.style.display = 'block';
+                errorBox.innerText = `ERROR AAYI HAI:\nItem fail hua: ${bulkMenuItems[successCount].name}\nReason: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

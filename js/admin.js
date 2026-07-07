@@ -1,5 +1,5 @@
 import { db, storage } from './firebase-config.js';
-import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
 
 // ==========================================
@@ -46,15 +46,15 @@ window.switchTab = function(tabName) {
 }
 
 // ==========================================
-// SALES LOGIC (UNTOUCHED)
+// SALES LOGIC
 // ==========================================
 let allSales = []; 
 async function fetchAllSalesFromDB() {
     try {
         const querySnapshot = await getDocs(collection(db, "sales_history"));
         allSales = [];
-        querySnapshot.forEach((doc) => {
-            let data = doc.data(); data.id = doc.id; allSales.push(data);
+        querySnapshot.forEach((docSnap) => {
+            let data = docSnap.data(); data.id = docSnap.id; allSales.push(data);
         });
     } catch (error) { console.error(error); }
 }
@@ -160,7 +160,6 @@ let selectedImageFile = null;
 let currentEditId = null; 
 let allMenuItems = []; 
 
-// 1. FETCH MENU FROM FIREBASE
 window.loadMenuData = async function() {
     const tbody = document.getElementById('menuTableBody');
     tbody.innerHTML = '<tr><td colspan="6" class="loading">Loading Menu from Cloud... ☁️</td></tr>';
@@ -220,9 +219,6 @@ window.deleteMenuItem = async function(id) {
     }
 }
 
-// ==========================================
-// DYNAMIC CATEGORY LOGIC
-// ==========================================
 function populateCategoryDropdown(selectedCategory = null) {
     const select = document.getElementById('itemCategoryInput');
     const newCatInput = document.getElementById('newCategoryInput');
@@ -253,9 +249,6 @@ document.getElementById('itemCategoryInput').addEventListener('change', (e) => {
     }
 });
 
-// ==========================================
-// MODAL OPENERS (ADD & EDIT) - THE MISSING PIECE!
-// ==========================================
 document.getElementById('addNewItemBtn').addEventListener('click', () => {
     currentEditId = null; 
     document.getElementById('modalTitle').innerText = 'Add New Item';
@@ -264,7 +257,7 @@ document.getElementById('addNewItemBtn').addEventListener('click', () => {
     document.getElementById('itemNameInput').value = '';
     document.getElementById('itemPriceInput').value = '';
     
-    populateCategoryDropdown(); // Dropdown load karo
+    populateCategoryDropdown(); 
     
     imagePreview.style.backgroundImage = 'none';
     imagePreviewText.style.display = 'block';
@@ -286,7 +279,7 @@ window.editMenuItem = function(id) {
     document.getElementById('itemNameInput').value = item.name;
     document.getElementById('itemPriceInput').value = item.price;
     
-    populateCategoryDropdown(item.category); // Purani category select karo
+    populateCategoryDropdown(item.category); 
 
     if(item.image) {
         imagePreview.style.backgroundImage = `url(${item.image})`;
@@ -300,12 +293,10 @@ window.editMenuItem = function(id) {
     itemModal.classList.remove('hidden');
 }
 
-// 6. CLOSE MODAL
 document.getElementById('closeModalBtn').addEventListener('click', () => {
     itemModal.classList.add('hidden');
 });
 
-// 7. IMAGE PREVIEW LOGIC
 imagePreview.addEventListener('click', () => itemImageInput.click());
 itemImageInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -320,7 +311,6 @@ itemImageInput.addEventListener('change', (e) => {
     }
 });
 
-// 8. SAVE & UPDATE LOGIC
 document.getElementById('saveItemBtn').addEventListener('click', async () => {
     const btn = document.getElementById('saveItemBtn');
     const name = document.getElementById('itemNameInput').value.trim();
