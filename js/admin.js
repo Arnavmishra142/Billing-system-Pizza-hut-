@@ -402,3 +402,161 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
         btn.disabled = false;
     }
 });
+// Tab switcher update taaki expense load ho
+window.switchTab = function(tabName) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    
+    document.getElementById(tabName + 'Section').classList.add('active');
+    event.target.classList.add('active');
+
+    if(tabName === 'menu') loadMenuData();
+    if(tabName === 'expense') loadAdminExpenses('days', 1);
+}
+
+// Expense fetcher
+window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
+    if(btnContext) {
+        document.querySelectorAll('#expenseSection .filter-btn').forEach(b => b.classList.remove('active'));
+        btnContext.classList.add('active');
+    }
+
+    const tbody = document.getElementById('expenseTableBody');
+    tbody.innerHTML = '<tr><td colspan="3" class="loading">Loading...</td></tr>';
+    
+    try {
+        const querySnapshot = await getDocs(collection(db, "daily_expenses"));
+        let filteredExpenses = [];
+        const now = new Date();
+
+        querySnapshot.forEach((docSnap) => {
+            let exp = docSnap.data();
+            const expDate = new Date(exp.timestamp);
+            const diffDays = Math.ceil(Math.abs(now - expDate) / (1000 * 60 * 60 * 24)); 
+            
+            if (filterType === 'days') {
+                if (filterValue === 1 && expDate.toDateString() === now.toDateString()) filteredExpenses.push(exp);
+                else if (filterValue !== 1 && diffDays <= filterValue) filteredExpenses.push(exp);
+            }
+        });
+
+        filteredExpenses.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        
+        tbody.innerHTML = '';
+        let totalExp = 0;
+
+        if(filteredExpenses.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:20px; color:gray;">No expenses found.</td></tr>';
+        } else {
+            filteredExpenses.forEach(exp => {
+                totalExp += Number(exp.amount);
+                let timeString = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
+                tbody.innerHTML += `
+                    <tr>
+                        <td style="color:#94a3b8;">${timeString}</td>
+                        <td style="font-weight:bold; color:white; text-transform: capitalize;">${exp.note}</td>
+                        <td class="text-right" style="color:#ef4444; font-weight:bold;">₹${exp.amount}</td>
+                    </tr>
+                `;
+            });
+        }
+        document.getElementById('totalExpenseBox').innerText = `₹${totalExp}`;
+    } catch (error) {
+        console.error(error);
+        tbody.innerHTML = '<tr><td colspan="3" style="color:red; text-align:center;">Error loading expenses.</td></tr>';
+    }
+}
+// ==========================================
+// EXPENSE LOGIC & REFRESH BUTTON
+// ==========================================
+
+// Tab switcher logic (Ensure expense is handled)
+window.switchTab = function(tabName) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    
+    document.getElementById(tabName + 'Section').classList.add('active');
+    event.target.classList.add('active');
+
+    if(tabName === 'menu') loadMenuData();
+    if(tabName === 'expense') loadAdminExpenses('days', 1);
+}
+
+window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
+    if(btnContext) {
+        document.querySelectorAll('#expenseSection .filter-btn').forEach(b => b.classList.remove('active'));
+        btnContext.classList.add('active');
+    }
+
+    const tbody = document.getElementById('expenseTableBody');
+    if(!tbody) return;
+    
+    tbody.innerHTML = '<tr><td colspan="3" class="loading">Loading Expenses... ☁️</td></tr>';
+    
+    try {
+        const querySnapshot = await getDocs(collection(db, "daily_expenses"));
+        let filteredExpenses = [];
+        const now = new Date();
+
+        querySnapshot.forEach((docSnap) => {
+            let exp = docSnap.data();
+            const expDate = new Date(exp.timestamp);
+            const diffDays = Math.ceil(Math.abs(now - expDate) / (1000 * 60 * 60 * 24)); 
+            
+            if (filterType === 'days') {
+                if (filterValue === 1 && expDate.toDateString() === now.toDateString()) {
+                    filteredExpenses.push(exp);
+                }
+                else if (filterValue !== 1 && diffDays <= filterValue) {
+                    filteredExpenses.push(exp);
+                }
+            }
+        });
+
+        // Naye kharche sabse upar
+        filteredExpenses.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        
+        tbody.innerHTML = '';
+        let totalExp = 0;
+
+        if(filteredExpenses.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:20px; color:gray;">No expenses found for this time.</td></tr>';
+        } else {
+            filteredExpenses.forEach(exp => {
+                totalExp += Number(exp.amount);
+                let timeString = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
+                tbody.innerHTML += `
+                    <tr>
+                        <td style="color:#94a3b8;">${timeString}</td>
+                        <td style="font-weight:bold; color:white; text-transform: capitalize;">${exp.note}</td>
+                        <td class="text-right" style="color:#ef4444; font-weight:bold;">₹${exp.amount}</td>
+                    </tr>
+                `;
+            });
+        }
+        document.getElementById('totalExpenseBox').innerText = `₹${totalExp}`;
+    } catch (error) {
+        console.error(error);
+        tbody.innerHTML = '<tr><td colspan="3" style="color:red; text-align:center;">Error loading expenses. Internet check karo.</td></tr>';
+    }
+}
+
+// NAYA: Refresh Button Click Listener
+const refreshExpBtn = document.getElementById('refreshExpenseBtn');
+if(refreshExpBtn) {
+    refreshExpBtn.addEventListener('click', async (e) => {
+        const btn = e.target;
+        btn.innerText = "🔄..."; 
+        btn.disabled = true;
+        
+        // Jo filter abhi select hai (jaise '1 Day'), wahi refresh hoga
+        const activeBtn = document.querySelector('#expenseSection .filter-btn.active');
+        let days = 1;
+        if(activeBtn) days = parseInt(activeBtn.dataset.val);
+        
+        await loadAdminExpenses('days', days);
+        
+        btn.innerText = "🔄 Refresh Data";
+        btn.disabled = false;
+    });
+}

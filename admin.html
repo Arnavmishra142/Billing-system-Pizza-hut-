@@ -33,40 +33,8 @@
 
         <main class="main-workspace">
             
+            <!-- A. SALES SECTION -->
             <div id="salesSection" class="section active">
-                            <!-- EXPENSE SECTION -->
-            <div id="expenseSection" class="section">
-                <div class="filter-controls">
-                    <div class="filter-row">
-                        <button class="filter-btn active" data-filter="days" data-val="1" onclick="loadAdminExpenses('days', 1, this)">1 Day (Today)</button>
-                        <button class="filter-btn" data-filter="days" data-val="7" onclick="loadAdminExpenses('days', 7, this)">1 Week</button>
-                        <button class="filter-btn" data-filter="days" data-val="30" onclick="loadAdminExpenses('days', 30, this)">1 Month</button>
-                    </div>
-                </div>
-
-                <div class="stats-grid" style="grid-template-columns: 1fr;">
-                    <div class="stat-card">
-                        <h3>Total Expenses</h3>
-                        <div class="value" id="totalExpenseBox" style="color: #ef4444;">₹0</div>
-                    </div>
-                </div>
-
-                <div class="table-responsive">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Time / Date</th>
-                                <th>Note</th>
-                                <th class="text-right">Amount (₹)</th>
-                            </tr>
-                        </thead>
-                        <tbody id="expenseTableBody">
-                            <tr><td colspan="3" class="loading">Loading Expenses...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
                 <div class="filter-controls">
                     <div class="filter-row">
                         <button class="filter-btn active" data-filter="days" data-val="1">1 Day (Today)</button>
@@ -102,7 +70,7 @@
                             </tr>
                         </thead>
                         <tbody id="salesTableBody">
-                            </tbody>
+                        </tbody>
                     </table>
                 </div>
 
@@ -118,7 +86,7 @@
                             </tr>
                         </thead>
                         <tbody id="billsTableBody">
-                            </tbody>
+                        </tbody>
                     </table>
                 </div>
             </div>
@@ -127,7 +95,6 @@
             <div id="menuSection" class="section">
                 <div class="menu-header-bar">
                     <h2 class="section-header" style="margin: 0; border: none;">🍔 Menu Management</h2>
-                    
                     <button class="btn" id="addNewItemBtn" style="background: #10b981; color: white;">+ Add New Item</button>
                 </div>
 
@@ -145,8 +112,42 @@
                             </tr>
                         </thead>
                         <tbody id="menuTableBody">
-                            <!-- Data will be injected here via JS -->
                             <tr><td colspan="6" class="loading">Loading Menu Layout... ⚙️</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- C. EXPENSE SECTION -->
+            <div id="expenseSection" class="section">
+                <div class="filter-controls">
+                    <div class="filter-row">
+                        <button class="filter-btn active" data-filter="days" data-val="1" onclick="loadAdminExpenses('days', 1, this)">1 Day (Today)</button>
+                        <button class="filter-btn" data-filter="days" data-val="7" onclick="loadAdminExpenses('days', 7, this)">1 Week</button>
+                        <button class="filter-btn" data-filter="days" data-val="30" onclick="loadAdminExpenses('days', 30, this)">1 Month</button>
+                    </div>
+                    <!-- NAYA: Refresh Button for Expenses -->
+                    <button class="btn btn-refresh" id="refreshExpenseBtn">🔄 Refresh Data</button>
+                </div>
+
+                <div class="stats-grid" style="grid-template-columns: 1fr;">
+                    <div class="stat-card">
+                        <h3>Total Expenses</h3>
+                        <div class="value" id="totalExpenseBox" style="color: #ef4444;">₹0</div>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Time / Date</th>
+                                <th>Note</th>
+                                <th class="text-right">Amount (₹)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="expenseTableBody">
+                            <tr><td colspan="3" class="loading">Loading Expenses...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -155,7 +156,7 @@
         </main>
     </div>
 
-    <!-- MODAL -->
+    <!-- MODAL (Add/Edit Item) -->
     <div id="itemModal" class="modal-overlay hidden">
         <div class="modal-box">
             <h2 id="modalTitle">Add New Item</h2>
@@ -192,7 +193,7 @@
         </div>
     </div>
                  
-    <!-- Vercel cache issue avoid karne ke liye version tag laga diya -->
-    <script type="module" src="js/admin.js?v=10"></script>
+    <!-- Cache issue avoid karne ke liye version tag update kar diya -->
+    <script type="module" src="js/admin.js?v=12"></script>
 </body>
 </html>
