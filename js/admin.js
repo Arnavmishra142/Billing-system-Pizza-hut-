@@ -119,7 +119,6 @@ window.loadSalesData = async function(filterType, filterValue) {
         salesTbody.innerHTML += `<tr><td style="font-weight:bold; color:white;">${stat.name}</td><td class="text-right" style="color:#38bdf8; font-weight:bold;">${stat.qty}</td><td class="text-right" style="color:#10b981; font-weight:bold;">₹${stat.rev.toFixed(2)}</td></tr>`;
     });
 }
-
 window.deleteSale = async function(saleId) {
     if (confirm("Delete this bill?")) {
         await deleteDoc(doc(db, "sales_history", saleId));

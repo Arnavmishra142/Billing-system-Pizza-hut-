@@ -90,7 +90,7 @@
                 </div>
             </div>
 
-                   <!-- B. MENU EDIT SECTION -->
+            <!-- B. MENU EDIT SECTION -->
             <div id="menuSection" class="section">
                 <div class="menu-header-bar">
                     <h2 class="section-header" style="margin: 0; border: none;">🍔 Menu Management</h2>
@@ -122,7 +122,8 @@
         </main>
     </div>
 
-        <div id="itemModal" class="modal-overlay hidden">
+    <!-- MODAL -->
+    <div id="itemModal" class="modal-overlay hidden">
         <div class="modal-box">
             <h2 id="modalTitle">Add New Item</h2>
             
@@ -146,8 +147,7 @@
                 
                 <div class="form-group">
                     <label>Category</label>
-                    <select id="itemCategoryInput">
-                        </select>
+                    <select id="itemCategoryInput"></select>
                     <input type="text" id="newCategoryInput" class="hidden" placeholder="Type new category..." style="margin-top: 10px; border-color: #10b981;">
                 </div>
             </div>
@@ -159,6 +159,7 @@
         </div>
     </div>
                  
-    <script type="module" src="js/admin.js"></script>
+    <!-- Vercel cache issue avoid karne ke liye version tag laga diya -->
+    <script type="module" src="js/admin.js?v=10"></script>
 </body>
 </html>

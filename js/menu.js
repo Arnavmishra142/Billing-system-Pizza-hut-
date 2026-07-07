@@ -11,6 +11,7 @@ let currentCategory = 'All';
 document.addEventListener('DOMContentLoaded', () => {
     fetchMenuFromCloud();
     setupQuickAddPopups();
+    setupSearch();
 });
 
 // 1. FIREBASE SE MENU LAO
@@ -190,5 +191,57 @@ function updateDatalist() {
     datalist.innerHTML = '';
     categories.forEach(cat => {
         if(cat !== 'All') datalist.innerHTML += `<option value="${cat}">`;
+    });
+}
+// ==========================================
+// SEARCH LOGIC
+// ==========================================
+function setupSearch() {
+    const searchInput = document.getElementById('searchInput');
+    if (!searchInput) return;
+
+    searchInput.addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase().trim();
+        const grid = document.getElementById('itemsGrid');
+        grid.innerHTML = '';
+
+        // Agar search box khali hai, toh current category ke items wapas load kar do
+        if (searchTerm === '') {
+            loadItems(currentCategory);
+            return;
+        }
+
+        // Search term ke hisaab se allItems ko filter karo
+        let searchedItems = allItems.filter(item => 
+            item.name.toLowerCase().includes(searchTerm)
+        );
+
+        if (searchedItems.length === 0) {
+            grid.innerHTML = '<div style="padding:20px; color:gray; width:100%; text-align:center;">Koi item nahi mila bhai.</div>';
+            return;
+        }
+
+        // Filtered items ko grid mein dikhao
+        searchedItems.forEach(item => {
+            let card = document.createElement('div');
+            card.className = 'item-card';
+            
+            let bgImage = item.image ? `url('${item.image}')` : 'none';
+            let bgText = item.image ? '' : '<span style="color:#aaa; font-size:10px;">No Image</span>';
+
+            card.innerHTML = `
+                <div class="item-image" style="background-image: ${bgImage}; background-size:cover; background-position:center; height:100px; display:flex; align-items:center; justify-content:center; background-color:#f3f4f6; border-radius:8px 8px 0 0;">
+                    ${bgText}
+                </div>
+                <div class="item-title" style="padding:10px 10px 0; font-weight:bold; font-size:0.9rem;">${item.name}</div>
+                <div class="item-price" style="padding:5px 10px 10px; color:#10b981; font-weight:bold;">₹${item.price}</div>
+            `;
+            
+            card.onclick = () => {
+                window.dispatchEvent(new CustomEvent('add-to-cart', { detail: item }));
+            };
+            
+            grid.appendChild(card);
+        });
     });
 }
