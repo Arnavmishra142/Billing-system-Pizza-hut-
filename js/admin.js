@@ -587,12 +587,10 @@ if(magicBtn) {
         if (confirmUpload) {
             magicBtn.innerText = `STARTING UPLOAD... 0 / ${totalItems} ⏳`;
             magicBtn.disabled = true;
-            magicBtn.style.background = "#eab308"; // Yellow color for processing
+            magicBtn.style.background = "#eab308"; // Yellow color
             
             try {
-                // Import zaroori functions
-                const { collection, addDoc } = await import("https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js");
-                
+                // YAHAN SE HATA DIYA WOH EXTRA IMPORT LINE
                 let successCount = 0;
 
                 // Ek-ek karke saare upload karo
@@ -607,23 +605,20 @@ if(magicBtn) {
                     });
                     
                     successCount++;
-                    // LIVE COUNTER UPDATE
                     magicBtn.innerText = `UPLOADING... ${successCount} / ${totalItems} ⏳`;
                 }
                 
-                // FINAL SUCCESS
-                magicBtn.style.background = "#10b981"; // Green color for success
+                magicBtn.style.background = "#10b981"; // Green color
                 magicBtn.innerText = "✅ DONE! (Now Delete Me)";
                 alert(`🎉 SUCCESS! Poore ${successCount} items safely database mein save ho gaye!`);
                 
-                loadMenuData(); // Table refresh karo
+                loadMenuData(); 
                 
             } catch (error) {
-                // FAIL HANDLING
                 console.error("Bulk Upload Error:", error);
-                magicBtn.style.background = "#ef4444"; // Red color for fail
-                magicBtn.innerText = "❌ FAILED! TRY AGAIN";
-                alert(`⚠️ UPLOAD FAIL HOGAYA!\nInternet connection check karo ya Firebase ke rules dekho.\nError: ${error.message}`);
+                magicBtn.style.background = "#ef4444"; // Red color
+                magicBtn.innerText = "❌ FAILED!";
+                alert(`⚠️ UPLOAD FAIL HOGAYA!\nError: ${error.message}\nDatabase rules check kar!`);
             }
         }
     });
