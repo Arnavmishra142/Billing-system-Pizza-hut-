@@ -590,10 +590,9 @@ if(magicBtn) {
             magicBtn.style.background = "#eab308"; // Yellow color
             
             try {
-                // YAHAN SE HATA DIYA WOH EXTRA IMPORT LINE
                 let successCount = 0;
 
-                // Ek-ek karke saare upload karo
+                // Seedha loop chalao, upar wale static imports ka use karke!
                 for (let i = 0; i < totalItems; i++) {
                     const item = bulkMenuItems[i];
                     await addDoc(collection(db, "menu_items"), {
@@ -615,10 +614,11 @@ if(magicBtn) {
                 loadMenuData(); 
                 
             } catch (error) {
+                // Ab agar fail hua, toh screen pe theek theek bata dega kyun fail hua
                 console.error("Bulk Upload Error:", error);
                 magicBtn.style.background = "#ef4444"; // Red color
                 magicBtn.innerText = "❌ FAILED!";
-                alert(`⚠️ UPLOAD FAIL HOGAYA!\nError: ${error.message}\nDatabase rules check kar!`);
+                alert(`⚠️ UPLOAD FAIL HOGAYA!\nError: ${error.message}`);
             }
         }
     });
