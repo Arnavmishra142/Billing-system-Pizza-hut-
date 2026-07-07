@@ -178,7 +178,39 @@ window.loadMenuData = async function() {
             let item = docSnap.data();
             item.id = docSnap.id;
             allMenuItems.push(item); 
+        });
+
+        // NAYA LOGIC: Sorting by Category then by Name
+        allMenuItems.sort((a, b) => {
+            let catA = (a.category || "").toUpperCase();
+            let catB = (b.category || "").toUpperCase();
+            if (catA < catB) return -1;
+            if (catA > catB) return 1;
             
+            // Agar category same hai, toh Name ke hisaab se sort karo
+            let nameA = (a.name || "").toUpperCase();
+            let nameB = (b.name || "").toUpperCase();
+            if (nameA < nameB) return -1;
+            if (nameA > nameB) return 1;
+            return 0;
+        });
+
+        // Table mein print karna
+        let currentCategoryTrack = "";
+
+        allMenuItems.forEach((item) => {
+            // Category Divider Logic (Formatting ke liye)
+            if(item.category !== currentCategoryTrack) {
+                currentCategoryTrack = item.category;
+                tbody.innerHTML += `
+                    <tr style="background: #334155;">
+                        <td colspan="6" style="color: #f8fafc; font-weight: 800; font-size: 1.1rem; padding: 10px 15px; letter-spacing: 1px; text-transform: uppercase;">
+                            📌 ${item.category}
+                        </td>
+                    </tr>
+                `;
+            }
+
             let checked = item.inStock !== false ? 'checked' : '';
             let imageTag = item.image ? `<img src="${item.image}" class="menu-thumb">` : `<div class="menu-thumb" style="display:flex;align-items:center;justify-content:center;font-size:10px;color:gray;">No Img</div>`;
 
@@ -204,18 +236,6 @@ window.loadMenuData = async function() {
     } catch (e) {
         console.error("Error loading menu:", e);
         tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="color:red;">Error loading menu. Internet check karo.</td></tr>';
-    }
-}
-
-window.toggleStock = async function(id, isStockStatus) {
-    try { await updateDoc(doc(db, "menu_items", id), { inStock: isStockStatus }); } 
-    catch(e) { alert("Stock update fail hua!"); }
-}
-
-window.deleteMenuItem = async function(id) {
-    if(confirm("Are you sure you want to delete this item permanently?")) {
-        await deleteDoc(doc(db, "menu_items", id));
-        loadMenuData(); 
     }
 }
 
