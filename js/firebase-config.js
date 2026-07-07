@@ -8,7 +8,8 @@ const firebaseConfig = {
     projectId: "billing-system-f8531",
     storageBucket: "billing-system-f8531.firebasestorage.app",
     messagingSenderId: "921228841270",
-    appId: "1:921228841270:web:9013d59b3ef96dda40e397",    measurementd: "G-JMPEJCCBHZ"
+    appId: "1:921228841270:web:9013d59b3ef96dda40e397",
+    measurementId: "G-JMPEJCCBHZ"
 };
 
 const app = initializeApp(firebaseConfig);
