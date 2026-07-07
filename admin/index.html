@@ -122,14 +122,17 @@
             </div>
 
             <!-- C. EXPENSE SECTION -->
-            <div id="expenseSection" class="section">
+                     <div id="expenseSection" class="section">
                 <div class="filter-controls">
                     <div class="filter-row">
                         <button class="filter-btn active" data-filter="days" data-val="1" onclick="loadAdminExpenses('days', 1, this)">1 Day (Today)</button>
                         <button class="filter-btn" data-filter="days" data-val="7" onclick="loadAdminExpenses('days', 7, this)">1 Week</button>
                         <button class="filter-btn" data-filter="days" data-val="30" onclick="loadAdminExpenses('days', 30, this)">1 Month</button>
+                        
+                        <span class="divider">|</span>
+                        <span class="date-label">Pick Date: </span>
+                        <input type="date" id="expenseDateSearch">
                     </div>
-                    <!-- NAYA: Refresh Button for Expenses -->
                     <button class="btn btn-refresh" id="refreshExpenseBtn">🔄 Refresh Data</button>
                 </div>
 

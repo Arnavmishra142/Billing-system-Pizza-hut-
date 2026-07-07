@@ -481,19 +481,23 @@ window.switchTab = function(tabName) {
     event.target.classList.add('active');
 
     if(tabName === 'menu') loadMenuData();
-    if(tabName === 'expense') loadAdminExpenses('days', 1);
+    if(tabName === 'expense') {
+        if(document.getElementById('expenseDateSearch')) document.getElementById('expenseDateSearch').value = '';
+        loadAdminExpenses('days', 1, document.querySelector('#expenseSection .filter-btn[data-val="1"]'));
+    }
 }
 
 window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
     if(btnContext) {
         document.querySelectorAll('#expenseSection .filter-btn').forEach(b => b.classList.remove('active'));
         btnContext.classList.add('active');
+        if(document.getElementById('expenseDateSearch')) document.getElementById('expenseDateSearch').value = ''; // Reset date if button clicked
     }
 
     const tbody = document.getElementById('expenseTableBody');
     if(!tbody) return;
     
-    tbody.innerHTML = '<tr><td colspan="3" class="loading">Loading Expenses... ☁️</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="4" class="loading">Loading Expenses... ☁️</td></tr>';
     
     try {
         const querySnapshot = await getDocs(collection(db, "daily_expenses"));
@@ -513,6 +517,11 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
                 else if (filterValue !== 1 && diffDays <= filterValue) {
                     filteredExpenses.push(exp);
                 }
+            } else if (filterType === 'date') {
+                // NAYA: Particular date ka logic
+                if (expDate.toDateString() === new Date(filterValue).toDateString()) {
+                    filteredExpenses.push(exp);
+                }
             }
         });
 
@@ -523,7 +532,7 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
         let totalExp = 0;
 
         if(filteredExpenses.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:20px; color:gray;">No expenses found for this time.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:gray;">No expenses found for this date.</td></tr>';
         } else {
             filteredExpenses.forEach(exp => {
                 totalExp += Number(exp.amount);
@@ -543,8 +552,20 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
         document.getElementById('totalExpenseBox').innerText = `₹${totalExp}`;
     } catch (error) {
         console.error(error);
-        tbody.innerHTML = '<tr><td colspan="3" style="color:red; text-align:center;">Error loading expenses. Internet check karo.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">Error loading expenses. Internet check karo.</td></tr>';
     }
+}
+
+// NAYA: Date Picker Event Listener
+const expenseDateSearch = document.getElementById('expenseDateSearch');
+if(expenseDateSearch) {
+    expenseDateSearch.addEventListener('change', (e) => {
+        if (e.target.value) {
+            // Un-highlight normal buttons
+            document.querySelectorAll('#expenseSection .filter-btn').forEach(b => b.classList.remove('active'));
+            loadAdminExpenses('date', e.target.value, null);
+        }
+    });
 }
 
 // NAYA: Refresh Button Click Listener
@@ -555,54 +576,55 @@ if(refreshExpBtn) {
         btn.innerText = "🔄..."; 
         btn.disabled = true;
         
-        // Jo filter abhi select hai (jaise '1 Day'), wahi refresh hoga
         const activeBtn = document.querySelector('#expenseSection .filter-btn.active');
-        let days = 1;
-        if(activeBtn) days = parseInt(activeBtn.dataset.val);
+        const dateVal = document.getElementById('expenseDateSearch').value;
         
-        await loadAdminExpenses('days', days);
+        if(activeBtn) {
+            await loadAdminExpenses('days', parseInt(activeBtn.dataset.val));
+        } else if(dateVal) {
+            await loadAdminExpenses('date', dateVal);
+        } else {
+            await loadAdminExpenses('days', 1);
+        }
         
         btn.innerText = "🔄 Refresh Data";
         btn.disabled = false;
     });
 }
+
 // ==========================================
 // PWA INSTALL LOGIC (APP DOWNLOAD)
 // ==========================================
 let deferredPrompt;
 const pwaBtn = document.getElementById('pwaDownloadBtn');
 
-// 1. Service Worker Registration (Google Chrome ko PWA ke liye ye chahiye hi chahiye)
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').then(() => {
         console.log("Service Worker Active!");
     }).catch(err => console.log("SW Error:", err));
 }
 
-// 2. Install Prompt trigger hone ka wait karo
 window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault(); // Browser ka default popup roko
-    deferredPrompt = e; // Event ko save karo
-    if(pwaBtn) pwaBtn.style.display = 'block'; // ⬇️ Yahan tera button SHOW hoga!
+    e.preventDefault(); 
+    deferredPrompt = e; 
+    if(pwaBtn) pwaBtn.style.display = 'block'; 
 });
 
-// 3. Jab tu button pe click karega
 if(pwaBtn) {
     pwaBtn.addEventListener('click', () => {
         if (deferredPrompt) {
-            deferredPrompt.prompt(); // Install popup dikhao
+            deferredPrompt.prompt(); 
             deferredPrompt.userChoice.then((choiceResult) => {
                 if (choiceResult.outcome === 'accepted') {
                     console.log('App Installed!');
                 }
                 deferredPrompt = null;
-                pwaBtn.style.display = 'none'; // Button hata do
+                pwaBtn.style.display = 'none'; 
             });
         }
     });
 }
 
-// 4. Agar pehle se install hai ya install ho gaya toh button chupa do
 window.addEventListener('appinstalled', () => {
     if(pwaBtn) pwaBtn.style.display = 'none';
 });
@@ -616,12 +638,16 @@ window.deleteExpense = async function(expenseId) {
     try {
         await deleteDoc(doc(db, "daily_expenses", expenseId));
         
-        // Refresh the table after deletion
         const activeBtn = document.querySelector('#expenseSection .filter-btn.active');
-        let days = 1;
-        if(activeBtn) days = parseInt(activeBtn.dataset.val);
+        const dateVal = document.getElementById('expenseDateSearch').value;
         
-        await loadAdminExpenses('days', days);
+        if(activeBtn) {
+            await loadAdminExpenses('days', parseInt(activeBtn.dataset.val));
+        } else if (dateVal) {
+            await loadAdminExpenses('date', dateVal);
+        } else {
+            await loadAdminExpenses('days', 1);
+        }
     } catch (error) {
         console.error("Delete error: ", error);
         alert("Delete nahi hua. Internet check kar!");
