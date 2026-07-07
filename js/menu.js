@@ -105,17 +105,14 @@ function loadItems(categoryFilter) {
             <div class="item-price" style="padding:5px 10px 10px; color:#10b981; font-weight:bold;">₹${item.price}</div>
         `;
         
-        // Assuming your cart.js has a global function window.addToCart
-        card.onclick = () => {
-            if(window.addToCart) {
-                window.addToCart(item);
-            } else {
-                console.log("Cart function not linked yet: ", item.name);
-            }
+                     card.onclick = () => {
+            window.dispatchEvent(new CustomEvent('add-to-cart', { detail: item }));
         };
+
         grid.appendChild(card);
     });
 }
+
 
 // 4. QUICK ADD LOGIC (Tere HTML Popups ke sath)
 function setupQuickAddPopups() {
