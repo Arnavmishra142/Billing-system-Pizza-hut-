@@ -593,3 +593,7 @@ body {
         font-size: 0.85rem;
     }
 }
+#screen-home {
+    overflow-y: auto;
+    padding-bottom: 30px; /* Niche se thodi space maintain karne ke liye */
+}
