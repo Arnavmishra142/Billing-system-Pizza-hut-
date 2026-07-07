@@ -149,7 +149,7 @@ document.getElementById('customDateSearch').addEventListener('change', (e) => {
 });
 
 // ==========================================
-// ASLI MENU MANAGEMENT (WITH EDIT FEATURE)
+// MENU MANAGEMENT & UI UPDATES
 // ==========================================
 const itemModal = document.getElementById('itemModal');
 const imagePreview = document.getElementById('imagePreview');
@@ -187,7 +187,6 @@ window.loadMenuData = async function() {
             if (catA < catB) return -1;
             if (catA > catB) return 1;
             
-            // Agar category same hai, toh Name ke hisaab se sort karo
             let nameA = (a.name || "").toUpperCase();
             let nameB = (b.name || "").toUpperCase();
             if (nameA < nameB) return -1;
@@ -195,11 +194,10 @@ window.loadMenuData = async function() {
             return 0;
         });
 
-        // Table mein print karna
+        // Table mein print karna (Category wise format)
         let currentCategoryTrack = "";
 
         allMenuItems.forEach((item) => {
-            // Category Divider Logic (Formatting ke liye)
             if(item.category !== currentCategoryTrack) {
                 currentCategoryTrack = item.category;
                 tbody.innerHTML += `
@@ -236,6 +234,19 @@ window.loadMenuData = async function() {
     } catch (e) {
         console.error("Error loading menu:", e);
         tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="color:red;">Error loading menu. Internet check karo.</td></tr>';
+    }
+}
+
+// MISSING FUNCTIONS RESTORED
+window.toggleStock = async function(id, isStockStatus) {
+    try { await updateDoc(doc(db, "menu_items", id), { inStock: isStockStatus }); } 
+    catch(e) { alert("Stock update fail hua!"); }
+}
+
+window.deleteMenuItem = async function(id) {
+    if(confirm("Are you sure you want to delete this item permanently?")) {
+        await deleteDoc(doc(db, "menu_items", id));
+        loadMenuData(); 
     }
 }
 
