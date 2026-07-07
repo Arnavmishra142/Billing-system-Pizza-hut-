@@ -562,31 +562,43 @@ if(refreshExpBtn) {
         btn.disabled = false;
     });
 }
+// ==========================================
+// PWA INSTALL LOGIC (APP DOWNLOAD)
+// ==========================================
 let deferredPrompt;
 const pwaBtn = document.getElementById('pwaDownloadBtn');
 
-// 1. Browser check karega ki PWA install ho sakta hai ya nahi
+// 1. Service Worker Registration (Google Chrome ko PWA ke liye ye chahiye hi chahiye)
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').then(() => {
+        console.log("Service Worker Active!");
+    }).catch(err => console.log("SW Error:", err));
+}
+
+// 2. Install Prompt trigger hone ka wait karo
 window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    pwaBtn.style.display = 'block'; // Button dikhao
+    e.preventDefault(); // Browser ka default popup roko
+    deferredPrompt = e; // Event ko save karo
+    if(pwaBtn) pwaBtn.style.display = 'block'; // ⬇️ Yahan tera button SHOW hoga!
 });
 
-// 2. Button click handle karo
-pwaBtn.addEventListener('click', () => {
-    if (deferredPrompt) {
-        deferredPrompt.prompt();
-        deferredPrompt.userChoice.then((choiceResult) => {
-            if (choiceResult.outcome === 'accepted') {
-                console.log('User installed PWA');
-            }
-            deferredPrompt = null;
-            pwaBtn.style.display = 'none'; // Install hone ke baad button hata do
-        });
-    }
-});
+// 3. Jab tu button pe click karega
+if(pwaBtn) {
+    pwaBtn.addEventListener('click', () => {
+        if (deferredPrompt) {
+            deferredPrompt.prompt(); // Install popup dikhao
+            deferredPrompt.userChoice.then((choiceResult) => {
+                if (choiceResult.outcome === 'accepted') {
+                    console.log('App Installed!');
+                }
+                deferredPrompt = null;
+                pwaBtn.style.display = 'none'; // Button hata do
+            });
+        }
+    });
+}
 
-// 3. Agar pehle se install hai toh check karo
+// 4. Agar pehle se install hai ya install ho gaya toh button chupa do
 window.addEventListener('appinstalled', () => {
-    pwaBtn.style.display = 'none';
+    if(pwaBtn) pwaBtn.style.display = 'none';
 });
