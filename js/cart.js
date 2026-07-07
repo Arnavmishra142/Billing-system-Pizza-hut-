@@ -151,21 +151,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
     holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
+    // =====================================
+    // RAWBT K.O.T PRINT LOGIC
+    // =====================================
     kotBtn.addEventListener('click', () => {
         if (currentCart.length === 0) return;
-        let kotHtml = `
-            <div class="print-header"><h2>K.O.T</h2><p>${getDisplayTitle()}</p><p>Time: ${new Date().toLocaleTimeString()}</p></div>
-            <div class="print-divider"></div>
-            <div class="print-item" style="font-weight: bold;"><span style="flex:1;">Item</span><span style="width: 30px; text-align: right;">Qty</span></div>
-            <div class="print-divider"></div>
-        `;
+        
+        let kotText = "------- K.O.T -------\n";
+        kotText += `Table: ${getDisplayTitle()}\n`;
+        kotText += `Time: ${new Date().toLocaleTimeString()}\n`;
+        kotText += "----------------------\n";
+        kotText += "Item              Qty\n";
+        kotText += "----------------------\n";
+        
         currentCart.forEach(item => {
-            kotHtml += `<div class="print-item"><span style="flex:1; padding-right: 5px;">${item.name}</span><span style="width: 30px; text-align: right;">x${item.qty}</span></div>`;
+            kotText += `${item.name}\n                   x${item.qty}\n`;
         });
-        printArea.innerHTML = kotHtml;
-        window.print();
+        
+        kotText += "----------------------\n";
+        kotText += "\n\n\n"; 
+        
+        window.location.href = "rawbt:" + encodeURIComponent(kotText);
     });
 
+    // =====================================
+    // RAWBT CHECKOUT BILL LOGIC
+    // =====================================
     checkoutBtn.addEventListener('click', async () => {
         if (currentCart.length === 0) return;
         const tableName = getCurrentTable();
@@ -183,19 +194,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 timestamp: new Date().toISOString()
             });
 
-            let billHtml = `
-                <div class="print-header"><h2>NEW PIZZA HUT</h2><p style="font-size: 10px;">Live Cake | Salempur, Deoria</p><p style="margin-top:5px;">Bill: ${getDisplayTitle()}</p><p>Date: ${new Date().toLocaleDateString()}</p></div>
-                <div class="print-divider"></div>
-                <div class="print-item" style="font-weight: bold;"><span style="flex:2;">Item</span><span style="flex:1; text-align:center;">Qty</span><span style="flex:1; text-align:right;">Amt</span></div>
-                <div class="print-divider"></div>
-            `;
-            currentCart.forEach(item => {
-                billHtml += `<div class="print-item"><span style="flex:2; padding-right: 5px;">${item.name}</span><span style="flex:1; text-align:center;">${item.qty}</span><span style="flex:1; text-align:right;">${item.price * item.qty}</span></div>`;
-            });
-            billHtml += `<div class="print-divider"></div><div class="print-total"><span>TOTAL</span><span>Rs ${total}</span></div>`;
+            let billText = "   NEW PIZZA HUT\n";
+            billText += " Live Cake | Salempur\n";
+            billText += "--------------------------\n";
+            billText += `Bill: ${getDisplayTitle()}\n`;
+            billText += `Date: ${new Date().toLocaleDateString()}\n`;
+            billText += "--------------------------\n";
+            billText += "Item          Qty    Amt\n";
+            billText += "--------------------------\n";
             
-            printArea.innerHTML = billHtml;
-            window.print();
+            currentCart.forEach(item => {
+                let shortName = item.name.length > 14 ? item.name.substring(0, 12) + ".." : item.name.padEnd(14, " ");
+                let itemTotal = item.price * item.qty;
+                billText += `${shortName}  ${item.qty}    ${itemTotal}\n`;
+            });
+            
+            billText += "--------------------------\n";
+            billText += `TOTAL:            Rs ${total}\n`;
+            billText += "--------------------------\n";
+            billText += "  Thank You! Visit Again\n";
+            billText += "\n\n\n";
+            
+            window.location.href = "rawbt:" + encodeURIComponent(billText);
 
             saveLocalCart([]); 
             currentCart = [];
