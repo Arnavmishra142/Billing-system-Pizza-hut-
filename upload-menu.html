@@ -3,27 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Menu Uploader - New Pizza Hut</title>
+    <title>Full Menu Uploader - New Pizza Hut</title>
     <style>
         body { font-family: sans-serif; padding: 40px; background: #0f172a; color: white; text-align: center; }
-        .box { background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; }
+        .box { background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; max-width: 800px;}
         .status { margin-top: 20px; font-weight: bold; color: #10b981; font-size: 1.2rem; }
     </style>
 </head>
 <body>
     <div class="box">
-        <h2>🍕 Menu Uploader - Firebase</h2>
-        <p>Press `F12` to open the console and see the upload progress.</p>
-        <button id="uploadBtn" style="padding: 10px 20px; background: #38bdf8; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">Start Upload</button>
+        <h2>🍕 Full Menu Uploader - Firebase</h2>
+        <p>Press `F12` to open the console and see the upload progress. Wahan tumhe saare 140+ items upload hote hue dikhenge.</p>
+        <button id="uploadBtn" style="padding: 10px 20px; background: #38bdf8; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px;">Start Full Menu Upload</button>
         <div id="statusText" class="status"></div>
     </div>
 
     <script type="module">
-        // Firebase Modular SDK imports
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
         import { getFirestore, collection, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-        // Your exact Firebase config
         const firebaseConfig = {
             apiKey: "AIzaSyBLzGd0DlItKShk0eJoQR4CjRx1sP3-o-w",
             authDomain: "billing-system-f8531.firebaseapp.com",
@@ -37,53 +35,198 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // Menu items extracted from your photos
+        // A-Z FULL MENU DATA
         const menuItems = [
-            // --- PIZZA (Divided by sizes) ---
+            // --- SANDWICH ---
+            { name: "Classic Sandwich", price: 60, category: "Sandwich", inStock: true, image: null },
+            { name: "Maxican Sandwich", price: 70, category: "Sandwich", inStock: true, image: null },
+            { name: "Cheese Overload Sandwich", price: 90, category: "Sandwich", inStock: true, image: null },
+            { name: "Paneer Sandwich", price: 110, category: "Sandwich", inStock: true, image: null },
+
+            // --- FRENCH FRIES ---
+            { name: "French Fry", price: 50, category: "French Fries", inStock: true, image: null },
+            { name: "Masala Fresh Fry", price: 60, category: "French Fries", inStock: true, image: null },
+            { name: "Peri Peri Fry", price: 70, category: "French Fries", inStock: true, image: null },
+
+            // --- BURGER ---
+            { name: "Veg Burger", price: 50, category: "Burger", inStock: true, image: null },
+            { name: "Maxican Burger", price: 60, category: "Burger", inStock: true, image: null },
+            { name: "Cheese Burger", price: 70, category: "Burger", inStock: true, image: null },
+            { name: "Double Decker Burger", price: 100, category: "Burger", inStock: true, image: null },
+
+            // --- CHINESE STARTER ---
+            { name: "Soya Chilli (Half)", price: 70, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Soya Chilli (Full)", price: 150, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Veg Manchurian (Half)", price: 80, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Veg Manchurian (Full)", price: 150, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Honey Chilli Patato (Half)", price: 90, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Honey Chilli Patato (Full)", price: 160, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Chilli Patato (Half)", price: 90, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Chilli Patato (Full)", price: 160, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Crispy Corn (Half)", price: 90, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Crispy Corn (Full)", price: 170, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Paneer Garlic (Half)", price: 90, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Paneer Garlic (Full)", price: 180, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Panner Chilli (Half)", price: 100, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Panner Chilli (Full)", price: 180, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Baby Corn Chilli (Half)", price: 100, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Baby Corn Chilli (Full)", price: 180, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Mashroom Salt And Chilli (Half)", price: 100, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Mashroom Salt And Chilli (Full)", price: 180, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Mashroom Chilli (Half)", price: 100, category: "Chinese Starter", inStock: true, image: null },
+            { name: "Mashroom Chilli (Full)", price: 180, category: "Chinese Starter", inStock: true, image: null },
+
+            // --- NOODLES ---
+            { name: "Hakka Noodles (Half)", price: 60, category: "Noodles", inStock: true, image: null },
+            { name: "Hakka Noodles (Full)", price: 110, category: "Noodles", inStock: true, image: null },
+            { name: "Singapuri Noodles (Half)", price: 70, category: "Noodles", inStock: true, image: null },
+            { name: "Singapuri Noodles (Full)", price: 110, category: "Noodles", inStock: true, image: null },
+            { name: "Schezwan Noodles (Half)", price: 80, category: "Noodles", inStock: true, image: null },
+            { name: "Schezwan Noodles (Full)", price: 120, category: "Noodles", inStock: true, image: null },
+            { name: "Hong Kong Noodles (Half)", price: 90, category: "Noodles", inStock: true, image: null },
+            { name: "Hong Kong Noodles (Full)", price: 130, category: "Noodles", inStock: true, image: null },
+            { name: "Paneer Noodles (Half)", price: 100, category: "Noodles", inStock: true, image: null },
+            { name: "Paneer Noodles (Full)", price: 150, category: "Noodles", inStock: true, image: null },
+
+            // --- FRIED RICE ---
+            { name: "Veg Fried Rice (Half)", price: 50, category: "Fried Rice", inStock: true, image: null },
+            { name: "Veg Fried Rice (Full)", price: 90, category: "Fried Rice", inStock: true, image: null },
+            { name: "Schezwan Fried Rice (Half)", price: 70, category: "Fried Rice", inStock: true, image: null },
+            { name: "Schezwan Fried Rice (Full)", price: 110, category: "Fried Rice", inStock: true, image: null },
+            { name: "Paneer Fried Rice (Half)", price: 80, category: "Fried Rice", inStock: true, image: null },
+            { name: "Paneer Fried Rice (Full)", price: 140, category: "Fried Rice", inStock: true, image: null },
+
+            // --- SOUP ---
+            { name: "Veg Manchow Soup", price: 60, category: "Soup", inStock: true, image: null },
+            { name: "Golden Garlic Soup", price: 50, category: "Soup", inStock: true, image: null },
+            { name: "Hot & Sour Soup", price: 55, category: "Soup", inStock: true, image: null },
+            { name: "Lemon Coriander Soup", price: 40, category: "Soup", inStock: true, image: null },
+            { name: "Sweet Corn Soup", price: 45, category: "Soup", inStock: true, image: null },
+
+            // --- ROLL ---
+            { name: "Spring Roll", price: 60, category: "Roll", inStock: true, image: null },
+            { name: "Kathi Roll", price: 50, category: "Roll", inStock: true, image: null },
+            { name: "Cheese Corn Roll", price: 90, category: "Roll", inStock: true, image: null },
+            { name: "Paneer Roll", price: 100, category: "Roll", inStock: true, image: null },
+
+            // --- PAV BHAJI ---
+            { name: "Pav Bhaji", price: 60, category: "Pav Bhaji", inStock: true, image: null },
+            { name: "Extra Pav (1Pcs.)", price: 20, category: "Pav Bhaji", inStock: true, image: null },
+            { name: "Extra Bhaji", price: 20, category: "Pav Bhaji", inStock: true, image: null },
+
+            // --- MAGGIE ---
+            { name: "Masala Maggie", price: 50, category: "Maggie", inStock: true, image: null },
+            { name: "Paneer Maggie", price: 70, category: "Maggie", inStock: true, image: null },
+            { name: "Sweetcorn Maggie", price: 70, category: "Maggie", inStock: true, image: null },
+            { name: "Cheese Maggie", price: 70, category: "Maggie", inStock: true, image: null },
+
+            // --- COFFEE ---
+            { name: "Espresso (Cold Coffee)", price: 70, category: "Coffee", inStock: true, image: null },
+            { name: "Americano (Cold Coffee)", price: 80, category: "Coffee", inStock: true, image: null },
+            { name: "Coffee", price: 40, category: "Coffee", inStock: true, image: null },
+
+            // --- SHAKE ---
+            { name: "Chocolate Shake", price: 80, category: "Shake", inStock: true, image: null },
+            { name: "Oreo Shake", price: 90, category: "Shake", inStock: true, image: null },
+            { name: "Kit-Kat Shake", price: 90, category: "Shake", inStock: true, image: null },
+            { name: "Vanilla Shake", price: 90, category: "Shake", inStock: true, image: null },
+            { name: "Strawberry Shake", price: 90, category: "Shake", inStock: true, image: null },
+            { name: "Pineapple Shake", price: 90, category: "Shake", inStock: true, image: null },
+            { name: "Butterscotch Shake", price: 90, category: "Shake", inStock: true, image: null },
+
+            // --- MOMO'S ---
+            { name: "Veg Steamed Momo (Half)", price: 50, category: "Momo's", inStock: true, image: null },
+            { name: "Veg Steamed Momo (Full)", price: 90, category: "Momo's", inStock: true, image: null },
+            { name: "Paneer Steamed Momo (Half)", price: 70, category: "Momo's", inStock: true, image: null },
+            { name: "Paneer Steamed Momo (Full)", price: 130, category: "Momo's", inStock: true, image: null },
+            { name: "Fried Veg Momo (Half)", price: 60, category: "Momo's", inStock: true, image: null },
+            { name: "Fried Veg Momo (Full)", price: 110, category: "Momo's", inStock: true, image: null },
+            { name: "Fried Panner Momo (Half)", price: 80, category: "Momo's", inStock: true, image: null },
+            { name: "Fried Panner Momo (Full)", price: 140, category: "Momo's", inStock: true, image: null },
+            { name: "Veg Kurkure Momo (Half)", price: 70, category: "Momo's", inStock: true, image: null },
+            { name: "Veg Kurkure Momo (Full)", price: 120, category: "Momo's", inStock: true, image: null },
+            { name: "Panner Kurkure Momo (Half)", price: 90, category: "Momo's", inStock: true, image: null },
+            { name: "Panner Kurkure Momo (Full)", price: 140, category: "Momo's", inStock: true, image: null },
+
+            // --- PIZZA ---
             { name: "Margherita Pizza (Regular)", price: 75, category: "Pizza", inStock: true, image: null },
             { name: "Margherita Pizza (Medium)", price: 160, category: "Pizza", inStock: true, image: null },
             { name: "Margherita Pizza (Large)", price: 240, category: "Pizza", inStock: true, image: null },
             { name: "O.C.T Pizza (Regular)", price: 100, category: "Pizza", inStock: true, image: null },
+            { name: "O.C.T Pizza (Medium)", price: 200, category: "Pizza", inStock: true, image: null },
+            { name: "O.C.T Pizza (Large)", price: 300, category: "Pizza", inStock: true, image: null },
+            { name: "Cheese & Paneer Pizza (Regular)", price: 110, category: "Pizza", inStock: true, image: null },
+            { name: "Cheese & Paneer Pizza (Medium)", price: 210, category: "Pizza", inStock: true, image: null },
+            { name: "Cheese & Paneer Pizza (Large)", price: 300, category: "Pizza", inStock: true, image: null },
+            { name: "Italiano Pizza (Regular)", price: 120, category: "Pizza", inStock: true, image: null },
+            { name: "Italiano Pizza (Medium)", price: 210, category: "Pizza", inStock: true, image: null },
+            { name: "Italiano Pizza (Large)", price: 320, category: "Pizza", inStock: true, image: null },
+            { name: "Farmhouse Pizza (Regular)", price: 120, category: "Pizza", inStock: true, image: null },
             { name: "Farmhouse Pizza (Medium)", price: 250, category: "Pizza", inStock: true, image: null },
-            { name: "Extra Topping (Cheese)", price: 50, category: "Pizza", inStock: true, image: null },
-            
-            // --- BURGER ---
-            { name: "Veg Burger", price: 50, category: "Burger", inStock: true, image: null },
-            { name: "Mexican Burger", price: 60, category: "Burger", inStock: true, image: null },
-            { name: "Cheese Burger", price: 70, category: "Burger", inStock: true, image: null },
-            { name: "Double Decker Burger", price: 100, category: "Burger", inStock: true, image: null },
+            { name: "Farmhouse Pizza (Large)", price: 350, category: "Pizza", inStock: true, image: null },
+            { name: "Peri Peri Pizza (Regular)", price: 130, category: "Pizza", inStock: true, image: null },
+            { name: "Peri Peri Pizza (Medium)", price: 240, category: "Pizza", inStock: true, image: null },
+            { name: "Peri Peri Pizza (Large)", price: 340, category: "Pizza", inStock: true, image: null },
+            { name: "Cheese & Mushroom Pizza (Regular)", price: 140, category: "Pizza", inStock: true, image: null },
+            { name: "Cheese & Mushroom Pizza (Medium)", price: 220, category: "Pizza", inStock: true, image: null },
+            { name: "Cheese & Mushroom Pizza (Large)", price: 320, category: "Pizza", inStock: true, image: null },
+            { name: "Cheese Overload Pizza (Regular)", price: 140, category: "Pizza", inStock: true, image: null },
+            { name: "Cheese Overload Pizza (Medium)", price: 260, category: "Pizza", inStock: true, image: null },
+            { name: "Cheese Overload Pizza (Large)", price: 360, category: "Pizza", inStock: true, image: null },
+            { name: "Paneer Schezwan Pizza (Regular)", price: 150, category: "Pizza", inStock: true, image: null },
+            { name: "Paneer Schezwan Pizza (Medium)", price: 260, category: "Pizza", inStock: true, image: null },
+            { name: "Paneer Schezwan Pizza (Large)", price: 360, category: "Pizza", inStock: true, image: null },
+            { name: "Country Pizza (Regular)", price: 150, category: "Pizza", inStock: true, image: null },
+            { name: "Country Pizza (Medium)", price: 260, category: "Pizza", inStock: true, image: null },
+            { name: "Country Pizza (Large)", price: 360, category: "Pizza", inStock: true, image: null },
+            { name: "Paneer Makhani Pizza (Regular)", price: 150, category: "Pizza", inStock: true, image: null },
+            { name: "Paneer Makhani Pizza (Medium)", price: 260, category: "Pizza", inStock: true, image: null },
+            { name: "Paneer Makhani Pizza (Large)", price: 360, category: "Pizza", inStock: true, image: null },
+            { name: "Tandoori Pizza (Regular)", price: 150, category: "Pizza", inStock: true, image: null },
+            { name: "Tandoori Pizza (Medium)", price: 270, category: "Pizza", inStock: true, image: null },
+            { name: "Tandoori Pizza (Large)", price: 380, category: "Pizza", inStock: true, image: null },
+            { name: "Paneer Tikka Pizza (Regular)", price: 160, category: "Pizza", inStock: true, image: null },
+            { name: "Paneer Tikka Pizza (Medium)", price: 280, category: "Pizza", inStock: true, image: null },
+            { name: "Paneer Tikka Pizza (Large)", price: 390, category: "Pizza", inStock: true, image: null },
 
-            // --- SANDWICH & FRIES ---
-            { name: "Classic Sandwich", price: 60, category: "Sandwich", inStock: true, image: null },
-            { name: "Cheese Overload Sandwich", price: 90, category: "Sandwich", inStock: true, image: null },
-            { name: "French Fry", price: 50, category: "French Fries", inStock: true, image: null },
-            { name: "Peri Peri Fry", price: 70, category: "French Fries", inStock: true, image: null },
+            // --- EXTRA TOPPING ---
+            { name: "Extra Cheese", price: 50, category: "Extra Topping", inStock: true, image: null },
+            { name: "Extra Veggies", price: 50, category: "Extra Topping", inStock: true, image: null },
 
-            // --- CHINESE (Half/Full) ---
-            { name: "Veg Manchurian (Half)", price: 80, category: "Chinese Starter", inStock: true, image: null },
-            { name: "Veg Manchurian (Full)", price: 150, category: "Chinese Starter", inStock: true, image: null },
-            { name: "Hakka Noodles (Half)", price: 60, category: "Noodles", inStock: true, image: null },
-            { name: "Hakka Noodles (Full)", price: 110, category: "Noodles", inStock: true, image: null },
-            { name: "Veg Fried Rice (Half)", price: 50, category: "Fried Rice", inStock: true, image: null },
-
-            // --- SOUP, ROLL & MAGGIE ---
-            { name: "Veg Manchow Soup", price: 60, category: "Soup", inStock: true, image: null },
-            { name: "Spring Roll", price: 60, category: "Roll", inStock: true, image: null },
-            { name: "Masala Maggie", price: 50, category: "Maggie", inStock: true, image: null },
-            { name: "Cheese Maggie", price: 70, category: "Maggie", inStock: true, image: null },
-
-            // --- SHAKES & COFFEE ---
-            { name: "Espresso (Cold Coffee)", price: 70, category: "Coffee", inStock: true, image: null },
-            { name: "Oreo Shake", price: 90, category: "Shake", inStock: true, image: null },
-
-            // --- CAKE & PASTRY ---
+            // --- PASTRY ---
             { name: "Pineapple Pastry", price: 50, category: "Pastry", inStock: true, image: null },
+            { name: "Strawberry Pastry", price: 50, category: "Pastry", inStock: true, image: null },
+            { name: "Butterscotch Pastry", price: 50, category: "Pastry", inStock: true, image: null },
+            { name: "White Forest Pastry", price: 50, category: "Pastry", inStock: true, image: null },
+            { name: "Choco Chips Pastry", price: 60, category: "Pastry", inStock: true, image: null },
+            { name: "Chocolate Flax Pastry", price: 60, category: "Pastry", inStock: true, image: null },
+
+            // --- GARLIC BREAD ---
+            { name: "Plain Garlic Bread", price: 50, category: "Garlic Bread", inStock: true, image: null },
+            { name: "Stuffed Garlic Bread", price: 60, category: "Garlic Bread", inStock: true, image: null },
+            { name: "Cheese Garlic Bread", price: 70, category: "Garlic Bread", inStock: true, image: null },
+
+            // --- CAKE ---
             { name: "Black Forest Cake", price: 300, category: "Cake", inStock: true, image: null },
+            { name: "White Forest Cake", price: 350, category: "Cake", inStock: true, image: null },
+            { name: "Chocolate Chips Cake", price: 350, category: "Cake", inStock: true, image: null },
+            { name: "Chocolate Flex Cake", price: 350, category: "Cake", inStock: true, image: null },
+            { name: "Chocolate Munch Cake", price: 380, category: "Cake", inStock: true, image: null },
+            { name: "Kit-Kat Cake", price: 400, category: "Cake", inStock: true, image: null },
+            { name: "Chocolate Vanilla Cake", price: 300, category: "Cake", inStock: true, image: null },
+            { name: "Chocolate Oreo Cake", price: 300, category: "Cake", inStock: true, image: null },
+            { name: "Red Velvet Cake", price: 450, category: "Cake", inStock: true, image: null },
+            { name: "Chocolate Truffles Cake", price: 500, category: "Cake", inStock: true, image: null },
+            { name: "Pineapple Cake", price: 300, category: "Cake", inStock: true, image: null },
+            { name: "Strawberry Cake", price: 300, category: "Cake", inStock: true, image: null },
+            { name: "Butter Scotch Cake", price: 300, category: "Cake", inStock: true, image: null },
+            { name: "Mixed Fruit Cake", price: 350, category: "Cake", inStock: true, image: null },
+            { name: "Real Fruit Cake", price: 450, category: "Cake", inStock: true, image: null },
             { name: "3D Cake", price: 750, category: "Cake", inStock: true, image: null },
-            { name: "Stuffed Garlic Bread", price: 60, category: "Garlic Bread", inStock: true, image: null }
-            
-            // Note: Maine almost har category se data daal diya hai testing ke liye.
-            // Jo bach gaye hain, tum aaram se upar wale format ko copy-paste karke add kar sakte ho!
+
+            // --- COMBO ---
+            { name: "Combo 1 (Margherita+Fry+Burger+Coldrink)", price: 200, category: "Combo", inStock: true, image: null },
+            { name: "Combo 2 (Noodle+Manchurian+Pastry+Coldrink)", price: 200, category: "Combo", inStock: true, image: null }
         ];
 
         document.getElementById('uploadBtn').addEventListener('click', async () => {
@@ -91,10 +234,11 @@
             const btn = document.getElementById('uploadBtn');
             
             btn.disabled = true;
-            btn.innerText = "Uploading... ⏳";
-            statusText.innerText = "Check Console (F12) for live progress...";
+            btn.innerText = "Uploading 140+ Items... ⏳";
+            statusText.innerText = "Check Console (F12) for live progress. Please wait, this will take a few seconds...";
 
             let successCount = 0;
+            let errorCount = 0;
 
             for (let item of menuItems) {
                 try {
@@ -103,12 +247,9 @@
                     successCount++;
                 } catch (e) {
                     console.error(`❌ Failed: ${item.name}`, e);
+                    errorCount++;
                 }
             }
 
-            statusText.innerText = `🎉 Done! Successfully uploaded ${successCount} items to Firestore.`;
-            btn.innerText = "Upload Complete";
-        });
-    </script>
-</body>
-</html>
+            if (errorCount === 0) {
+                statusText.innerText = `🎉 Done! Successfully uploaded all ${successCount} items to Firest
