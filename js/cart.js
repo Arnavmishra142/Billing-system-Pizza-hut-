@@ -182,29 +182,71 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const getDisplayTitle = () => {
         const tName = getCurrentTable();
-        if(tName === 'Direct Entry') return tName;
+        if(tName === 'Direct Entry') return 'Cash Sale';
         return tName.includes('Parcel') ? tName : `${tName} [${getCurrentCustomer()}]`;
     };
 
     if (holdBtn) holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
+    // =====================================
+    // PRINT FORMATTING HELPERS (EZO STYLE)
+    // =====================================
     const centerText = (text) => {
         if (text.length >= 32) return text.substring(0, 32);
         const spaces = Math.floor((32 - text.length) / 2);
         return " ".repeat(spaces) + text;
     };
 
-    const rightText = (text) => {
-        if (text.length >= 32) return text.substring(0, 32);
-        const spaces = 32 - text.length;
-        return " ".repeat(spaces) + text;
+    const getFormattedDate = () => {
+        const now = new Date();
+        const dd = String(now.getDate()).padStart(2, '0');
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const yy = String(now.getFullYear()).slice(-2);
+        let hours = now.getHours();
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const ampm = hours >= 12 ? 'PM' : 'AM';
+        hours = hours % 12 || 12;
+        return `${dd}/${mm}/${yy} ${hours}:${minutes} ${ampm}`;
     };
 
+    // Naya function jo long names ko wrap karta hai taaki kuch cut na ho
+    const formatBillRow = (name, qty, rate, total) => {
+        let nameLines = [];
+        let currentLine = "";
+        let words = name.split(" ");
+        
+        for(let w of words) {
+            if((currentLine + w).length > 14) {
+                if(currentLine) nameLines.push(currentLine.trim());
+                currentLine = w + " ";
+            } else {
+                currentLine += w + " ";
+            }
+        }
+        if(currentLine) nameLines.push(currentLine.trim());
+
+        let res = "";
+        for(let i=0; i<nameLines.length; i++) {
+            let line = nameLines[i].padEnd(14, " ");
+            if(i === 0) {
+                let q = String(qty).padStart(3, " ");
+                let r = String(rate).padStart(4, " ");
+                let t = String(total).padStart(6, " ");
+                res += `${line} ${q} ${r}  ${t}\n`;
+            } else {
+                res += `${line}\n`;
+            }
+        }
+        return res;
+    };
+
+    // =====================================
+    // KOT PRINT LOGIC
+    // =====================================
     const printKOT = (isFullKot = false) => {
         if (currentCart.length === 0) return;
         
         let itemsToPrint = [];
-        
         if (isFullKot) {
             itemsToPrint = currentCart.map(item => ({...item, printQty: item.qty}));
         } else {
@@ -214,30 +256,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (itemsToPrint.length === 0) {
-            alert("Koi naya item nahi hai! Agar puraana order print karna hai toh 'PRINT FULL K.O.T' dabayein.");
+            alert("Koi naya item nahi hai! Puraana order print karne ke liye 'PRINT FULL K.O.T' dabayein.");
             return;
         }
 
+        let randKOT = Math.floor(Math.random() * 900) + 100; // Temporary KOT number
+        
         let kotText = "\n";
-        kotText += centerText(isFullKot ? "--- FULL K.O.T ---" : "------- K.O.T -------") + "\n";
-        kotText += centerText(`Table: ${getDisplayTitle()}`) + "\n";
-        kotText += centerText(`Time: ${new Date().toLocaleTimeString('en-IN')}`) + "\n";
-        kotText += "--------------------------------\n";
-        kotText += "Item                         Qty\n";
-        kotText += "--------------------------------\n";
+        if (isFullKot) kotText += centerText("--- FULL K.O.T ---") + "\n";
+        kotText += `KOT No: ${randKOT}\n`;
+        kotText += `Date: ${getFormattedDate()}\n`;
+        kotText += `Table: ${getDisplayTitle()}\n`;
+        kotText += "--------------------------------\n\n";
         
         itemsToPrint.forEach(item => {
-            let n = item.name.length > 25 ? item.name.substring(0, 23) + ".." : item.name.padEnd(25, " ");
-            let q = String(item.printQty).padStart(2, " ") + "x ";
-            kotText += `${n}  ${q}\n`;
+            kotText += `${item.name}\n`;
+            kotText += `(${item.printQty})\n\n`; // Quantity bracket mein next line pe
         });
         
-        kotText += "--------------------------------\n";
-        kotText += "\n\n\n"; 
+        kotText += "--------------------------------\n\n\n";
         
-        currentCart.forEach(item => {
-            item.printedQty = item.qty; 
-        });
+        currentCart.forEach(item => { item.printedQty = item.qty; });
         saveLocalCart(currentCart); 
         renderCart(); 
 
@@ -247,7 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (kotBtn) kotBtn.addEventListener('click', () => printKOT(false));
 
     // =====================================
-    // CHECKOUT LOGIC
+    // CHECKOUT (FINAL BILL) LOGIC
     // =====================================
     if (checkoutBtn) {
         checkoutBtn.addEventListener('click', async () => {
@@ -259,7 +298,8 @@ document.addEventListener('DOMContentLoaded', () => {
             checkoutBtn.disabled = true;
 
             try {
-                await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
+                const billId = `SALE_${Date.now()}`;
+                await setDoc(doc(db, "sales_history", billId), {
                     table: tableName,
                     customer: customerName,
                     items: currentCart,
@@ -267,39 +307,44 @@ document.addEventListener('DOMContentLoaded', () => {
                     timestamp: new Date().toISOString()
                 });
 
-                // GLOBAL GHOST HISTORY MEIN SAVE KARO (For Drawer)
                 if(window.saveToGhostHistory) {
                     let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
                     window.saveToGhostHistory(orderId, total, currentCart);
                 }
 
+                let shortOrderId = String(Date.now()).slice(-5); // Bill No ke liye
                 let billText = "\n";
-                billText += centerText("NEW PIZZA HUT") + "\n";
-                billText += centerText("Live Cake | Salempur") + "\n";
-                billText += "--------------------------------\n";
-                billText += `Bill: ${getDisplayTitle()}\n`;
-                billText += `Date: ${new Date().toLocaleString('en-IN')}\n`;
-                billText += "--------------------------------\n";
-                billText += "Item                Qty      Amt\n";
+                
+                billText += centerText("NEW PIZZA HUT AND LIVE CAKE") + "\n";
+                billText += centerText("in front of SBI bank ke tik") + "\n";
+                billText += centerText("samne salempur Deoria, UP") + "\n";
+                billText += centerText("FSSAI: 30230324113093042") + "\n";
+                billText += centerText("Phone: 9628548655") + "\n";
                 billText += "--------------------------------\n";
                 
+                billText += `Bill No: ${shortOrderId}\n`;
+                billText += `Created On: ${getFormattedDate()}\n`;
+                billText += `Bill To: ${getDisplayTitle()}\n\n`;
+                
+                billText += "Item Name      Qty Rate  Total\n";
+                billText += "--------------------------------\n";
+                
+                let totalQty = 0;
                 currentCart.forEach(item => {
-                    let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
-                    let q = String(item.qty).padStart(2, " ") + "x";
-                    let a = String(item.price * item.qty).padStart(6, " ");
-                    billText += `${n}    ${q}   ${a}\n`;
+                    totalQty += item.qty;
+                    billText += formatBillRow(item.name, item.qty, item.price, item.price * item.qty);
                 });
                 
                 billText += "--------------------------------\n";
-                billText += rightText(`TOTAL: Rs ${total}`) + "\n";
+                billText += `Total Items: ${currentCart.length}\n`;
+                billText += `Total Quantity: ${totalQty}\n`;
+                billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n";
                 billText += "--------------------------------\n";
-                billText += centerText("Thank You! Visit Again") + "\n\n";
-                
-                billText += centerText("--- UPI PAYMENT ---") + "\n";
-                billText += centerText("6393349498@fam") + "\n";
-                billText += centerText("(Pay via PhonePe/GPay)") + "\n";
-                
-                billText += "\n\n\n\n";
+                billText += centerText(`TOTAL: Rs ${total}`) + "\n";
+                billText += "--------------------------------\n";
+                billText += `Mode of Payment`.padEnd(24, ' ') + ` UPI\n`;
+                billText += `Received`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n";
+                billText += centerText("Thank You! Visit Again!") + "\n\n\n\n";
                 
                 window.location.href = "rawbt:" + encodeURIComponent(billText);
 
@@ -342,7 +387,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     timestamp: new Date().toISOString()
                 });
 
-                // GLOBAL GHOST HISTORY MEIN SAVE KARO (For Drawer)
                 if(window.saveToGhostHistory) {
                     let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
                     window.saveToGhostHistory(orderId + " (HOLD)", total, currentCart);
