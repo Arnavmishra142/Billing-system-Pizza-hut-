@@ -736,3 +736,56 @@ body {
     font-weight: 900 !important;
     letter-spacing: 1px !important;
 }
+/* =========================================
+   RUNNING ORDERS SECTION (SCROLLABLE GRID)
+   ========================================= */
+/* Container jo niche ka hissa cover karega */
+#runningOrdersContainer {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)) !important;
+    gap: 20px !important;
+    height: 40vh !important; /* Screen ka lagbhag half se thoda kam */
+    overflow-y: auto !important; /* Vertical scroll aayega */
+    overflow-x: hidden !important;
+    background: #f8fafc !important;
+    padding: 20px !important;
+    border: 2px solid #e2e8f0 !important;
+    border-radius: 16px !important;
+    align-content: start !important;
+}
+
+/* Scrollbar thoda sundar dikhe */
+#runningOrdersContainer::-webkit-scrollbar {
+    width: 8px;
+}
+#runningOrdersContainer::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 10px;
+}
+
+/* Har active bill ka card bada aur bold */
+.running-card {
+    padding: 20px !important;
+    border-radius: 12px !important;
+    border-left: 8px solid #f59e0b !important; /* Orange line moti ki hai */
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    background: white !important;
+}
+
+.running-card .rc-title { 
+    font-size: 1.4rem !important; 
+    font-weight: 900 !important; 
+    color: #1f2937 !important; 
+}
+.running-card .rc-amount { 
+    font-size: 1.3rem !important; 
+    color: #10b981 !important; 
+    font-weight: 900 !important; 
+}
+.running-card .rc-items { 
+    font-size: 1.1rem !important; 
+    color: #64748b !important; 
+    font-weight: bold !important; 
+}
