@@ -189,7 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (holdBtn) holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
     // =====================================
-    // PRINT FORMATTING HELPERS (EZO STYLE)
+    // PRINT FORMATTING HELPERS
     // =====================================
     const centerText = (text) => {
         if (text.length >= 32) return text.substring(0, 32);
@@ -209,7 +209,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${dd}/${mm}/${yy} ${hours}:${minutes} ${ampm}`;
     };
 
-    // Naya function jo long names ko wrap karta hai taaki kuch cut na ho
     const formatBillRow = (name, qty, rate, total) => {
         let nameLines = [];
         let currentLine = "";
@@ -241,7 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // =====================================
-    // KOT PRINT LOGIC
+    // KOT PRINT LOGIC (TIGHT SPACING)
     // =====================================
     const printKOT = (isFullKot = false) => {
         if (currentCart.length === 0) return;
@@ -260,18 +259,18 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        let randKOT = Math.floor(Math.random() * 900) + 100; // Temporary KOT number
+        let randKOT = Math.floor(Math.random() * 900) + 100;
         
-        let kotText = "\n";
+        let kotText = "";
         if (isFullKot) kotText += centerText("--- FULL K.O.T ---") + "\n";
         kotText += `KOT No: ${randKOT}\n`;
         kotText += `Date: ${getFormattedDate()}\n`;
         kotText += `Table: ${getDisplayTitle()}\n`;
-        kotText += "--------------------------------\n\n";
+        kotText += "--------------------------------\n";
         
         itemsToPrint.forEach(item => {
             kotText += `${item.name}\n`;
-            kotText += `(${item.printQty})\n\n`; // Quantity bracket mein next line pe
+            kotText += `(${item.printQty})\n`; 
         });
         
         kotText += "--------------------------------\n\n\n";
@@ -286,7 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (kotBtn) kotBtn.addEventListener('click', () => printKOT(false));
 
     // =====================================
-    // CHECKOUT (FINAL BILL) LOGIC
+    // CHECKOUT (FINAL BILL) LOGIC (TIGHT SPACING)
     // =====================================
     if (checkoutBtn) {
         checkoutBtn.addEventListener('click', async () => {
@@ -312,8 +311,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.saveToGhostHistory(orderId, total, currentCart);
                 }
 
-                let shortOrderId = String(Date.now()).slice(-5); // Bill No ke liye
-                let billText = "\n";
+                let shortOrderId = String(Date.now()).slice(-5); 
+                let billText = "";
                 
                 billText += centerText("NEW PIZZA HUT AND LIVE CAKE") + "\n";
                 billText += centerText("in front of SBI bank ke tik") + "\n";
@@ -324,7 +323,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 billText += `Bill No: ${shortOrderId}\n`;
                 billText += `Created On: ${getFormattedDate()}\n`;
-                billText += `Bill To: ${getDisplayTitle()}\n\n`;
+                billText += `Bill To: ${getDisplayTitle()}\n`;
+                billText += "--------------------------------\n";
                 
                 billText += "Item Name      Qty Rate  Total\n";
                 billText += "--------------------------------\n";
@@ -336,12 +336,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 
                 billText += "--------------------------------\n";
+                
                 billText += `Total Items: ${currentCart.length}\n`;
                 billText += `Total Quantity: ${totalQty}\n`;
                 billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n";
                 billText += "--------------------------------\n";
                 billText += centerText(`TOTAL: Rs ${total}`) + "\n";
                 billText += "--------------------------------\n";
+                
                 billText += `Mode of Payment`.padEnd(24, ' ') + ` UPI\n`;
                 billText += `Received`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n";
                 billText += centerText("Thank You! Visit Again!") + "\n\n\n\n";
