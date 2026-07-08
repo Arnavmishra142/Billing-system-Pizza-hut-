@@ -827,39 +827,3 @@ body {
         margin-top: 40px !important;
     }
 }
-/* =========================================
-   BOTTOM NAVIGATION BAR - RIGHT ALIGNED
-   ========================================= */
-#screen-grid {
-    display: flex !important;
-    flex-direction: column !important;
-    height: 100dvh !important;
-}
-
-#screen-grid .table-grid {
-    order: 1 !important;
-    flex-grow: 1 !important;
-    overflow-y: auto !important; 
-}
-
-#screen-grid .top-nav {
-    order: 2 !important;
-    box-shadow: 0 -5px 10px rgba(0,0,0,0.1) !important;
-    /* Back button ko right karne ke liye flex-direction reverse kiya */
-    display: flex !important;
-    flex-direction: row-reverse !important; 
-    justify-content: flex-start !important;
-    padding: 20px 25px !important;
-}
-
-/* Button aur Title ke beech thoda gap maintain rahe */
-#screen-grid .top-nav h2 {
-    margin-right: auto; /* Title ko left me dhakelne ke liye */
-}
-
-/* Button size adjust */
-#screen-grid .back-btn {
-    font-size: 1.2rem !important;
-    padding: 12px 25px !important;
-    margin-left: 20px !important;
-}
