@@ -113,11 +113,14 @@ body {
     background: #1f2937; 
     color: white; 
     padding: 15px 25px; 
+    padding-bottom: max(15px, calc(env(safe-area-inset-bottom) + 12px)); /* niche gesture bar se bachne ke liye */
     display: flex; 
     align-items: center; 
     gap: 20px; 
     flex-shrink: 0;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    flex-wrap: wrap;
+    box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1); /* ab ye bottom bar hai, isliye shadow upar ki taraf */
+    order: 2; /* Screen ke sabse niche le jaane ke liye (flex-direction column hai) */
 }
 
 .customer-tabs { 
@@ -154,6 +157,8 @@ body {
     cursor: pointer; 
     font-weight: bold; 
     transition: background 0.2s;
+    order: 3; /* HTML mein jahan bhi ho, ye hamesha right side pe aayega */
+    margin-left: auto;
 }
 .back-btn:hover { background: #dc2626; }
 
@@ -825,5 +830,47 @@ body {
     .table-empty-text {
         font-size: 1.5rem !important;
         margin-top: 40px !important;
+    }
+}
+
+/* =========================================
+   TOP NAV SPACING FIX (PHONE + TABLET)
+   ========================================= */
+@media (max-width: 600px) {
+    .top-nav {
+        padding: 12px 15px !important;
+        padding-bottom: max(12px, calc(env(safe-area-inset-bottom) + 10px)) !important;
+        gap: 12px !important;
+    }
+    .back-btn {
+        padding: 8px 14px !important;
+        font-size: 0.95rem !important;
+    }
+    .table-grid {
+        gap: 12px !important;
+        padding: 12px !important;
+    }
+    .table-card {
+        min-height: 165px !important;
+        padding: 15px !important;
+    }
+}
+
+@media (min-width: 768px) {
+    .top-nav {
+        padding: 18px 30px !important;
+        padding-bottom: max(18px, calc(env(safe-area-inset-bottom) + 15px)) !important;
+    }
+    .back-btn {
+        padding: 12px 22px !important;
+        font-size: 1.05rem !important;
+    }
+    .table-grid {
+        gap: 20px !important;
+        padding: 20px !important;
+    }
+    .table-card {
+        min-height: 34vh !important;
+        padding: 20px !important;
     }
 }
