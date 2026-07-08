@@ -147,20 +147,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const cartItemDiv = document.createElement('div');
             cartItemDiv.className = 'cart-item';
-            cartItemDiv.innerHTML = `
+                      cartItemDiv.innerHTML = `
                 <div class="cart-item-header">
                     <span>${item.name} ${unprintedTag}</span>
                     <span>₹${itemTotal}</span>
                 </div>
                 <div class="cart-item-controls">
-                    <span style="color: #6b7280; font-size: 0.85rem;">₹${item.price} x ${item.qty}</span>
+                    <span style="color: #4b5563; font-size: 1.1rem; font-weight: bold;">₹${item.price} x ${item.qty}</span>
                     <div class="quantity-control">
                         <button class="qty-btn qty-minus" data-id="${item.id}">-</button>
-                        <span style="font-weight: bold;">${item.qty}</span>
+                        <span style="font-weight: bold; font-size: 1.2rem;">${item.qty}</span>
                         <button class="qty-btn qty-plus" data-id="${item.id}">+</button>
                     </div>
                 </div>
             `;
+
             cartItemsContainer.appendChild(cartItemDiv);
         });
 
