@@ -789,3 +789,63 @@ body {
     color: #64748b !important; 
     font-weight: bold !important; 
 }
+/* =========================================
+   TABLE GRID LIVE ITEMS (BOX DESIGN)
+   ========================================= */
+.table-card {
+    padding: 15px !important; /* Box mein jagah banane ke liye padding kam ki */
+    text-align: left !important;
+    display: flex !important;
+    flex-direction: column !important;
+    height: 220px !important; /* Box ki height fix kar di taki sab same dikhein */
+    overflow: hidden !important; /* Box se bahar kuch na nikle */
+}
+
+.table-name-header {
+    font-weight: 900;
+    font-size: 1.4rem;
+    color: #1f2937;
+    margin-bottom: 10px;
+    border-bottom: 2px solid #e5e7eb;
+    padding-bottom: 8px;
+    text-align: center;
+}
+
+.table-items-container {
+    flex-grow: 1;
+    overflow: hidden; /* Extra items cut ho jayenge */
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.table-item-row {
+    font-size: 0.95rem;
+    color: #4b5563;
+    font-weight: 600;
+    white-space: nowrap; /* Text doosri line mein nahi jayega */
+    overflow: hidden; 
+    text-overflow: ellipsis; /* Lamba naam hone par '...' lag jayega */
+    background: #f3f4f6;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.table-item-more {
+    font-size: 0.9rem;
+    color: #f59e0b; /* Orange color */
+    font-weight: 800;
+    text-align: center;
+    margin-top: auto; /* Box ke bilkul neeche chipak jayega */
+    padding-top: 5px;
+}
+
+.table-empty-text {
+    color: #9ca3af;
+    text-align: center;
+    font-style: italic;
+    margin-top: 30px;
+    font-weight: normal;
+}

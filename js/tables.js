@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const backToHomeBtn = document.getElementById('backToHomeBtn');
     const backToTablesBtn = document.getElementById('backToTablesBtn');
 
-    // Generate Grid (Tables / Parcels)
+        // Generate Grid (Tables / Parcels) with Live Items
     function loadGrid(type) {
         dynamicGrid.innerHTML = ''; 
         let totalCount = 10;
@@ -28,20 +28,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
         for (let i = 1; i <= totalCount; i++) {
             const card = document.createElement('div');
+            let tableName = `${prefix} ${i}`;
             
             let isOccupied = false;
+            let tableItemsHTML = "";
+            let itemCount = 0;
+
+            // LocalStorage se is table ka cart data nikalo
             for (let j = 0; j < localStorage.length; j++) {
-                if (localStorage.key(j).startsWith(`cart_${prefix} ${i}_`)) {
+                const key = localStorage.key(j);
+                if (key.startsWith(`cart_${tableName}_`)) {
                     isOccupied = true;
-                    break;
+                    try {
+                        let cartData = JSON.parse(localStorage.getItem(key));
+                        if (cartData && cartData.length > 0) {
+                            cartData.forEach(item => {
+                                itemCount++;
+                                // Sirf shuruat ke 4 items dikhayenge, baki ko hide karenge
+                                if (itemCount <= 4) {
+                                    tableItemsHTML += `<div class="table-item-row">${item.name} <span style="font-weight:bold; color:#059669;">x${item.qty}</span></div>`;
+                                }
+                            });
+                        }
+                    } catch(e) {}
                 }
             }
 
+            // Agar 4 se zyada items hain, toh "See more" dikhao
+            if (itemCount > 4) {
+                tableItemsHTML += `<div class="table-item-more">+ ${itemCount - 4} more items...</div>`;
+            }
+
             card.className = isOccupied ? 'table-card status-hold' : 'table-card status-empty'; 
-            card.innerText = `${prefix} ${i}`;
+            
+            // Card ke andar ka HTML structure (Table name + Items list)
+            card.innerHTML = `
+                <div class="table-name-header">${tableName}</div>
+                <div class="table-items-container">
+                    ${isOccupied && itemCount > 0 ? tableItemsHTML : '<div class="table-empty-text">Empty</div>'}
+                </div>
+            `;
             
             card.addEventListener('click', () => {
-                openPOS(`${prefix} ${i}`);
+                openPOS(tableName);
             });
             
             dynamicGrid.appendChild(card);
