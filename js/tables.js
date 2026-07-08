@@ -45,7 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             cartData.forEach(item => {
                                 itemCount++;
                                 // Sirf shuruat ke 4 items dikhayenge, baki ko hide karenge
-                                if (itemCount <= 4) {
+                                if (itemCount <= 7) {
                                     tableItemsHTML += `<div class="table-item-row">${item.name} <span style="font-weight:bold; color:#059669;">x${item.qty}</span></div>`;
                                 }
                             });

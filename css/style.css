@@ -849,3 +849,58 @@ body {
     margin-top: 30px;
     font-weight: normal;
 }
+/* =========================================
+   TABLET-OPTIMIZED HUGE TABLE GRID
+   ========================================= */
+/* Grid ko poori screen par failane ke liye */
+.table-grid {
+    display: grid !important;
+    grid-template-columns: repeat(5, 1fr) !important; /* Ek line mein 5 boxes */
+    gap: 20px !important;
+    padding: 25px !important;
+    height: 100% !important; 
+    align-content: stretch !important; /* Bachi hui jagah ko kheench kar bhar dega */
+}
+
+/* Box ka size bada aur bold */
+.table-card {
+    padding: 20px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    height: auto !important; 
+    min-height: 38vh !important; /* Box ki height screen ke hisaab se badi hogi */
+    border-radius: 16px !important;
+    box-shadow: 0 6px 12px rgba(0,0,0,0.08) !important;
+}
+
+/* Table Name Header ko bada kiya */
+.table-name-header {
+    font-size: 1.8rem !important; 
+    font-weight: 900 !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 15px !important;
+    border-bottom: 3px solid #e5e7eb !important;
+}
+
+.table-items-container {
+    gap: 8px !important; /* Items ke beech thoda zyada gap */
+}
+
+/* Andar ke items ka text bada aur clear */
+.table-item-row {
+    font-size: 1.2rem !important; 
+    padding: 8px 12px !important;
+    border-radius: 6px !important;
+}
+
+.table-item-more {
+    font-size: 1.1rem !important;
+    margin-top: 10px !important;
+}
+
+/* Jab table khali ho */
+.table-empty-text {
+    font-size: 1.5rem !important;
+    margin-top: 40px !important;
+    color: #9ca3af !important;
+}
