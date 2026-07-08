@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.dispatchEvent(new Event('cart-updated'));
     };
 
-    // UI Updates based on POS mode (Direct Entry vs Table)
+    // UI Updates based on POS mode
     window.addEventListener('pos-opened', (e) => {
         const name = e.detail.name;
         const holdBtn = document.getElementById('holdBtn');
@@ -39,8 +39,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if(holdBtn) holdBtn.style.display = 'none';
             if(kotBtn) kotBtn.style.display = 'none';
             if(saveExitBtn) {
-                saveExitBtn.innerText = "SAVE ENTRY"; // Professional text
-                saveExitBtn.style.gridColumn = "span 2"; // Full row coverage
+                saveExitBtn.innerText = "SAVE ENTRY"; 
+                saveExitBtn.style.gridColumn = "span 2"; 
             }
         } else {
             if(holdBtn) holdBtn.style.display = 'block';
@@ -52,6 +52,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // =====================================
+    // KOT TRACKING LOGIC ADDED (printedQty)
+    // =====================================
     window.addEventListener('add-to-cart', (e) => {
         const item = e.detail;
         currentCart = getLocalCart();
@@ -59,7 +62,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (existingItem) {
             existingItem.qty += 1;
         } else {
-            currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
+            // Naya item aate hi uska printedQty 0 set kar do
+            currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1, printedQty: 0 });
         }
         saveLocalCart(currentCart);
         renderCart();
@@ -68,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('add-custom-item-to-bill', (e) => {
         const item = e.detail;
         currentCart = getLocalCart();
-        currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1 });
+        currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1, printedQty: 0 });
         saveLocalCart(currentCart);
         renderCart();
     });
@@ -78,6 +82,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const itemIndex = currentCart.findIndex(item => item.id === id);
         if (itemIndex > -1) {
             currentCart[itemIndex].qty += delta;
+            
+            // Agar quantity kam hoti hai, aur printed quantity usse jyada hai, toh printed quantity ko bhi reduce karo
+            if ((currentCart[itemIndex].printedQty || 0) > currentCart[itemIndex].qty) {
+                currentCart[itemIndex].printedQty = currentCart[itemIndex].qty;
+            }
+
             if (currentCart[itemIndex].qty <= 0) currentCart.splice(itemIndex, 1);
             saveLocalCart(currentCart);
             renderCart();
@@ -93,6 +103,41 @@ document.addEventListener('DOMContentLoaded', () => {
         cartItemsContainer.innerHTML = '';
         let totalAmount = 0;
 
+        // ----------------------------------------------------
+        // DYNAMIC "FULL KOT" BUTTON CREATION & VISIBILITY
+        // ----------------------------------------------------
+        let fullKotBtn = document.getElementById('fullKotBtn');
+        const kotBtn = document.getElementById('kotBtn');
+        
+        if(!fullKotBtn && kotBtn) {
+            fullKotBtn = document.createElement('button');
+            fullKotBtn.id = 'fullKotBtn';
+            fullKotBtn.className = 'btn';
+            fullKotBtn.style.background = '#8b5cf6'; // Pro Purple Color
+            fullKotBtn.innerText = 'PRINT FULL K.O.T';
+            fullKotBtn.style.display = 'none';
+            fullKotBtn.style.gridColumn = 'span 2'; // Taki upar puri jagah le
+            
+            const actionGrid = kotBtn.parentNode;
+            if(actionGrid) {
+                actionGrid.insertBefore(fullKotBtn, actionGrid.firstChild);
+            }
+            
+            fullKotBtn.addEventListener('click', () => printKOT(true)); // true means FULL KOT
+        }
+
+        // Check karo ki kya koi item print ho chuka hai
+        let hasPrintedItems = currentCart.some(item => (item.printedQty || 0) > 0);
+        
+        if (fullKotBtn) {
+            if (hasPrintedItems && activeTableNameEl.innerText !== 'Direct Entry') {
+                fullKotBtn.style.display = 'block';
+            } else {
+                fullKotBtn.style.display = 'none';
+            }
+        }
+        // ----------------------------------------------------
+
         if (currentCart.length === 0) {
             cartItemsContainer.innerHTML = `
                 <div style="text-align: center; color: #9ca3af; margin-top: 50px; font-weight: bold;">
@@ -107,11 +152,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const itemTotal = item.price * item.qty;
             totalAmount += itemTotal;
 
+            // Indicator for unprinted items
+            let unprintedQty = item.qty - (item.printedQty || 0);
+            let unprintedTag = unprintedQty > 0 ? `<span style="background: #ef4444; color: white; font-size: 0.7rem; padding: 2px 5px; border-radius: 4px; margin-left: 5px;">+${unprintedQty} New</span>` : '';
+
             const cartItemDiv = document.createElement('div');
             cartItemDiv.className = 'cart-item';
             cartItemDiv.innerHTML = `
                 <div class="cart-item-header">
-                    <span>${item.name}</span>
+                    <span>${item.name} ${unprintedTag}</span>
                     <span>₹${itemTotal}</span>
                 </div>
                 <div class="cart-item-controls">
@@ -140,7 +189,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const kotBtn = document.getElementById('kotBtn');
     const checkoutBtn = document.getElementById('checkoutBtn');
     const saveExitBtn = document.getElementById('saveExitBtn'); 
-    const printArea = document.getElementById('printArea');
     const backToTablesBtn = document.getElementById('backToTablesBtn');
 
     const getDisplayTitle = () => {
@@ -151,8 +199,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
-  // =====================================
-    // RAWBT ALIGNMENT HELPERS (The Math)
+    // =====================================
+    // RAWBT ALIGNMENT HELPERS
     // =====================================
     const centerText = (text) => {
         if (text.length >= 32) return text.substring(0, 32);
@@ -167,31 +215,58 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // =====================================
-    // RAWBT K.O.T PRINT LOGIC
+    // INCREMENTAL / FULL KOT PRINT LOGIC
     // =====================================
-    kotBtn.addEventListener('click', () => {
+    const printKOT = (isFullKot = false) => {
         if (currentCart.length === 0) return;
         
+        let itemsToPrint = [];
+        
+        if (isFullKot) {
+            // Pura cart print karna hai
+            itemsToPrint = currentCart.map(item => ({...item, printQty: item.qty}));
+        } else {
+            // Sirf wahi nikalna hai jo pehle print nahi hua (Incremental)
+            itemsToPrint = currentCart
+                .filter(item => item.qty > (item.printedQty || 0))
+                .map(item => ({...item, printQty: item.qty - (item.printedQty || 0)}));
+        }
+
+        if (itemsToPrint.length === 0) {
+            alert("Koi naya item nahi hai! Agar puraana order print karna hai toh 'PRINT FULL K.O.T' dabayein.");
+            return;
+        }
+
         let kotText = "\n";
-        kotText += centerText("------- K.O.T -------") + "\n";
+        kotText += centerText(isFullKot ? "--- FULL K.O.T ---" : "------- K.O.T -------") + "\n";
         kotText += centerText(`Table: ${getDisplayTitle()}`) + "\n";
         kotText += centerText(`Time: ${new Date().toLocaleTimeString('en-IN')}`) + "\n";
         kotText += "--------------------------------\n";
         kotText += "Item                         Qty\n";
         kotText += "--------------------------------\n";
         
-        currentCart.forEach(item => {
-            // 25 chars for name, 3 for spacing, 4 for qty = 32 Total
+        itemsToPrint.forEach(item => {
             let n = item.name.length > 25 ? item.name.substring(0, 23) + ".." : item.name.padEnd(25, " ");
-            let q = String(item.qty).padStart(2, " ") + "x ";
+            let q = String(item.printQty).padStart(2, " ") + "x ";
             kotText += `${n}  ${q}\n`;
         });
         
         kotText += "--------------------------------\n";
         kotText += "\n\n\n"; 
         
+        // Print Command bhejte hi Database mein record save kar lo ki print ho gaya
+        currentCart.forEach(item => {
+            item.printedQty = item.qty; // Sab items ab printed hain
+        });
+        saveLocalCart(currentCart); 
+        renderCart(); 
+
         window.location.href = "rawbt:" + encodeURIComponent(kotText);
-    });
+    };
+
+    // Original KOT button hamesha Delta KOT nikalege
+    kotBtn.addEventListener('click', () => printKOT(false));
+
 
     // =====================================
     // RAWBT CHECKOUT BILL LOGIC
@@ -201,15 +276,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const tableName = getCurrentTable();
         const customerName = getCurrentCustomer();
         const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-        
-        // 🕒 NAYA: Ek common Order ID bana li
-        const orderId = `SALE_${Date.now()}`; 
-        
         checkoutBtn.innerText = "Processing...";
         checkoutBtn.disabled = true;
 
         try {
-            await setDoc(doc(db, "sales_history", orderId), {
+            await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
                 table: tableName,
                 customer: customerName,
                 items: currentCart,
@@ -217,10 +288,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 timestamp: new Date().toISOString()
             });
 
-            // 🕒 NAYA: Database me save hote hi History me bhi daal do!
-            window.saveToGhostHistory(orderId, total, currentCart);
-
-            // Bill Layout - Pure Spacing Math!
             let billText = "\n";
             billText += centerText("NEW PIZZA HUT") + "\n";
             billText += centerText("Live Cake | Salempur") + "\n";
@@ -232,7 +299,6 @@ document.addEventListener('DOMContentLoaded', () => {
             billText += "--------------------------------\n";
             
             currentCart.forEach(item => {
-                // 16 name + 4 space + 3 qty + 3 space + 6 amt = 32 Total
                 let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
                 let q = String(item.qty).padStart(2, " ") + "x";
                 let a = String(item.price * item.qty).padStart(6, " ");
@@ -244,12 +310,11 @@ document.addEventListener('DOMContentLoaded', () => {
             billText += "--------------------------------\n";
             billText += centerText("Thank You! Visit Again") + "\n\n";
             
-            // UPI Details centered properly
             billText += centerText("--- UPI PAYMENT ---") + "\n";
             billText += centerText("6393349498@fam") + "\n";
             billText += centerText("(Pay via PhonePe/GPay)") + "\n";
             
-            billText += "\n\n\n\n"; // Paper cutting margin
+            billText += "\n\n\n\n";
             
             window.location.href = "rawbt:" + encodeURIComponent(billText);
 
@@ -265,9 +330,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // =====================================
-    // SAVE & EXIT LOGIC
-    // =====================================
     if (saveExitBtn) {
         saveExitBtn.addEventListener('click', async () => {
             if (currentCart.length === 0) {
@@ -278,25 +340,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const customerName = getCurrentCustomer();
             const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
             
-            // 🕒 NAYA: Ek common Order ID bana li
-            const orderId = `SALE_${Date.now()}`;
-
             const textBackup = saveExitBtn.innerText;
             saveExitBtn.innerText = "Saving...";
             saveExitBtn.disabled = true;
 
             try {
-                await setDoc(doc(db, "sales_history", orderId), {
+                await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
                     table: tableName,
                     customer: customerName,
                     items: currentCart,
                     total: total,
                     timestamp: new Date().toISOString()
                 });
-
-                // 🕒 NAYA: Database me save hote hi History me bhi daal do!
-                window.saveToGhostHistory(orderId, total, currentCart);
-
                 saveLocalCart([]); 
                 currentCart = [];
                 renderCart();
