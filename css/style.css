@@ -737,170 +737,93 @@ body {
     letter-spacing: 1px !important;
 }
 /* =========================================
-   RUNNING ORDERS SECTION (SCROLLABLE GRID)
+   RESPONSIVE TABLE GRID (PHONE + TABLET FIX)
    ========================================= */
-/* Container jo niche ka hissa cover karega */
-#runningOrdersContainer {
-    display: grid !important;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)) !important;
-    gap: 20px !important;
-    height: 40vh !important; /* Screen ka lagbhag half se thoda kam */
-    overflow-y: auto !important; /* Vertical scroll aayega */
-    overflow-x: hidden !important;
-    background: #f8fafc !important;
-    padding: 20px !important;
-    border: 2px solid #e2e8f0 !important;
-    border-radius: 16px !important;
-    align-content: start !important;
-}
 
-/* Scrollbar thoda sundar dikhe */
-#runningOrdersContainer::-webkit-scrollbar {
-    width: 8px;
-}
-#runningOrdersContainer::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 10px;
-}
-
-/* Har active bill ka card bada aur bold */
-.running-card {
-    padding: 20px !important;
-    border-radius: 12px !important;
-    border-left: 8px solid #f59e0b !important; /* Orange line moti ki hai */
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 10px !important;
-    background: white !important;
-}
-
-.running-card .rc-title { 
-    font-size: 1.4rem !important; 
-    font-weight: 900 !important; 
-    color: #1f2937 !important; 
-}
-.running-card .rc-amount { 
-    font-size: 1.3rem !important; 
-    color: #10b981 !important; 
-    font-weight: 900 !important; 
-}
-.running-card .rc-items { 
-    font-size: 1.1rem !important; 
-    color: #64748b !important; 
-    font-weight: bold !important; 
-}
-/* =========================================
-   TABLE GRID LIVE ITEMS (BOX DESIGN)
-   ========================================= */
-.table-card {
-    padding: 15px !important; /* Box mein jagah banane ke liye padding kam ki */
-    text-align: left !important;
-    display: flex !important;
-    flex-direction: column !important;
-    height: 220px !important; /* Box ki height fix kar di taki sab same dikhein */
-    overflow: hidden !important; /* Box se bahar kuch na nikle */
-}
-
-.table-name-header {
-    font-weight: 900;
-    font-size: 1.4rem;
-    color: #1f2937;
-    margin-bottom: 10px;
-    border-bottom: 2px solid #e5e7eb;
-    padding-bottom: 8px;
-    text-align: center;
-}
-
-.table-items-container {
-    flex-grow: 1;
-    overflow: hidden; /* Extra items cut ho jayenge */
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-}
-
-.table-item-row {
-    font-size: 0.95rem;
-    color: #4b5563;
-    font-weight: 600;
-    white-space: nowrap; /* Text doosri line mein nahi jayega */
-    overflow: hidden; 
-    text-overflow: ellipsis; /* Lamba naam hone par '...' lag jayega */
-    background: #f3f4f6;
-    padding: 4px 8px;
-    border-radius: 4px;
-    display: flex;
-    justify-content: space-between;
-}
-
-.table-item-more {
-    font-size: 0.9rem;
-    color: #f59e0b; /* Orange color */
-    font-weight: 800;
-    text-align: center;
-    margin-top: auto; /* Box ke bilkul neeche chipak jayega */
-    padding-top: 5px;
-}
-
-.table-empty-text {
-    color: #9ca3af;
-    text-align: center;
-    font-style: italic;
-    margin-top: 30px;
-    font-weight: normal;
-}
-/* =========================================
-   TABLET-OPTIMIZED HUGE TABLE GRID
-   ========================================= */
-/* Grid ko poori screen par failane ke liye */
+/* 1. DEFAULT FOR PHONES (Mobile par 2 column aur chhote box) */
 .table-grid {
     display: grid !important;
-    grid-template-columns: repeat(5, 1fr) !important; /* Ek line mein 5 boxes */
-    gap: 20px !important;
-    padding: 25px !important;
-    height: 100% !important; 
-    align-content: stretch !important; /* Bachi hui jagah ko kheench kar bhar dega */
+    grid-template-columns: repeat(2, 1fr) !important; /* Phone par sirf 2 box ek line mein */
+    gap: 15px !important;
+    padding: 15px !important;
+    height: auto !important; 
+    align-content: start !important; 
 }
 
-/* Box ka size bada aur bold */
 .table-card {
-    padding: 20px !important;
+    padding: 15px !important;
     display: flex !important;
     flex-direction: column !important;
     height: auto !important; 
-    min-height: 38vh !important; /* Box ki height screen ke hisaab se badi hogi */
-    border-radius: 16px !important;
-    box-shadow: 0 6px 12px rgba(0,0,0,0.08) !important;
+    min-height: 180px !important; /* Phone ke liye chhota height */
+    border-radius: 12px !important;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.08) !important;
 }
 
-/* Table Name Header ko bada kiya */
 .table-name-header {
-    font-size: 1.8rem !important; 
+    font-size: 1.3rem !important; 
     font-weight: 900 !important;
-    padding-bottom: 12px !important;
-    margin-bottom: 15px !important;
-    border-bottom: 3px solid #e5e7eb !important;
+    padding-bottom: 8px !important;
+    margin-bottom: 10px !important;
+    border-bottom: 2px solid #e5e7eb !important;
 }
 
 .table-items-container {
-    gap: 8px !important; /* Items ke beech thoda zyada gap */
+    gap: 5px !important;
 }
 
-/* Andar ke items ka text bada aur clear */
 .table-item-row {
-    font-size: 1.2rem !important; 
-    padding: 8px 12px !important;
-    border-radius: 6px !important;
+    font-size: 0.9rem !important; 
+    padding: 5px 8px !important;
+    border-radius: 4px !important;
 }
 
-.table-item-more {
-    font-size: 1.1rem !important;
-    margin-top: 10px !important;
-}
-
-/* Jab table khali ho */
 .table-empty-text {
-    font-size: 1.5rem !important;
-    margin-top: 40px !important;
+    font-size: 1.2rem !important;
+    margin-top: 30px !important;
     color: #9ca3af !important;
+}
+
+/* 2. TABLET & BIG SCREENS (Jahan screen badi hai wahan 5 columns aayenge) */
+@media (min-width: 768px) {
+    .table-grid {
+        grid-template-columns: repeat(5, 1fr) !important; /* Tablet par 5 box */
+        gap: 20px !important;
+        padding: 25px !important;
+        height: 100% !important; 
+        align-content: stretch !important; /* Khali jagah bharega */
+    }
+
+    .table-card {
+        padding: 20px !important;
+        min-height: 38vh !important; /* Tablet par lambe boxes */
+        border-radius: 16px !important;
+    }
+
+    .table-name-header {
+        font-size: 1.8rem !important; 
+        padding-bottom: 12px !important;
+        margin-bottom: 15px !important;
+        border-bottom: 3px solid #e5e7eb !important;
+    }
+
+    .table-items-container {
+        gap: 8px !important;
+    }
+
+    .table-item-row {
+        font-size: 1.2rem !important; 
+        padding: 8px 12px !important;
+        border-radius: 6px !important;
+    }
+
+    .table-item-more {
+        font-size: 1.1rem !important;
+        margin-top: 10px !important;
+    }
+
+    .table-empty-text {
+        font-size: 1.5rem !important;
+        margin-top: 40px !important;
+    }
 }
