@@ -6,6 +6,46 @@
     <title>Admin Dashboard - New Pizza Hut</title>
     <link rel="stylesheet" href="../css/admin.css">  
     <link rel="manifest" href="manifest.json">=
+    <style>
+        /* Sales section: Table/Parcel (left) vs Quick Sale (right), clean split */
+        .sales-split {
+            display: flex;
+            align-items: flex-start;
+            gap: 25px;
+            margin-top: 10px;
+        }
+        .sales-col {
+            flex: 1;
+            min-width: 0;
+        }
+        .sales-col-title {
+            font-weight: 800;
+            font-size: 1.1rem;
+            color: #e2e8f0;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid rgba(148, 163, 184, 0.25);
+        }
+        .sales-col-divider {
+            width: 1px;
+            align-self: stretch;
+            background: rgba(148, 163, 184, 0.25);
+            flex-shrink: 0;
+        }
+        .mini-stats {
+            margin-bottom: 15px;
+        }
+        @media (max-width: 900px) {
+            .sales-split {
+                flex-direction: column;
+            }
+            .sales-col-divider {
+                width: 100%;
+                height: 1px;
+                margin: 10px 0;
+            }
+        }
+    </style>
 </head>
 <body>
 
@@ -27,10 +67,7 @@
                 <button class="nav-btn" onclick="switchTab('expense')">📉 Expenses</button>
             </div>
             <div class="topbar-actions">
-                <button class="btn btn-lock" id="logoutBtn">🔒 Lock</button>
                 <button id="pwaDownloadBtn" class="btn" style="background: #8b5cf6; display: none;">⬇️ Install App</button>
-                <!-- FIXED: Exit button ka link wapas daal diya -->
-                <button class="btn btn-danger" onclick="window.location.href='../index.html'">Exit to POS</button>
             </div>
         </header>
 
@@ -62,35 +99,98 @@
                     </div>
                 </div>
 
-                <div class="section-header">Item-wise Sales Breakdown</div>
-                <div class="table-responsive">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Item Name</th>
-                                <th class="text-right">Qty Sold</th>
-                                <th class="text-right">Revenue (₹)</th>
-                            </tr>
-                        </thead>
-                        <tbody id="salesTableBody">
-                        </tbody>
-                    </table>
-                </div>
+                <div class="sales-split">
+                    <!-- TABLE / PARCEL COLUMN -->
+                    <div class="sales-col">
+                        <div class="sales-col-title">🍽️ Table / Parcel Orders</div>
 
-                <div class="section-header dashed-top">Recent Bills (Spoof Testing)</div>
-                <div class="table-responsive">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Time / Date</th>
-                                <th>Table & Customer</th>
-                                <th class="text-right">Bill Amount (₹)</th>
-                                <th class="text-center">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="billsTableBody">
-                        </tbody>
-                    </table>
+                        <div class="stats-grid mini-stats">
+                            <div class="stat-card">
+                                <h3>Revenue</h3>
+                                <div class="value" id="tableRevenueBox">₹0</div>
+                            </div>
+                            <div class="stat-card">
+                                <h3>Orders</h3>
+                                <div class="value" id="tableOrdersBox" style="color: #38bdf8;">0</div>
+                            </div>
+                        </div>
+
+                        <div class="section-header">Item-wise Sales Breakdown</div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Item Name</th>
+                                        <th class="text-right">Qty Sold</th>
+                                        <th class="text-right">Revenue (₹)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tableSalesTableBody"></tbody>
+                            </table>
+                        </div>
+
+                        <div class="section-header dashed-top">Recent Bills</div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time / Date</th>
+                                        <th>Table & Customer</th>
+                                        <th class="text-right">Bill Amount (₹)</th>
+                                        <th class="text-center">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tableBillsTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="sales-col-divider"></div>
+
+                    <!-- QUICK SALE ENTRY COLUMN -->
+                    <div class="sales-col">
+                        <div class="sales-col-title">⚡ Quick Sale Entries</div>
+
+                        <div class="stats-grid mini-stats">
+                            <div class="stat-card">
+                                <h3>Revenue</h3>
+                                <div class="value" id="qsRevenueBox">₹0</div>
+                            </div>
+                            <div class="stat-card">
+                                <h3>Orders</h3>
+                                <div class="value" id="qsOrdersBox" style="color: #38bdf8;">0</div>
+                            </div>
+                        </div>
+
+                        <div class="section-header">Item-wise Sales Breakdown</div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Item Name</th>
+                                        <th class="text-right">Qty Sold</th>
+                                        <th class="text-right">Revenue (₹)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="qsSalesTableBody"></tbody>
+                            </table>
+                        </div>
+
+                        <div class="section-header dashed-top">Recent Bills</div>
+                        <div class="table-responsive">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time / Date</th>
+                                        <th>Entry</th>
+                                        <th class="text-right">Bill Amount (₹)</th>
+                                        <th class="text-center">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="qsBillsTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </div>
 

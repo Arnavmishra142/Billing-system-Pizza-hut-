@@ -28,13 +28,6 @@ document.getElementById('loginBtn').addEventListener('click', () => {
     }
 });
 
-document.getElementById('logoutBtn').addEventListener('click', () => {
-    localStorage.removeItem('adminLoggedIn');
-    document.getElementById('adminContent').style.display = 'none';
-    document.getElementById('loginScreen').style.display = 'flex';
-    document.getElementById('pinInput').value = ''; 
-});
-
 window.switchTab = function(tabName) {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -62,7 +55,8 @@ async function fetchAllSalesFromDB() {
 }
 
 window.loadSalesData = async function(filterType, filterValue) {
-    document.getElementById('salesTableBody').innerHTML = '<tr><td colspan="3" class="loading">Loading...</td></tr>';
+    document.getElementById('tableSalesTableBody').innerHTML = '<tr><td colspan="3" class="loading">Loading...</td></tr>';
+    document.getElementById('qsSalesTableBody').innerHTML = '<tr><td colspan="3" class="loading">Loading...</td></tr>';
     await fetchAllSalesFromDB();
     const now = new Date();
     let filteredSales = [];
@@ -80,46 +74,82 @@ window.loadSalesData = async function(filterType, filterValue) {
     });
 
     filteredSales.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    let totalRevenue = 0; let itemStats = {}; 
-    const billsTbody = document.getElementById('billsTableBody'); billsTbody.innerHTML = '';
 
-    if (filteredSales.length === 0) {
-        billsTbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:#64748b;">No bills found.</td></tr>';
-    } else {
-        filteredSales.forEach(sale => {
-            const saleTotal = Number(sale.total) || 0; totalRevenue += saleTotal;
-            (sale.items || []).forEach(item => {
-                const itemName = item.name || 'Unknown Item';
-                if (!itemStats[itemName]) itemStats[itemName] = { qty: 0, rev: 0 };
-                itemStats[itemName].qty += Number(item.qty) || 0;
-                itemStats[itemName].rev += (Number(item.qty) || 0) * (Number(item.price) || 0);
-            });
+    let totalRevenue = 0;
+    let tableRevenue = 0, tableOrders = 0, tableItemStats = {};
+    let qsRevenue = 0, qsOrders = 0, qsItemStats = {};
 
-            let timeString = sale.timestamp ? new Date(sale.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : 'N/A';
-            let tableName = sale.table || 'Unknown';
-            if(!tableName.includes('Parcel')) tableName = `${tableName} [${sale.customer || 'C1'}]`;
-            
-            billsTbody.innerHTML += `
-                <tr>
-                    <td style="color:#94a3b8; white-space:nowrap;">${timeString}</td>
-                    <td style="font-weight:bold; color:white; white-space:nowrap;">${tableName}</td>
-                    <td class="text-right" style="color:#10b981; font-weight:bold;">₹${saleTotal.toFixed(2)}</td>
-                    <td class="text-center"><button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.9rem;" onclick="deleteSale('${sale.id}')">🗑️</button></td>
-                </tr>
-            `;
+    const tableBillsTbody = document.getElementById('tableBillsTableBody'); tableBillsTbody.innerHTML = '';
+    const qsBillsTbody = document.getElementById('qsBillsTableBody'); qsBillsTbody.innerHTML = '';
+
+    filteredSales.forEach(sale => {
+        const saleTotal = Number(sale.total) || 0;
+        totalRevenue += saleTotal;
+
+        const isQuickSale = sale.table === 'Direct Entry';
+        let timeString = sale.timestamp ? new Date(sale.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : 'N/A';
+
+        let displayName = sale.table || 'Unknown';
+        if (isQuickSale) {
+            displayName = 'Cash Sale';
+        } else if (!displayName.includes('Parcel')) {
+            displayName = `${displayName} [${sale.customer || 'C1'}]`;
+        }
+
+        const rowHTML = `
+            <tr>
+                <td style="color:#94a3b8; white-space:nowrap;">${timeString}</td>
+                <td style="font-weight:bold; color:white; white-space:nowrap;">${displayName}</td>
+                <td class="text-right" style="color:#10b981; font-weight:bold;">₹${saleTotal.toFixed(2)}</td>
+                <td class="text-center"><button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.9rem;" onclick="deleteSale('${sale.id}')">🗑️</button></td>
+            </tr>
+        `;
+
+        const targetStats = isQuickSale ? qsItemStats : tableItemStats;
+        (sale.items || []).forEach(item => {
+            const itemName = item.name || 'Unknown Item';
+            if (!targetStats[itemName]) targetStats[itemName] = { qty: 0, rev: 0 };
+            targetStats[itemName].qty += Number(item.qty) || 0;
+            targetStats[itemName].rev += (Number(item.qty) || 0) * (Number(item.price) || 0);
         });
-    }
+
+        if (isQuickSale) {
+            qsRevenue += saleTotal;
+            qsOrders++;
+            qsBillsTbody.innerHTML += rowHTML;
+        } else {
+            tableRevenue += saleTotal;
+            tableOrders++;
+            tableBillsTbody.innerHTML += rowHTML;
+        }
+    });
+
+    if (tableOrders === 0) tableBillsTbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:#64748b;">No bills found.</td></tr>';
+    if (qsOrders === 0) qsBillsTbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:#64748b;">No bills found.</td></tr>';
 
     document.getElementById('totalRevenueBox').innerText = `₹${totalRevenue.toFixed(2)}`;
     document.getElementById('totalOrdersBox').innerText = filteredSales.length;
+    document.getElementById('tableRevenueBox').innerText = `₹${tableRevenue.toFixed(2)}`;
+    document.getElementById('tableOrdersBox').innerText = tableOrders;
+    document.getElementById('qsRevenueBox').innerText = `₹${qsRevenue.toFixed(2)}`;
+    document.getElementById('qsOrdersBox').innerText = qsOrders;
 
-    const salesTbody = document.getElementById('salesTableBody'); salesTbody.innerHTML = '';
-    let sortedItems = Object.keys(itemStats).map(key => ({ name: key, qty: itemStats[key].qty, rev: itemStats[key].rev })).sort((a, b) => b.qty - a.qty);
+    const renderItemStats = (tbodyId, statsObj) => {
+        const tbody = document.getElementById(tbodyId);
+        tbody.innerHTML = '';
+        let sortedItems = Object.keys(statsObj).map(key => ({ name: key, qty: statsObj[key].qty, rev: statsObj[key].rev })).sort((a, b) => b.qty - a.qty);
 
-    if (sortedItems.length === 0) salesTbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:30px; color:#64748b;">No items sold.</td></tr>';
-    else sortedItems.forEach(stat => {
-        salesTbody.innerHTML += `<tr><td style="font-weight:bold; color:white;">${stat.name}</td><td class="text-right" style="color:#38bdf8; font-weight:bold;">${stat.qty}</td><td class="text-right" style="color:#10b981; font-weight:bold;">₹${stat.rev.toFixed(2)}</td></tr>`;
-    });
+        if (sortedItems.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:30px; color:#64748b;">No items sold.</td></tr>';
+        } else {
+            sortedItems.forEach(stat => {
+                tbody.innerHTML += `<tr><td style="font-weight:bold; color:white;">${stat.name}</td><td class="text-right" style="color:#38bdf8; font-weight:bold;">${stat.qty}</td><td class="text-right" style="color:#10b981; font-weight:bold;">₹${stat.rev.toFixed(2)}</td></tr>`;
+            });
+        }
+    };
+
+    renderItemStats('tableSalesTableBody', tableItemStats);
+    renderItemStats('qsSalesTableBody', qsItemStats);
 }
 window.deleteSale = async function(saleId) {
     if (confirm("Delete this bill?")) {
