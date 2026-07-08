@@ -667,3 +667,47 @@ body {
 .btn-reprint {
     margin-top: 0 !important; 
 }
+/* =========================================
+   POS UI UPGRADES (MANAGER EYESIGHT FIX)
+   ========================================= */
+/* Sidebar Categories */
+#categoryList button {
+    font-size: 1.3rem !important;
+    font-weight: 900 !important;
+    padding: 20px 15px !important;
+    letter-spacing: 0.5px !important;
+    border-bottom: 2px solid #f3f4f6 !important;
+}
+
+/* Item Cards in Grid */
+.item-card {
+    min-height: 160px; /* Card thoda bada hoga */
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.item-title {
+    font-size: 1.3rem !important; /* Naam bada aur bold */
+    font-weight: 900 !important;
+    line-height: 1.3;
+    color: #111827;
+}
+
+.item-price {
+    font-size: 1.5rem !important; /* Price aur bhi highlight hogi */
+    font-weight: 900 !important;
+    color: #059669 !important; /* Thoda aur dark green */
+}
+
+/* Cart panel ke items bhi thode bade dikhein */
+.cart-item-header {
+    font-size: 1.15rem !important;
+    font-weight: 800 !important;
+}
+.qty-btn {
+    width: 35px !important;
+    height: 35px !important;
+    font-size: 1.5rem !important;
+}
