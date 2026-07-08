@@ -827,3 +827,30 @@ body {
         margin-top: 40px !important;
     }
 }
+/* =========================================
+   BOTTOM NAVIGATION BAR (TABLE/PARCEL GRID)
+   ========================================= */
+#screen-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100dvh !important;
+}
+
+#screen-grid .table-grid {
+    order: 1 !important;       /* Grid ko upar rakhega */
+    flex-grow: 1 !important;   /* Grid poori jagah lega */
+    overflow-y: auto !important; 
+}
+
+#screen-grid .top-nav {
+    order: 2 !important;       /* Black margin ko ekdum bottom me dhakel dega */
+    box-shadow: 0 -5px 10px rgba(0,0,0,0.1) !important; /* Shadow upar ki taraf */
+    justify-content: flex-start !important; /* Back button ko left me fix rakhega */
+    padding: 20px 25px !important; /* Tablet ke hisaab se thoda touch area bada kiya */
+}
+
+/* Back button ko thoda aur bada/clear karna ho toh */
+#screen-grid .back-btn {
+    font-size: 1.2rem !important;
+    padding: 12px 25px !important;
+}
