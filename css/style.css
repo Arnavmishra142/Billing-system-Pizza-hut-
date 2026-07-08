@@ -711,3 +711,28 @@ body {
     height: 35px !important;
     font-size: 1.5rem !important;
 }
+/* =========================================
+   HOME SCREEN OPTIMIZATION (TABLET/BIG SCREEN)
+   ========================================= */
+.home-grid {
+    max-width: 950px !important; /* Tablet ke liye width badhayi */
+    gap: 30px !important;
+    padding: 30px !important;
+    margin-top: 20px !important;
+}
+
+.menu-big-btn {
+    min-height: 170px !important; /* Button ki height badhayi */
+    border-radius: 20px !important;
+}
+
+.menu-big-btn .icon {
+    font-size: 4rem !important; /* Emojis bade dikhenge */
+    margin-bottom: 15px !important;
+}
+
+.menu-big-btn .title {
+    font-size: 1.6rem !important; /* Title bada aur bold */
+    font-weight: 900 !important;
+    letter-spacing: 1px !important;
+}
