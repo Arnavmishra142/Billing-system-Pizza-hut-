@@ -460,24 +460,136 @@ body {
     display: none; 
 }
 
-.running-card {
-    min-width: 150px;
+/* =========================================
+   RUNNING ORDERS: TABLES (LEFT) / PARCELS (RIGHT)
+   ========================================= */
+.running-split {
+    display: flex;
+    align-items: stretch;
+    gap: 20px;
+}
+
+.running-col {
+    flex: 1;
+    min-width: 0;
     background: #fff;
-    padding: 15px;
     border-radius: 12px;
-    border-left: 5px solid #f59e0b; /* Yellow for hold/running */
-    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    padding: 15px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+    border: 1px solid #e5e7eb;
+}
+
+.running-col-title {
+    font-weight: 800;
+    font-size: 1rem;
+    color: #374151;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #f3f4f6;
+}
+
+.running-col-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.running-col-empty {
+    color: #9ca3af;
+    font-style: italic;
+    font-size: 0.9rem;
+}
+
+/* Beech mein patli si divider line */
+.running-col-divider {
+    width: 1px;
+    background: #d1d5db;
     flex-shrink: 0;
+    align-self: stretch;
+}
+
+@media (max-width: 600px) {
+    .running-split {
+        gap: 12px;
+    }
+    .running-col {
+        padding: 10px;
+    }
+    .running-col-title {
+        font-size: 0.85rem;
+    }
+}
+
+.running-card {
+    width: 100%;
+    background: #f9fafb;
+    padding: 12px 15px;
+    border-radius: 10px;
+    border-left: 5px solid #f59e0b; /* Yellow for hold/running */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     cursor: pointer;
     display: flex;
     flex-direction: column;
     gap: 5px;
-    white-space: nowrap; /* Taki text do line me toot kar kate na */
     transition: transform 0.2s;
 }
 
 .running-card:active { transform: scale(0.95); }
 .running-card .rc-title { font-weight: bold; font-size: 1.1rem; color: #1f2937; }
+
+/* =========================================
+   ⏱ LIVE ORDER TIMER BADGE (KOT print hone ke baad)
+   ========================================= */
+.order-timer {
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Grid card ke andar (table name ke saath, dark border ke upar) */
+.table-name-header .order-timer {
+    font-size: 0.7rem;
+    padding: 2px 7px;
+}
+
+@media (min-width: 768px) {
+    .table-name-header .order-timer {
+        font-size: 1rem !important;
+        padding: 4px 12px !important;
+    }
+}
+
+/* 0-14 min: sab theek hai */
+.order-timer.timer-ok {
+    background: #d1fae5;
+    color: #059669;
+}
+
+/* 15-29 min: dhyaan do */
+.order-timer.timer-warn {
+    background: #fef3c7;
+    color: #d97706;
+}
+
+/* 30+ min: turant dekho */
+.order-timer.timer-danger {
+    background: #fee2e2;
+    color: #dc2626;
+    animation: timerPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes timerPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
 .running-card .rc-amount { color: #10b981; font-weight: 800; font-size: 1rem; }
 .running-card .rc-items { font-size: 0.85rem; color: #6b7280; }
 /* Checkout button ko lamba karne ke liye */
@@ -771,6 +883,10 @@ body {
     padding-bottom: 8px !important;
     margin-bottom: 10px !important;
     border-bottom: 2px solid #e5e7eb !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
 }
 
 .table-items-container {
@@ -810,6 +926,10 @@ body {
         padding-bottom: 12px !important;
         margin-bottom: 15px !important;
         border-bottom: 3px solid #e5e7eb !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        gap: 10px !important;
     }
 
     .table-items-container {

@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const getCurrentCustomer = () => activeTableNameEl.dataset.customer || 'C1';
     
     const getCartKey = () => `cart_${getCurrentTable()}_${getCurrentCustomer()}`;
+    const getKotTimeKey = () => `kotTime_${getCurrentTable()}_${getCurrentCustomer()}`;
 
     const getLocalCart = () => {
         const data = localStorage.getItem(getCartKey());
@@ -22,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = getCartKey();
         if (cartData.length === 0) {
             localStorage.removeItem(key);
+            localStorage.removeItem(getKotTimeKey()); // Order khatam, timer bhi hata do
         } else {
             localStorage.setItem(key, JSON.stringify(cartData));
         }
@@ -258,6 +260,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (itemsToPrint.length === 0) {
             alert("Koi naya item nahi hai! Puraana order print karne ke liye 'PRINT FULL K.O.T' dabayein.");
             return;
+        }
+
+        // Order ka timer sirf pehle KOT print par shuru hoga, dobara overwrite nahi hoga
+        const kotTimeKey = getKotTimeKey();
+        if (!localStorage.getItem(kotTimeKey)) {
+            localStorage.setItem(kotTimeKey, Date.now().toString());
         }
 
         let randKOT = Math.floor(Math.random() * 900) + 100;

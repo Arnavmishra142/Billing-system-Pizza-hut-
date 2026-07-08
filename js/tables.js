@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let isOccupied = false;
             let tableItemsHTML = "";
             let itemCount = 0;
+            let earliestKotTime = null; // Sabse purana KOT time is table ke liye
 
             // LocalStorage se is table ka cart data nikalo
             for (let j = 0; j < localStorage.length; j++) {
@@ -52,7 +53,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     } catch(e) {}
                 }
+                if (key.startsWith(`kotTime_${tableName}_`)) {
+                    const ts = parseInt(localStorage.getItem(key));
+                    if (!isNaN(ts) && (earliestKotTime === null || ts < earliestKotTime)) {
+                        earliestKotTime = ts;
+                    }
+                }
             }
+
+            let timerBadgeHTML = earliestKotTime ? `<span class="order-timer" data-start="${earliestKotTime}">⏱ 0m</span>` : '';
 
             // Agar 4 se zyada items hain, toh "See more" dikhao
             if (itemCount > 4) {
@@ -63,7 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Card ke andar ka HTML structure (Table name + Items list)
             card.innerHTML = `
-                <div class="table-name-header">${tableName}</div>
+                <div class="table-name-header"><span>${tableName}</span>${timerBadgeHTML}</div>
                 <div class="table-items-container">
                     ${isOccupied && itemCount > 0 ? tableItemsHTML : '<div class="table-empty-text">Empty</div>'}
                 </div>
@@ -80,6 +89,8 @@ document.addEventListener('DOMContentLoaded', () => {
         screenHome.classList.add('hidden');
         screenGrid.classList.remove('hidden');
         screenGrid.classList.add('active');
+
+        refreshTimers();
     }
 
     btnTables.addEventListener('click', () => loadGrid('table'));
@@ -199,12 +210,30 @@ document.addEventListener('DOMContentLoaded', () => {
         customerTabsContainer.appendChild(addBtn);
     }
 
-    // Render Running Orders List
+    // Render Running Orders List (Tables left, Parcels right, divider beech mein)
     function renderRunningOrders() {
         const container = document.getElementById('runningOrdersContainer');
         if(!container) return;
-        container.innerHTML = ''; 
-        let hasRunningOrders = false;
+
+        // Skeleton: do columns + thin divider
+        container.innerHTML = `
+            <div class="running-split">
+                <div class="running-col">
+                    <div class="running-col-title">🍽️ Tables</div>
+                    <div class="running-col-body" id="runningTablesCol"></div>
+                </div>
+                <div class="running-col-divider"></div>
+                <div class="running-col">
+                    <div class="running-col-title">📦 Parcels</div>
+                    <div class="running-col-body" id="runningParcelsCol"></div>
+                </div>
+            </div>
+        `;
+
+        const tablesCol = document.getElementById('runningTablesCol');
+        const parcelsCol = document.getElementById('runningParcelsCol');
+        let hasTableOrders = false;
+        let hasParcelOrders = false;
 
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
@@ -219,14 +248,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const cartData = JSON.parse(localStorage.getItem(key));
                 if (cartData && cartData.length > 0) {
-                    hasRunningOrders = true;
                     let total = cartData.reduce((sum, item) => sum + (item.price * item.qty), 0);
                     let itemCount = cartData.reduce((sum, item) => sum + item.qty, 0);
                     
+                    const isParcel = tableName.includes('Parcel');
                     let displayName = tableName;
-                    if (!tableName.includes('Parcel')) {
+                    if (!isParcel) {
                         displayName += ` (${customerId})`; 
                     }
+
+                    // Is specific order ka KOT time (agar KOT print ho chuka hai)
+                    const kotTs = parseInt(localStorage.getItem(`kotTime_${tableName}_${customerId}`));
+                    const rcTimerHTML = !isNaN(kotTs) ? `<span class="order-timer" data-start="${kotTs}">⏱ 0m</span>` : '';
 
                     const card = document.createElement('div');
                     card.className = 'running-card';
@@ -234,18 +267,55 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="rc-title">${displayName}</span>
                         <span class="rc-amount">₹${total.toFixed(2)}</span>
                         <span class="rc-items">${itemCount} Items</span>
+                        ${rcTimerHTML}
                     `;
                     card.addEventListener('click', () => {
                         openPOS(tableName, customerId);
                     });
-                    container.appendChild(card);
+
+                    if (isParcel) {
+                        hasParcelOrders = true;
+                        parcelsCol.appendChild(card);
+                    } else {
+                        hasTableOrders = true;
+                        tablesCol.appendChild(card);
+                    }
                 }
             }
         }
-        if (!hasRunningOrders) {
-            container.innerHTML = `<span style="color: #6b7280; font-style: italic;">No active table orders right now.</span>`;
+        if (!hasTableOrders) {
+            tablesCol.innerHTML = `<span class="running-col-empty">No active tables</span>`;
         }
+        if (!hasParcelOrders) {
+            parcelsCol.innerHTML = `<span class="running-col-empty">No active parcels</span>`;
+        }
+
+        refreshTimers();
     }
+
+    // =====================================
+    // ⏱ LIVE ORDER TIMER (KOT print hone ke baad se)
+    // =====================================
+    function refreshTimers() {
+        document.querySelectorAll('.order-timer').forEach(el => {
+            const start = parseInt(el.dataset.start);
+            if (isNaN(start)) return;
+
+            const mins = Math.max(0, Math.floor((Date.now() - start) / 60000));
+            el.innerText = `⏱ ${mins}m`;
+
+            el.classList.remove('timer-ok', 'timer-warn', 'timer-danger');
+            if (mins >= 30) {
+                el.classList.add('timer-danger');
+            } else if (mins >= 15) {
+                el.classList.add('timer-warn');
+            } else {
+                el.classList.add('timer-ok');
+            }
+        });
+    }
+
+    setInterval(refreshTimers, 30000); // Har 30 sec mein sab timers live update honge
 
     renderRunningOrders();
     window.addEventListener('cart-updated', renderRunningOrders);
