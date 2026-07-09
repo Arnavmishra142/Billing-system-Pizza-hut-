@@ -33,33 +33,18 @@ export async function fetchMenuFromCloud() {
         });
 
         // ==========================================
-        // SMART SORTING LOGIC (Base Name + Size Rank)
+        // PRICE SORTING LOGIC (Kam se zyada price)
         // ==========================================
-        allItems.sort((a, b) => {
-            // Bracket ke pehle ka naam nikalo (Base Name)
-            const getBase = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
-            
-            // Size ke hisaab se rank assign karo
-            const getRank = (name) => {
-                let n = name.toLowerCase();
-                if (n.includes('(half)') || n.includes('(regular)')) return 1;
-                if (n.includes('(full)') || n.includes('(medium)')) return 2;
-                if (n.includes('(large)')) return 3;
-                return 0; // Default rank for items without brackets
-            };
-
-            let baseA = getBase(a.name);
-            let baseB = getBase(b.name);
-
-            // Rule 1: Pehle Base Name (Parivar) ke hisaab se sort karo A-Z
-            if (baseA < baseB) return -1;
-            if (baseA > baseB) return 1;
-
-            // Rule 2: Agar Base Name same hai, toh unke Size (Rank) ke hisaab se sort karo
-            return getRank(a.name) - getRank(b.name);
-        });
+        allItems.sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0));
 
         categories = Array.from(catSet);
+
+        // Categories ko A-Z order mein sort karo, "All" hamesha sabse upar
+        categories.sort((a, b) => {
+            if (a === 'All') return -1;
+            if (b === 'All') return 1;
+            return a.localeCompare(b);
+        });
         
         loadCategories();
         loadItems('All');
