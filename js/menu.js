@@ -33,9 +33,23 @@ export async function fetchMenuFromCloud() {
         });
 
         // ==========================================
-        // PRICE SORTING LOGIC (Kam se zyada price)
+        // FAMILY GROUPING + PRICE SORTING LOGIC
+        // (Margherita Regular ke niche Margherita Medium/Large hi aayega,
+        //  aur family ke andar size-order price ke hisaab se decide hoga)
         // ==========================================
-        allItems.sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0));
+        const getBaseName = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
+
+        allItems.sort((a, b) => {
+            const baseA = getBaseName(a.name);
+            const baseB = getBaseName(b.name);
+
+            // Rule 1: Pehle family (base name) ke hisaab se A-Z
+            if (baseA < baseB) return -1;
+            if (baseA > baseB) return 1;
+
+            // Rule 2: Same family ke andar, kam price wala pehle (Half/Regular < Full/Medium < Large)
+            return (Number(a.price) || 0) - (Number(b.price) || 0);
+        });
 
         categories = Array.from(catSet);
 
