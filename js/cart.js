@@ -185,7 +185,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const getDisplayTitle = () => {
         const tName = getCurrentTable();
         if(tName === 'Direct Entry') return 'Cash Sale';
-        // [C1] hat gaya yahan se
         return tName; 
     };
 
@@ -261,11 +260,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let randKOT = Math.floor(Math.random() * 900) + 100;
         
-        // 🔥 BRAHMASTRA FOR BOLD TEXT (Hardware Command) 🔥
         const BOLD_ON = '\x1B\x45\x01';
         const BOLD_OFF = '\x1B\x45\x00';
         
-        // Print start hote hi hardware ko BOLD karne ka signal jayega
         let kotText = BOLD_ON; 
         
         if (isFullKot) kotText += "FULL K.O.T\n";
@@ -316,21 +313,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.saveToGhostHistory(orderId, total, currentCart);
                 }
 
-                // 🔥 BRAHMASTRA FOR MAIN BILL BOLD TEXT 🔥
+                // ==========================================
+                // RAWBT & ESC/POS MAGIC (HARDWARE COMMANDS)
+                // ==========================================
                 const BOLD_ON = '\x1B\x45\x01';
                 const BOLD_OFF = '\x1B\x45\x00';
+                
+                // YAHAN APNA BASE64 CODE PASTE KARNA HAI (Inverted commas ke andar)
+                const logoBase64 = "YAHAN_LOGO_KA_BASE64_PASTE_KAR"; 
+                const qrBase64 = "YAHAN_QR_CODE_KA_BASE64_PASTE_KAR";
 
                 let shortOrderId = String(Date.now()).slice(-5); 
+                let billText = "";
                 
-                // Poora Bill Hardware se Bold Hoga
-                let billText = BOLD_ON;
+                // 1. LOGO PRINT (RawBT tag)
+                // Agar abhi logo nahi daalna toh is line ko '//' lagakar comment kar dena
+                billText += `<center><img>${logoBase64}</img></center>\n`;
+
+                // 2. SHOP NAME (Bada aur Bold - RawBT tags)
+                billText += `<center><W><b>NEW PIZZA HUT\nAND LIVE CAKE</b></W></center>\n`;
                 
-                billText += centerText("NEW PIZZA HUT AND LIVE CAKE") + "\n";
+                // 3. ADDRESS (Normal font, center aligned)
                 billText += centerText("in front of SBI bank ke tik") + "\n";
                 billText += centerText("samne salempur Deoria, UP") + "\n";
                 billText += centerText("FSSAI: 30230324113093042") + "\n";
                 billText += centerText("Phone: 9628548655") + "\n\n"; 
                 
+                // 4. BILL DETAILS
                 billText += `Bill No: ${shortOrderId}\n`;
                 billText += `Created On: ${getFormattedDate()}\n`;
                 billText += `Bill To: ${getDisplayTitle()}\n\n`; 
@@ -349,12 +358,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 billText += `Total Quantity: ${totalQty}\n`;
                 billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n"; 
                 
-                billText += centerText(`TOTAL: Rs ${total}`) + "\n\n"; 
+                // 5. TOTAL (Bold)
+                billText += centerText(`${BOLD_ON}TOTAL: Rs ${total}${BOLD_OFF}`) + "\n\n"; 
                 
-                billText += `Mode of Payment`.padEnd(24, ' ') + ` UPI\n`;
-                billText += `Received`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n";
+                // Mode of Payment & Received Hata Diya Gaya Hai
                 
-                billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
+                // 6. QR CODE PRINT
+                billText += `<center><img>${qrBase64}</img></center>\n`;
+                billText += centerText("Scan To Pay") + "\n\n";
+                
+                // 7. FOOTER
+                billText += centerText(`${BOLD_ON}Thank You! Visit Again!${BOLD_OFF}`) + "\n\n\n\n";
                 
                 window.location.href = "rawbt:" + encodeURIComponent(billText);
 
