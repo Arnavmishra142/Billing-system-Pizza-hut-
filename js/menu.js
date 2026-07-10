@@ -2,8 +2,8 @@ import { db } from './firebase-config.js';
 import { collection, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 let allItems = [];
-let categories = ['All'];
-let currentCategory = 'All';
+let categories = []; // "All" hata diya
+let currentCategory = ''; // Blank rakha hai, baad me auto-set hoga
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchMenuFromCloud();
@@ -34,7 +34,12 @@ export async function fetchMenuFromCloud() {
 
         // SORT 1: Categories A-Z
         let sortedCats = Array.from(catSet).sort();
-        categories = ['All', ...sortedCats]; // 'All' hamesha sabse upar rahega
+        categories = [...sortedCats]; // Sirf real categories rahengi
+
+        // NAYA: Pehli category ko default set karo (e.g. Burger)
+        if(categories.length > 0) {
+            currentCategory = categories[0];
+        }
 
         // SORT 2: Items Sorting (Category -> Parivar -> Size)
         allItems.sort((a, b) => {
@@ -61,7 +66,9 @@ export async function fetchMenuFromCloud() {
         });
         
         loadCategories();
-        loadItems('All');
+        if(currentCategory) {
+            loadItems(currentCategory); // Pehli category show karo
+        }
         updateDatalist(); 
         
     } catch (e) {
@@ -90,7 +97,7 @@ function loadCategories() {
         btn.style.color = cat === currentCategory ? "white" : "#4b5563";
         btn.style.cursor = "pointer";
         btn.style.borderRadius = "8px";
-        btn.style.fontWeight = "bold"; // Font thoda heavy rakha hai list theek se padhne ke liye
+        btn.style.fontWeight = "bold"; 
         
         btn.onclick = () => {
             currentCategory = cat;
@@ -107,7 +114,8 @@ function loadItems(categoryFilter) {
     if(!grid) return;
     grid.innerHTML = '';
 
-    let itemsToShow = categoryFilter === 'All' ? allItems : allItems.filter(item => item.category === categoryFilter);
+    // "All" ki logic hata di, ab hamesha specific category hi show hogi
+    let itemsToShow = allItems.filter(item => item.category === categoryFilter);
 
     if(itemsToShow.length === 0) {
         grid.innerHTML = '<div style="padding:20px; color:gray;">Is category me item nahi hai.</div>';
@@ -235,7 +243,7 @@ function updateDatalist() {
     if(!datalist) return;
     datalist.innerHTML = '';
     categories.forEach(cat => {
-        if(cat !== 'All') datalist.innerHTML += `<option value="${cat}">`;
+        datalist.innerHTML += `<option value="${cat}">`;
     });
 }
 
@@ -256,6 +264,7 @@ function setupSearch() {
             return;
         }
 
+        // Search hamesha saare (allItems) par kaam karega
         let searchedItems = allItems.filter(item => 
             item.name.toLowerCase().includes(searchTerm)
         );
