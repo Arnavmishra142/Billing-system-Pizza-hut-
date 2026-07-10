@@ -8,6 +8,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentCart = [];
 
+    // 🔊 CASH SOUND SETUP (Volume 30%)
+    const cashSound = new Audio('cash.sfx.mp3');
+    cashSound.volume = 0.3;
+
+    function playCashSound() {
+        cashSound.currentTime = 0;
+        cashSound.play().catch(() => {});
+    }
+
     const getCurrentTable = () => activeTableNameEl.innerText;
     const getCurrentCustomer = () => activeTableNameEl.dataset.customer || 'C1';
     
@@ -346,6 +355,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 billText += centerText(`TOTAL: Rs ${total}`) + "\n\n"; 
                 billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
                 
+                // 🔊 CASH SOUND BEFORE PRINT
+                playCashSound();
+
                 window.location.href = "rawbt:" + encodeURIComponent(billText);
 
                 saveLocalCart([]); 
@@ -391,6 +403,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
                     window.saveToGhostHistory(orderId + " (HOLD)", total, currentCart);
                 }
+
+                // 🔊 CASH SOUND ON SAVE & EXIT
+                playCashSound();
 
                 saveLocalCart([]); 
                 currentCart = [];

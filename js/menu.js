@@ -2,8 +2,17 @@ import { db } from './firebase-config.js';
 import { collection, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 let allItems = [];
-let categories = []; // "All" hata diya
-let currentCategory = ''; // Blank rakha hai, baad me auto-set hoga
+let categories = [];
+let currentCategory = '';
+
+// 🔊 POP SOUND SETUP (Volume 30%)
+const popSound = new Audio('pop.sfx.mp3');
+popSound.volume = 0.3;
+
+function playPopSound() {
+    popSound.currentTime = 0;
+    popSound.play().catch(() => {});
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchMenuFromCloud();
@@ -11,7 +20,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setupSearch();
 });
 
-// 1. FIREBASE SE MENU LAO
 export async function fetchMenuFromCloud() {
     const grid = document.getElementById('itemsGrid');
     if(!grid) return;
@@ -32,16 +40,13 @@ export async function fetchMenuFromCloud() {
             }
         });
 
-        // SORT 1: Categories A-Z
         let sortedCats = Array.from(catSet).sort();
-        categories = [...sortedCats]; // Sirf real categories rahengi
+        categories = [...sortedCats];
 
-        // NAYA: Pehli category ko default set karo (e.g. Burger)
         if(categories.length > 0) {
             currentCategory = categories[0];
         }
 
-        // SORT 2: Items Sorting (Category -> Parivar -> Size)
         allItems.sort((a, b) => {
             const getBase = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
             const getRank = (name) => {
@@ -67,7 +72,7 @@ export async function fetchMenuFromCloud() {
         
         loadCategories();
         if(currentCategory) {
-            loadItems(currentCategory); // Pehli category show karo
+            loadItems(currentCategory);
         }
         updateDatalist(); 
         
@@ -77,7 +82,6 @@ export async function fetchMenuFromCloud() {
     }
 }
 
-// 2. RENDER CATEGORIES
 function loadCategories() {
     const list = document.getElementById('categoryList');
     if(!list) return;
@@ -108,13 +112,11 @@ function loadCategories() {
     });
 }
 
-// 3. RENDER ITEMS IN GRID
 function loadItems(categoryFilter) {
     const grid = document.getElementById('itemsGrid');
     if(!grid) return;
     grid.innerHTML = '';
 
-    // "All" ki logic hata di, ab hamesha specific category hi show hogi
     let itemsToShow = allItems.filter(item => item.category === categoryFilter);
 
     if(itemsToShow.length === 0) {
@@ -137,7 +139,9 @@ function loadItems(categoryFilter) {
             <div class="item-price" style="padding:5px 10px 10px; color:#10b981; font-weight:bold;">₹${item.price}</div>
         `;
         
+        // 🔊 POP SOUND ON CLICK
         card.onclick = () => {
+            playPopSound();
             window.dispatchEvent(new CustomEvent('add-to-cart', { detail: item }));
         };
 
@@ -145,7 +149,6 @@ function loadItems(categoryFilter) {
     });
 }
 
-// 4. QUICK ADD LOGIC
 function setupQuickAddPopups() {
     const mainBtn = document.getElementById('qckAddBtn');
     const choiceModal = document.getElementById('quickAddChoiceModal');
@@ -169,7 +172,6 @@ function setupQuickAddPopups() {
     };
     document.getElementById('cancelBillOnlyBtn').onclick = () => document.getElementById('billOnlyModal').classList.add('hidden');
 
-    // SAVE TO GLOBAL FIREBASE
     document.getElementById('saveGlobalBtn').onclick = async () => {
         const name = document.getElementById('globalItemName').value.trim();
         const price = document.getElementById('globalItemPrice').value.trim();
@@ -210,7 +212,6 @@ function setupQuickAddPopups() {
         }
     };
 
-    // SAVE TO BILL ONLY LOGIC
     const saveToBillBtn = document.getElementById('saveToBillBtn'); 
     
     if (saveToBillBtn) {
@@ -229,6 +230,7 @@ function setupQuickAddPopups() {
                 price: Number(price)
             };
 
+            playPopSound(); // 🔊 Custom item add pe bhi pop sound
             window.dispatchEvent(new CustomEvent('add-custom-item-to-bill', { detail: customItem }));
 
             document.getElementById('tempItemName').value = '';
@@ -247,9 +249,6 @@ function updateDatalist() {
     });
 }
 
-// ==========================================
-// SEARCH LOGIC
-// ==========================================
 function setupSearch() {
     const searchInput = document.getElementById('searchInput');
     if (!searchInput) return;
@@ -264,7 +263,6 @@ function setupSearch() {
             return;
         }
 
-        // Search hamesha saare (allItems) par kaam karega
         let searchedItems = allItems.filter(item => 
             item.name.toLowerCase().includes(searchTerm)
         );
@@ -289,7 +287,9 @@ function setupSearch() {
                 <div class="item-price" style="padding:5px 10px 10px; color:#10b981; font-weight:bold;">₹${item.price}</div>
             `;
             
+            // 🔊 POP SOUND ON SEARCH ITEM CLICK
             card.onclick = () => {
+                playPopSound();
                 window.dispatchEvent(new CustomEvent('add-to-cart', { detail: item }));
             };
             
