@@ -2,6 +2,43 @@ import { db } from './firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 document.addEventListener('DOMContentLoaded', () => {
+    // =====================================
+    // 🧠 BRAHMASTRA: LIVE IMAGE TO BASE64
+    // =====================================
+    let logoBase64Data = "";
+    let qrBase64Data = "";
+
+    function loadImagesToMemory() {
+        const convertToBase64 = (url) => {
+            return new Promise((resolve, reject) => {
+                let img = new Image();
+                img.crossOrigin = 'Anonymous'; // PWA block bypass
+                img.onload = () => {
+                    let canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    let ctx = canvas.getContext('2d');
+                    
+                    // White background ensure karne ke liye (Transparent black ho jata hai printer me)
+                    ctx.fillStyle = "#FFFFFF";
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0);
+                    
+                    resolve(canvas.toDataURL('image/png'));
+                };
+                img.onerror = (e) => reject(e);
+                img.src = url;
+            });
+        };
+
+        // App khulte hi images memory me load ho jayengi
+        convertToBase64('./logo.png').then(data => logoBase64Data = data).catch(() => console.log("Logo nahi mila"));
+        convertToBase64('./qr.png').then(data => qrBase64Data = data).catch(() => console.log("QR nahi mila"));
+    }
+    
+    // Function call kardo
+    loadImagesToMemory();
+
     const cartItemsContainer = document.getElementById('cartItems');
     const cartTotalElement = document.getElementById('cartTotal');
     const activeTableNameEl = document.getElementById('activeTableName');
@@ -314,23 +351,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // ==========================================
-                // RAWBT & ESC/POS MAGIC (HARDWARE COMMANDS)
+                // FINAL RAWBT PRINT FORMAT (LOGO + QR + BOLD)
                 // ==========================================
                 const BOLD_ON = '\x1B\x45\x01';
                 const BOLD_OFF = '\x1B\x45\x00';
-                
-                // YAHAN APNA BASE64 CODE PASTE KARNA HAI (Inverted commas ke andar)
-                const logoBase64 = "YAHAN_LOGO_KA_BASE64_PASTE_KAR"; 
-                const qrBase64 = "YAHAN_QR_CODE_KA_BASE64_PASTE_KAR";
 
                 let shortOrderId = String(Date.now()).slice(-5); 
+                
                 let billText = "";
                 
-                // 1. LOGO PRINT (RawBT tag)
-                // Agar abhi logo nahi daalna toh is line ko '//' lagakar comment kar dena
-                billText += `<center><img>${logoBase64}</img></center>\n`;
+                // 1. LOGO PRINT (Agar memory me load ho gaya hai toh print hoga)
+                if (logoBase64Data) {
+                    billText += `<center><img>${logoBase64Data}</img></center>\n`;
+                }
 
-                // 2. SHOP NAME (Bada aur Bold - RawBT tags)
+                // 2. SHOP NAME (Bada aur Bold - Hardware Tag)
                 billText += `<center><W><b>NEW PIZZA HUT\nAND LIVE CAKE</b></W></center>\n`;
                 
                 // 3. ADDRESS (Normal font, center aligned)
@@ -358,16 +393,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 billText += `Total Quantity: ${totalQty}\n`;
                 billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n"; 
                 
-                // 5. TOTAL (Bold)
+                // 5. TOTAL (Bold command on/off)
                 billText += centerText(`${BOLD_ON}TOTAL: Rs ${total}${BOLD_OFF}`) + "\n\n"; 
                 
-                // Mode of Payment & Received Hata Diya Gaya Hai
-                
-                // 6. QR CODE PRINT
-                billText += `<center><img>${qrBase64}</img></center>\n`;
-                billText += centerText("Scan To Pay") + "\n\n";
+                // 6. QR CODE PRINT (Agar memory me hai)
+                if (qrBase64Data) {
+                    billText += `<center><img>${qrBase64Data}</img></center>\n`;
+                }
                 
                 // 7. FOOTER
+                billText += centerText("Scan To Pay") + "\n\n";
                 billText += centerText(`${BOLD_ON}Thank You! Visit Again!${BOLD_OFF}`) + "\n\n\n\n";
                 
                 window.location.href = "rawbt:" + encodeURIComponent(billText);
