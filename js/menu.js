@@ -21,7 +21,7 @@ export async function fetchMenuFromCloud() {
     try {
         const querySnapshot = await getDocs(collection(db, "menu_items"));
         allItems = [];
-        let catSet = new Set(['All']);
+        let catSet = new Set();
 
         querySnapshot.forEach((docSnap) => {
             let item = docSnap.data();
@@ -32,12 +32,13 @@ export async function fetchMenuFromCloud() {
             }
         });
 
-        // ==========================================
-        // PRO SORTING: 1. Category -> 2. Base Name -> 3. Size
-        // ==========================================
+        // SORT 1: Categories A-Z
+        let sortedCats = Array.from(catSet).sort();
+        categories = ['All', ...sortedCats]; // 'All' hamesha sabse upar rahega
+
+        // SORT 2: Items Sorting (Category -> Parivar -> Size)
         allItems.sort((a, b) => {
             const getBase = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
-            
             const getRank = (name) => {
                 let n = name.toLowerCase();
                 if (n.includes('(half)') || n.includes('(regular)')) return 1;
@@ -46,23 +47,18 @@ export async function fetchMenuFromCloud() {
                 return 0; 
             };
 
-            // Rule 1: Category ke hisaab se A-Z sort (Taki "All" tab me mix na ho)
             let catA = (a.category || "").toLowerCase();
             let catB = (b.category || "").toLowerCase();
             if (catA < catB) return -1;
             if (catA > catB) return 1;
 
-            // Rule 2: Base Name (Parivar) ke hisaab se sort karo A-Z
             let baseA = getBase(a.name);
             let baseB = getBase(b.name);
             if (baseA < baseB) return -1;
             if (baseA > baseB) return 1;
 
-            // Rule 3: Agar Base Name same hai, toh unke Size (Rank) ke hisaab se sort karo
             return getRank(a.name) - getRank(b.name);
         });
-
-        categories = Array.from(catSet);
         
         loadCategories();
         loadItems('All');
@@ -94,6 +90,7 @@ function loadCategories() {
         btn.style.color = cat === currentCategory ? "white" : "#4b5563";
         btn.style.cursor = "pointer";
         btn.style.borderRadius = "8px";
+        btn.style.fontWeight = "bold"; // Font thoda heavy rakha hai list theek se padhne ke liye
         
         btn.onclick = () => {
             currentCategory = cat;
@@ -117,23 +114,7 @@ function loadItems(categoryFilter) {
         return;
     }
 
-    let currentCat = "";
-
     itemsToShow.forEach(item => {
-        // NAYA JAADU: "All" Tab ke liye Divider Headers (Poori line gherenge)
-        if (categoryFilter === 'All' && item.category !== currentCat) {
-            currentCat = item.category;
-            let header = document.createElement('div');
-            header.style.gridColumn = "1 / -1"; // Isse header teeno columns (1 line) block kar lega
-            header.style.padding = "20px 10px 5px";
-            header.style.fontSize = "1.3rem";
-            header.style.fontWeight = "900";
-            header.style.color = "#1f2937";
-            header.style.borderBottom = "2px solid #e5e7eb";
-            header.innerText = "📌 " + currentCat;
-            grid.appendChild(header);
-        }
-
         let card = document.createElement('div');
         card.className = 'item-card';
         
