@@ -92,11 +92,25 @@
                 <div class="items-grid" id="itemsGrid">
                 </div>
             </main>
+                            <!-- FLOATING BUTTON (MAIN CONTENT KE ANDAR YAA BAAHAR) -->
+                <button id="floatingCartBtn" class="floating-cart-btn">
+                    🛒 View Details & Pay <span class="fab-badge" id="fabTotal">₹0.00</span>
+                </button>
+
 
             <aside class="cart-panel">
                 <div class="cart-items" id="cartItems">
                 </div>
+                            <aside class="cart-panel">
+                <!-- NAYA CART HEADER (START) -->
+                <div style="background: #1f2937; padding: 20px; display: flex; justify-content: space-between; align-items: center; color: white;">
+                    <h3 style="margin: 0; font-size: 1.2rem;">🛒 Order Details</h3>
+                    <button id="closeCartBtn" style="background: #ef4444; border: none; color: white; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close ❌</button>
+                </div>
+                <!-- NAYA CART HEADER (END) -->
                 
+                <div class="cart-items" id="cartItems">
+
                 <div class="billing-section">
                     <div class="total-row">
                         <span>Total:</span>
@@ -349,6 +363,36 @@ window.reprintGhostBill = function(billId) {
     // 4. RawBT App ko direct print command bhejna (No Popup)
     window.location.href = "rawbt:" + encodeURIComponent(billText);
 }
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const floatingCartBtn = document.getElementById('floatingCartBtn');
+            const cartPanel = document.querySelector('.cart-panel');
+            const closeCartBtn = document.getElementById('closeCartBtn');
+            
+            // Button dabane par drawer open karo
+            floatingCartBtn.addEventListener('click', () => {
+                cartPanel.classList.add('open');
+                floatingCartBtn.style.display = 'none'; // Open hote hi button gayab
+            });
+            
+            // Close dabane par wapas andar
+            closeCartBtn.addEventListener('click', () => {
+                cartPanel.classList.remove('open');
+                floatingCartBtn.style.display = 'flex'; // Wapas button dikhao
+            });
+
+            // Live Total Amount Sync (Cart se Floating button mein)
+            const cartTotalSpan = document.getElementById('cartTotal');
+            const fabTotalSpan = document.getElementById('fabTotal');
+            
+            const observer = new MutationObserver(() => {
+                fabTotalSpan.innerText = cartTotalSpan.innerText;
+            });
+            if(cartTotalSpan) {
+                observer.observe(cartTotalSpan, { childList: true, characterData: true, subtree: true });
+            }
+        });
+    </script>
 
 </script>
 <!-- 🕒 24-HOUR HISTORY DRAWER -->

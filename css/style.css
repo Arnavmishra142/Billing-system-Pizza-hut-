@@ -994,3 +994,68 @@ body {
         padding: 20px !important;
     }
 }
+/* =========================================
+   PRO UX: FULL WIDTH ITEMS & SLIDING CART
+   ========================================= */
+
+/* 1. Sidebar aur Main Content ko extra space do */
+.sidebar { width: 22% !important; }
+.main-content { width: 78% !important; }
+
+/* 2. Items Grid ko "Hamesha 3 Boxes" me Lock karo (Portrait & Landscape dono me) */
+.items-grid { 
+    grid-template-columns: repeat(3, 1fr) !important; 
+    gap: 15px !important; 
+}
+.item-card {
+    min-height: 180px !important; /* Box thode bade aur sundar dikhenge */
+}
+
+/* 3. Cart Panel ko "Hidden Sliding Drawer" banao */
+.cart-panel {
+    position: fixed !important;
+    top: 0 !important;
+    right: -450px !important; /* Screen ke bahar chupa diya */
+    width: 380px !important;
+    max-width: 90vw !important;
+    height: 100dvh !important;
+    z-index: 10000 !important;
+    box-shadow: -5px 0 25px rgba(0,0,0,0.4) !important;
+    transition: right 0.3s ease-in-out !important;
+    display: flex !important;
+    flex-direction: column !important;
+    background: #fff !important;
+}
+.cart-panel.open {
+    right: 0 !important; /* Button dabane par bahar aayega */
+}
+
+/* 4. Floating Action Button (FAB) */
+.floating-cart-btn {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    background: linear-gradient(135deg, #4f46e5, #6366f1);
+    color: white;
+    border: none;
+    border-radius: 50px;
+    padding: 15px 25px;
+    font-size: 1.2rem;
+    font-weight: bold;
+    box-shadow: 0 10px 20px rgba(79, 70, 229, 0.4);
+    cursor: pointer;
+    z-index: 9990;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    transition: transform 0.2s;
+}
+.floating-cart-btn:active { transform: scale(0.95); }
+.fab-badge {
+    background: white;
+    color: #4f46e5;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 1.1rem;
+    font-weight: 900;
+}
