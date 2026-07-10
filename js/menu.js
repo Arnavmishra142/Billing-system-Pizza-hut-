@@ -33,32 +33,36 @@ export async function fetchMenuFromCloud() {
         });
 
         // ==========================================
-        // FAMILY GROUPING + PRICE SORTING LOGIC
-        // (Margherita Regular ke niche Margherita Medium/Large hi aayega,
-        //  aur family ke andar size-order price ke hisaab se decide hoga)
+        // PRO SORTING: 1. Category -> 2. Base Name -> 3. Size
         // ==========================================
-        const getBaseName = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
-
         allItems.sort((a, b) => {
-            const baseA = getBaseName(a.name);
-            const baseB = getBaseName(b.name);
+            const getBase = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
+            
+            const getRank = (name) => {
+                let n = name.toLowerCase();
+                if (n.includes('(half)') || n.includes('(regular)')) return 1;
+                if (n.includes('(full)') || n.includes('(medium)')) return 2;
+                if (n.includes('(large)')) return 3;
+                return 0; 
+            };
 
-            // Rule 1: Pehle family (base name) ke hisaab se A-Z
+            // Rule 1: Category ke hisaab se A-Z sort (Taki "All" tab me mix na ho)
+            let catA = (a.category || "").toLowerCase();
+            let catB = (b.category || "").toLowerCase();
+            if (catA < catB) return -1;
+            if (catA > catB) return 1;
+
+            // Rule 2: Base Name (Parivar) ke hisaab se sort karo A-Z
+            let baseA = getBase(a.name);
+            let baseB = getBase(b.name);
             if (baseA < baseB) return -1;
             if (baseA > baseB) return 1;
 
-            // Rule 2: Same family ke andar, kam price wala pehle (Half/Regular < Full/Medium < Large)
-            return (Number(a.price) || 0) - (Number(b.price) || 0);
+            // Rule 3: Agar Base Name same hai, toh unke Size (Rank) ke hisaab se sort karo
+            return getRank(a.name) - getRank(b.name);
         });
 
         categories = Array.from(catSet);
-
-        // Categories ko A-Z order mein sort karo, "All" hamesha sabse upar
-        categories.sort((a, b) => {
-            if (a === 'All') return -1;
-            if (b === 'All') return 1;
-            return a.localeCompare(b);
-        });
         
         loadCategories();
         loadItems('All');
@@ -113,7 +117,23 @@ function loadItems(categoryFilter) {
         return;
     }
 
+    let currentCat = "";
+
     itemsToShow.forEach(item => {
+        // NAYA JAADU: "All" Tab ke liye Divider Headers (Poori line gherenge)
+        if (categoryFilter === 'All' && item.category !== currentCat) {
+            currentCat = item.category;
+            let header = document.createElement('div');
+            header.style.gridColumn = "1 / -1"; // Isse header teeno columns (1 line) block kar lega
+            header.style.padding = "20px 10px 5px";
+            header.style.fontSize = "1.3rem";
+            header.style.fontWeight = "900";
+            header.style.color = "#1f2937";
+            header.style.borderBottom = "2px solid #e5e7eb";
+            header.innerText = "📌 " + currentCat;
+            grid.appendChild(header);
+        }
+
         let card = document.createElement('div');
         card.className = 'item-card';
         
@@ -135,7 +155,6 @@ function loadItems(categoryFilter) {
         grid.appendChild(card);
     });
 }
-
 
 // 4. QUICK ADD LOGIC
 function setupQuickAddPopups() {
@@ -202,9 +221,7 @@ function setupQuickAddPopups() {
         }
     };
 
-    // ==========================================
-    // SAVE TO BILL ONLY LOGIC (Fixed)
-    // ==========================================
+    // SAVE TO BILL ONLY LOGIC
     const saveToBillBtn = document.getElementById('saveToBillBtn'); 
     
     if (saveToBillBtn) {
