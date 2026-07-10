@@ -299,18 +299,32 @@ document.addEventListener('DOMContentLoaded', () => {
             checkoutBtn.disabled = true;
 
             try {
-                // 1. BILL TEXT GENERATION (Bina Base64 Image ke)
+                // 1. BILL TEXT GENERATION
                 const BOLD_ON = '\x1B\x45\x01';
                 const BOLD_OFF = '\x1B\x45\x00';
+                
+                // Hardware size command as backup
+                const SIZE_BIG = '\x1D\x21\x11'; 
+                const SIZE_NORMAL = '\x1D\x21\x00';
+
                 let shortOrderId = String(Date.now()).slice(-5); 
                 
-                let billText = BOLD_ON;
-                billText += centerText("NEW PIZZA HUT AND LIVE CAKE") + "\n";
+                let billText = "";
+                
+                // 1. LOGO PRINT (Direct Link)
+                billText += `<center><img>https://i.postimg.cc/ygDzw5R6/logo.png</img></center>\n`;
+
+                // 2. SHOP NAME (Bada aur Bold - Height aur Width dono badhaya)
+                billText += `<center>${SIZE_BIG}<W><H><b>NEW PIZZA HUT</b></H></W>${SIZE_NORMAL}</center>\n`;
+                billText += `<center>${SIZE_BIG}<W><H><b>& LIVE CAKE</b></H></W>${SIZE_NORMAL}</center>\n`;
+                
+                // 3. ADDRESS (Normal font, center aligned)
                 billText += centerText("in front of SBI bank ke tik") + "\n";
                 billText += centerText("samne salempur Deoria, UP") + "\n";
                 billText += centerText("FSSAI: 30230324113093042") + "\n";
                 billText += centerText("Phone: 9628548655") + "\n\n"; 
                 
+                // 4. BILL DETAILS
                 billText += `Bill No: ${shortOrderId}\n`;
                 billText += `Created On: ${getFormattedDate()}\n`;
                 billText += `Bill To: ${getDisplayTitle()}\n\n`; 
@@ -329,11 +343,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 billText += `Total Quantity: ${totalQty}\n`;
                 billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n"; 
                 
-                billText += centerText(`TOTAL: Rs ${total}`) + "\n\n"; 
+                // 5. TOTAL (Bold)
+                billText += centerText(`${BOLD_ON}TOTAL: Rs ${total}${BOLD_OFF}`) + "\n\n"; 
                 
-                // FOOTER
+                // 6. QR CODE & FOOTER (Direct Link)
+                billText += `<center><img>https://i.postimg.cc/34kHP6GQ/qr.jpg</img></center>\n`;
                 billText += centerText("Scan To Pay") + "\n\n";
-                billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
+                billText += centerText(`${BOLD_ON}Thank You! Visit Again!${BOLD_OFF}`) + "\n\n\n\n";
 
                 // 2. 🚀 BYPASS CHROME BLOCK HACK (Direct Link Click)
                 const printUrl = "rawbt:" + encodeURIComponent(billText);
@@ -344,7 +360,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 printLink.click(); // JS se link click karwaya taaki Chrome block na kare
                 setTimeout(() => document.body.removeChild(printLink), 500);
 
-                // 3. FIREBASE SAVE (Print command bhejne ke baad save karo taaki delay na ho)
+                // 3. FIREBASE SAVE 
                 const billId = `SALE_${Date.now()}`;
                 await setDoc(doc(db, "sales_history", billId), {
                     table: tableName,
