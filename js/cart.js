@@ -287,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (kotBtn) kotBtn.addEventListener('click', () => printKOT(false));
 
     // =====================================
-    // CHECKOUT (PURE ESC/POS - NO HTML)
+    // CHECKOUT (FINAL BILL) LOGIC (ANTI-BLOCK HACK)
     // =====================================
     if (checkoutBtn) {
         checkoutBtn.addEventListener('click', async () => {
@@ -295,40 +295,72 @@ document.addEventListener('DOMContentLoaded', () => {
             const tableName = getCurrentTable();
             const customerName = getCurrentCustomer();
             const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-            
-            // ESC/POS Commands
-            const BOLD_ON = '\x1B\x45\x01';
-            const BOLD_OFF = '\x1B\x45\x00';
-            const SIZE_BIG = '\x1D\x21\x11'; // Double Width/Height
-            const SIZE_NORMAL = '\x1D\x21\x00';
-            const ALIGN_CENTER = '\x1B\x61\x01';
-            const ALIGN_LEFT = '\x1B\x61\x00';
+            checkoutBtn.innerText = "Processing...";
+            checkoutBtn.disabled = true;
 
             try {
-                // Bill Text (Ab koi HTML tag nahi hai, printer hang nahi hoga!)
-                let billText = ALIGN_CENTER + SIZE_BIG + BOLD_ON + "NEW PIZZA HUT\n& LIVE CAKE" + BOLD_OFF + SIZE_NORMAL + "\n\n";
+                // 1. BILL TEXT GENERATION
+                const BOLD_ON = '\x1B\x45\x01';
+                const BOLD_OFF = '\x1B\x45\x00';
                 
-                billText += ALIGN_LEFT + "in front of SBI bank ke tik\n";
-                billText += "samne salempur Deoria, UP\n";
-                billText += "FSSAI: 30230324113093042\n";
-                billText += "Phone: 9628548655\n\n"; 
+                // Hardware size command as backup
+                const SIZE_BIG = '\x1D\x21\x11'; 
+                const SIZE_NORMAL = '\x1D\x21\x00';
+
+                let shortOrderId = String(Date.now()).slice(-5); 
                 
-                billText += `Bill No: ${String(Date.now()).slice(-5)}\n`;
-                billText += `Date: ${getFormattedDate()}\n`;
-                billText += `Table: ${getDisplayTitle()}\n\n`; 
+                let billText = "";
                 
-                billText += "Item Name      Qty Rate  Total\n";
+                // 1. LOGO PRINT (Direct Link)
+                billText += `<center><img>https://i.postimg.cc/ygDzw5R6/logo.png</img></center>\n`;
+
+                // 2. SHOP NAME (Bada aur Bold - Height aur Width dono badhaya)
+                billText += `<center>${SIZE_BIG}<W><H><b>NEW PIZZA HUT</b></H></W>${SIZE_NORMAL}</center>\n`;
+                billText += `<center>${SIZE_BIG}<W><H><b>& LIVE CAKE</b></H></W>${SIZE_NORMAL}</center>\n`;
+                
+                // 3. ADDRESS (Normal font, center aligned)
+                billText += centerText("in front of SBI bank ke tik") + "\n";
+                billText += centerText("samne salempur Deoria, UP") + "\n";
+                billText += centerText("FSSAI: 30230324113093042") + "\n";
+                billText += centerText("Phone: 9628548655") + "\n\n"; 
+                
+                // 4. BILL DETAILS
+                billText += `Bill No: ${shortOrderId}\n`;
+                billText += `Created On: ${getFormattedDate()}\n`;
+                billText += `Bill To: ${getDisplayTitle()}\n\n`; 
+                
+                billText += "Item Name      Qty Rate  Total\n\n"; 
+                
+                let totalQty = 0;
                 currentCart.forEach(item => {
+                    totalQty += item.qty;
                     billText += formatBillRow(item.name, item.qty, item.price, item.price * item.qty);
                 });
                 
-                billText += "\n" + BOLD_ON + `TOTAL: Rs ${total}` + BOLD_OFF + "\n\n"; 
-                billText += ALIGN_CENTER + "Thank You! Visit Again!\n\n\n\n";
+                billText += "\n"; 
+                
+                billText += `Total Items: ${currentCart.length}\n`;
+                billText += `Total Quantity: ${totalQty}\n`;
+                billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n"; 
+                
+                // 5. TOTAL (Bold)
+                billText += centerText(`${BOLD_ON}TOTAL: Rs ${total}${BOLD_OFF}`) + "\n\n"; 
+                
+                // 6. QR CODE & FOOTER (Direct Link)
+                billText += `<center><img>https://i.postimg.cc/34kHP6GQ/qr.jpg</img></center>\n`;
+                billText += centerText("Scan To Pay") + "\n\n";
+                billText += centerText(`${BOLD_ON}Thank You! Visit Again!${BOLD_OFF}`) + "\n\n\n\n";
 
-                // Print
-                window.location.href = "rawbt:" + encodeURIComponent(billText);
+                // 2. 🚀 BYPASS CHROME BLOCK HACK (Direct Link Click)
+                const printUrl = "rawbt:" + encodeURIComponent(billText);
+                const printLink = document.createElement('a');
+                printLink.href = printUrl;
+                printLink.style.display = 'none';
+                document.body.appendChild(printLink);
+                printLink.click(); // JS se link click karwaya taaki Chrome block na kare
+                setTimeout(() => document.body.removeChild(printLink), 500);
 
-                // Firebase & Reset
+                // 3. FIREBASE SAVE 
                 const billId = `SALE_${Date.now()}`;
                 await setDoc(doc(db, "sales_history", billId), {
                     table: tableName,
@@ -348,8 +380,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderCart(); 
                 setTimeout(() => { if(backToTablesBtn) backToTablesBtn.click() }, 500); 
 
-            } catch (e) {
-                console.error(e);
+            } catch (error) {
+                alert("Database error!");
+                console.error(error);
             } finally {
                 checkoutBtn.innerText = "Bill & Settle";
                 checkoutBtn.disabled = false;
