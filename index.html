@@ -4,9 +4,77 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>POS System - New Pizza Hut & Live Cake</title>
-    <link rel="stylesheet" href="css/style.css?v=">
-   <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="css/style.css?v=200">
+    <link rel="manifest" href="manifest.json">
    
+    <!-- =========================================
+         INLINE CSS FIXES FOR FLOATING BUTTON & SCROLL
+         ========================================= -->
+    <style>
+        /* 1. View Details & Pay Button - Centered above bottom bar */
+        .floating-cart-btn {
+            position: fixed !important;
+            bottom: 95px !important; /* Bottom black bar ke theek upar */
+            left: 50% !important;
+            transform: translateX(-50%) !important;
+            right: auto !important;
+            background: linear-gradient(135deg, #4f46e5, #6366f1) !important;
+            color: white !important;
+            border: 3px solid #ffffff !important; /* Extra highlight */
+            border-radius: 50px !important;
+            padding: 12px 25px !important;
+            font-size: 1.2rem !important;
+            font-weight: 900 !important;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.4) !important;
+            z-index: 9999 !important;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            white-space: nowrap;
+        }
+        .floating-cart-btn:active { 
+            transform: translateX(-50%) scale(0.95) !important; 
+        }
+        .fab-badge {
+            background: white;
+            color: #4f46e5;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 1.1rem;
+            font-weight: 900;
+        }
+
+        /* 2. Items Grid Scroll Fix (Button ke neeche space) */
+        .items-grid {
+            padding-bottom: 130px !important; /* Items button ke piche nahi fasenge */
+        }
+
+        /* 3. Category Sidebar Scroll Fix */
+        .sidebar {
+            padding-bottom: 90px !important; 
+        }
+
+        /* 4. Cart Drawer Header Styling */
+        .cart-header-pro {
+            background: #1f2937; 
+            padding: 20px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            color: white;
+            border-bottom: 3px solid #374151;
+        }
+        .close-cart-btn {
+            background: #ef4444; 
+            border: none; 
+            color: white; 
+            padding: 8px 15px; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-weight: bold;
+            font-size: 1rem;
+        }
+    </style>
 </head>
 
 <body>
@@ -92,25 +160,17 @@
                 <div class="items-grid" id="itemsGrid">
                 </div>
             </main>
-                            <!-- FLOATING BUTTON (MAIN CONTENT KE ANDAR YAA BAAHAR) -->
-                <button id="floatingCartBtn" class="floating-cart-btn">
-                    🛒 View Details & Pay <span class="fab-badge" id="fabTotal">₹0.00</span>
-                </button>
 
-
+            <!-- SLIDING CART DRAWER -->
             <aside class="cart-panel">
-                <div class="cart-items" id="cartItems">
+                <div class="cart-header-pro">
+                    <h3 style="margin: 0; font-size: 1.3rem;">🛒 Order Details</h3>
+                    <button id="closeCartBtn" class="close-cart-btn">Close ❌</button>
                 </div>
-                            <aside class="cart-panel">
-                <!-- NAYA CART HEADER (START) -->
-                <div style="background: #1f2937; padding: 20px; display: flex; justify-content: space-between; align-items: center; color: white;">
-                    <h3 style="margin: 0; font-size: 1.2rem;">🛒 Order Details</h3>
-                    <button id="closeCartBtn" style="background: #ef4444; border: none; color: white; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: bold;">Close ❌</button>
-                </div>
-                <!-- NAYA CART HEADER (END) -->
                 
                 <div class="cart-items" id="cartItems">
-
+                </div>
+                
                 <div class="billing-section">
                     <div class="total-row">
                         <span>Total:</span>
@@ -125,6 +185,12 @@
                 </div>
             </aside>
         </div>
+
+        <!-- FLOATING CART BUTTON -->
+        <button id="floatingCartBtn" class="floating-cart-btn">
+            🛒 View Details & Pay <span class="fab-badge" id="fabTotal">₹0.00</span>
+        </button>
+
     </div>
 
     <!-- MODALS -->
@@ -218,194 +284,192 @@
             if(posBtn) posBtn.style.display = 'none';
         });
     </script>
-    <script>// ==========================================
-// 🕒 24-HOUR HISTORY LOGIC (GLOBAL)
-// ==========================================
-
-// Safe localStorage read - agar data corrupt hua toh crash nahi, empty array milega
-function getGhostHistory() {
-    try {
-        const raw = localStorage.getItem('pos_24h_history');
-        const parsed = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-        console.error("History data corrupt tha, reset kar diya:", e);
-        return [];
-    }
-}
-
-window.openHistoryDrawer = function() {
-    document.getElementById('historyDrawer').classList.add('open');
-    document.getElementById('historyOverlay').classList.add('open');
-    renderHistoryBills();
-}
-
-window.closeHistoryDrawer = function() {
-    document.getElementById('historyDrawer').classList.remove('open');
-    document.getElementById('historyOverlay').classList.remove('open');
-}
-
-// Ye function tere kisi bhi page/script se call ho sakta hai bill save karne ke liye
-window.saveToGhostHistory = function(orderNumber, totalAmount, cartItems) {
-    let history = getGhostHistory();
     
-    const newBill = {
-        id: orderNumber || "ORD-" + Math.floor(Math.random() * 10000),
-        timeStr: new Date().toLocaleString('en-IN', { hour12: true }),
-        timestamp: Date.now(),
-        total: totalAmount,
-        items: cartItems || [] // Tere items ka array, fallback empty
-    };
-
-    history.unshift(newBill); // Naya bill sabse upar
-    localStorage.setItem('pos_24h_history', JSON.stringify(history));
-}
-
-function renderHistoryBills() {
-    const list = document.getElementById('historyList');
-    let history = getGhostHistory();
-    const now = Date.now();
-    const twentyFourHours = 24 * 60 * 60 * 1000;
-
-    // 24 ghante se purane bills ko filter karke hata do
-    history = history.filter(bill => (now - bill.timestamp) <= twentyFourHours);
-    localStorage.setItem('pos_24h_history', JSON.stringify(history));
-
-    list.innerHTML = "";
-    if (history.length === 0) {
-        list.innerHTML = "<p style='text-align:center; color:#94a3b8;'>Koi recent bills nahi hain.</p>";
-        return;
-    }
-
-    history.forEach(bill => {
-        list.innerHTML += `
-            <div class="history-card">
-                <p><strong>Order No:</strong> ${bill.id}</p>
-                <p><strong>Time:</strong> ${bill.timeStr}</p>
-                <p><strong>Amount:</strong> ₹${bill.total}</p>
-                <div style="display: flex; gap: 8px; margin-top: 10px;">
-                    <button class="btn-reprint" style="flex: 1;" onclick="reprintGhostBill('${bill.id}')">🖨️ Print</button>
-                    <button class="btn-delete-ghost" onclick="deleteGhostBill('${bill.id}')">🗑️</button>
-                </div>
-            </div>
-        `;
-    });
-}
-
-// FIX: Ye function pehle missing tha - delete button click pe crash ho raha tha
-window.deleteGhostBill = function(billId) {
-    let history = getGhostHistory();
-    history = history.filter(b => b.id !== billId);
-    localStorage.setItem('pos_24h_history', JSON.stringify(history));
-    renderHistoryBills(); // list refresh
-}
-
-window.reprintGhostBill = function(billId) {
-    // 1. History se exact bill ka data nikalna
-    let history = getGhostHistory();
-    const bill = history.find(b => b.id === billId);
-
-    if (!bill) {
-        alert("Error: Bill data nahi mila!");
-        return;
-    }
-
-    // FIX: items missing/corrupt hone pe crash na ho
-    if (!Array.isArray(bill.items) || bill.items.length === 0) {
-        alert("Is bill ke items save nahi hue the, print nahi ho sakta.");
-        return;
-    }
-
-    // 2. Alignment Helpers (Jo humne cart.js me banaye the)
-    const centerText = (text) => {
-        if (text.length >= 32) return text.substring(0, 32);
-        const spaces = Math.floor((32 - text.length) / 2);
-        return " ".repeat(spaces) + text;
-    };
-
-    const rightText = (text) => {
-        if (text.length >= 32) return text.substring(0, 32);
-        const spaces = 32 - text.length;
-        return " ".repeat(spaces) + text;
-    };
-
-    // 3. Bill Layout Design Karna
-    let billText = "\n";
-    billText += centerText("NEW PIZZA HUT") + "\n";
-    billText += centerText("Live Cake | Salempur") + "\n";
-    
-    billText += "--------------------------------\n";
-    billText += `Order: ${bill.id}\n`;
-    billText += `Date: ${bill.timeStr}\n`;
-    billText += "--------------------------------\n";
-    billText += "Item                Qty      Amt\n";
-    billText += "--------------------------------\n";
-    
-    // Items ko loop karke add karna
-    bill.items.forEach(item => {
-        let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
-        let q = String(item.qty).padStart(2, " ") + "x";
-        let a = String(item.price * item.qty).padStart(6, " ");
-        billText += `${n}    ${q}   ${a}\n`;
-    });
-    
-    billText += "--------------------------------\n";
-    billText += rightText(`TOTAL: Rs ${bill.total}`) + "\n";
-    billText += "--------------------------------\n";
-    billText += centerText("Thank You! Visit Again") + "\n\n";
-    
-    billText += centerText("--- UPI PAYMENT ---") + "\n";
-    billText += centerText("6393349498@fam") + "\n";
-    billText += centerText("(Pay via PhonePe/GPay)") + "\n";
-    
-    billText += "\n\n\n\n"; // Paper cutting margin
-    
-    // 4. RawBT App ko direct print command bhejna (No Popup)
-    window.location.href = "rawbt:" + encodeURIComponent(billText);
-}
     <script>
+        // ==========================================
+        // 🕒 24-HOUR HISTORY LOGIC (GLOBAL)
+        // ==========================================
+        function getGhostHistory() {
+            try {
+                const raw = localStorage.getItem('pos_24h_history');
+                const parsed = raw ? JSON.parse(raw) : [];
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                console.error("History data corrupt tha, reset kar diya:", e);
+                return [];
+            }
+        }
+
+        window.openHistoryDrawer = function() {
+            document.getElementById('historyDrawer').classList.add('open');
+            document.getElementById('historyOverlay').classList.add('open');
+            renderHistoryBills();
+        }
+
+        window.closeHistoryDrawer = function() {
+            document.getElementById('historyDrawer').classList.remove('open');
+            document.getElementById('historyOverlay').classList.remove('open');
+        }
+
+        window.saveToGhostHistory = function(orderNumber, totalAmount, cartItems) {
+            let history = getGhostHistory();
+            const newBill = {
+                id: orderNumber || "ORD-" + Math.floor(Math.random() * 10000),
+                timeStr: new Date().toLocaleString('en-IN', { hour12: true }),
+                timestamp: Date.now(),
+                total: totalAmount,
+                items: cartItems || [] 
+            };
+            history.unshift(newBill); 
+            localStorage.setItem('pos_24h_history', JSON.stringify(history));
+        }
+
+        function renderHistoryBills() {
+            const list = document.getElementById('historyList');
+            let history = getGhostHistory();
+            const now = Date.now();
+            const twentyFourHours = 24 * 60 * 60 * 1000;
+
+            history = history.filter(bill => (now - bill.timestamp) <= twentyFourHours);
+            localStorage.setItem('pos_24h_history', JSON.stringify(history));
+
+            list.innerHTML = "";
+            if (history.length === 0) {
+                list.innerHTML = "<p style='text-align:center; color:#94a3b8;'>Koi recent bills nahi hain.</p>";
+                return;
+            }
+
+            history.forEach(bill => {
+                list.innerHTML += `
+                    <div class="history-card">
+                        <p><strong>Order No:</strong> ${bill.id}</p>
+                        <p><strong>Time:</strong> ${bill.timeStr}</p>
+                        <p><strong>Amount:</strong> ₹${bill.total}</p>
+                        <div style="display: flex; gap: 8px; margin-top: 10px;">
+                            <button class="btn-reprint" style="flex: 1;" onclick="reprintGhostBill('${bill.id}')">🖨️ Print</button>
+                            <button class="btn-delete-ghost" onclick="deleteGhostBill('${bill.id}')">🗑️</button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        window.deleteGhostBill = function(billId) {
+            let history = getGhostHistory();
+            history = history.filter(b => b.id !== billId);
+            localStorage.setItem('pos_24h_history', JSON.stringify(history));
+            renderHistoryBills(); 
+        }
+
+        window.reprintGhostBill = function(billId) {
+            let history = getGhostHistory();
+            const bill = history.find(b => b.id === billId);
+
+            if (!bill) {
+                alert("Error: Bill data nahi mila!");
+                return;
+            }
+
+            if (!Array.isArray(bill.items) || bill.items.length === 0) {
+                alert("Is bill ke items save nahi hue the, print nahi ho sakta.");
+                return;
+            }
+
+            const centerText = (text) => {
+                if (text.length >= 32) return text.substring(0, 32);
+                const spaces = Math.floor((32 - text.length) / 2);
+                return " ".repeat(spaces) + text;
+            };
+
+            const rightText = (text) => {
+                if (text.length >= 32) return text.substring(0, 32);
+                const spaces = 32 - text.length;
+                return " ".repeat(spaces) + text;
+            };
+
+            let billText = "\n";
+            billText += centerText("NEW PIZZA HUT") + "\n";
+            billText += centerText("Live Cake | Salempur") + "\n";
+            
+            billText += "--------------------------------\n";
+            billText += `Order: ${bill.id}\n`;
+            billText += `Date: ${bill.timeStr}\n`;
+            billText += "--------------------------------\n";
+            billText += "Item                Qty      Amt\n";
+            billText += "--------------------------------\n";
+            
+            bill.items.forEach(item => {
+                let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
+                let q = String(item.qty).padStart(2, " ") + "x";
+                let a = String(item.price * item.qty).padStart(6, " ");
+                billText += `${n}    ${q}   ${a}\n`;
+            });
+            
+            billText += "--------------------------------\n";
+            billText += rightText(`TOTAL: Rs ${bill.total}`) + "\n";
+            billText += "--------------------------------\n";
+            billText += centerText("Thank You! Visit Again") + "\n\n";
+            
+            billText += centerText("--- UPI PAYMENT ---") + "\n";
+            billText += centerText("6393349498@fam") + "\n";
+            billText += centerText("(Pay via PhonePe/GPay)") + "\n";
+            
+            billText += "\n\n\n\n"; 
+            
+            window.location.href = "rawbt:" + encodeURIComponent(billText);
+        }
+
+        // ==========================================
+        // FLOATING CART DRAWER LOGIC
+        // ==========================================
         document.addEventListener('DOMContentLoaded', () => {
             const floatingCartBtn = document.getElementById('floatingCartBtn');
             const cartPanel = document.querySelector('.cart-panel');
             const closeCartBtn = document.getElementById('closeCartBtn');
+            const backToTablesBtn = document.getElementById('backToTablesBtn');
             
-            // Button dabane par drawer open karo
+            // Open Drawer
             floatingCartBtn.addEventListener('click', () => {
                 cartPanel.classList.add('open');
-                floatingCartBtn.style.display = 'none'; // Open hote hi button gayab
+                floatingCartBtn.style.display = 'none'; 
             });
             
-            // Close dabane par wapas andar
+            // Close Drawer
             closeCartBtn.addEventListener('click', () => {
                 cartPanel.classList.remove('open');
-                floatingCartBtn.style.display = 'flex'; // Wapas button dikhao
+                floatingCartBtn.style.display = 'flex'; 
             });
 
-            // Live Total Amount Sync (Cart se Floating button mein)
+            // Agar Back dabayein, toh drawer band karke button wapas dikhao
+            if(backToTablesBtn) {
+                backToTablesBtn.addEventListener('click', () => {
+                    cartPanel.classList.remove('open');
+                    floatingCartBtn.style.display = 'flex';
+                });
+            }
+
+            // Sync Cart Total to Floating Button
             const cartTotalSpan = document.getElementById('cartTotal');
             const fabTotalSpan = document.getElementById('fabTotal');
             
             const observer = new MutationObserver(() => {
-                fabTotalSpan.innerText = cartTotalSpan.innerText;
+                if(fabTotalSpan && cartTotalSpan) {
+                    fabTotalSpan.innerText = cartTotalSpan.innerText;
+                }
             });
+            
             if(cartTotalSpan) {
                 observer.observe(cartTotalSpan, { childList: true, characterData: true, subtree: true });
             }
         });
     </script>
 
-</script>
-<!-- 🕒 24-HOUR HISTORY DRAWER -->
-<div id="historyOverlay" class="drawer-overlay" onclick="closeHistoryDrawer()"></div>
-<div id="historyDrawer" class="history-drawer">
-    <div class="drawer-header">
-        <h3 style="margin: 0; color: #1e293b;">📜 Recent Bills (24h)</h3>
-        <button onclick="closeHistoryDrawer()" class="close-btn">❌</button>
-    </div>
-    <div class="drawer-content" id="historyList">
-        <!-- Bills dynamically yahan aayenge -->
-    </div>
-</div>
-
-</body>
-</html>
+    <!-- 🕒 24-HOUR HISTORY DRAWER -->
+    <div id="historyOverlay" class="drawer-overlay" onclick="closeHistoryDrawer()"></div>
+    <div id="historyDrawer" class="history-drawer">
+        <div class="drawer-header">
+            <h3 style="margin: 0; color: #1e293b;">📜 Recent Bills (24h)</h3>
+            <button onclick="closeHistoryDrawer()" class="close-btn">❌</button>
+        </div>
+        <div class="drawer-content" id="historyList">
+            <
