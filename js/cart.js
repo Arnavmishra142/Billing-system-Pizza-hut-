@@ -2,43 +2,6 @@ import { db } from './firebase-config.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 document.addEventListener('DOMContentLoaded', () => {
-    // =====================================
-    // 🧠 BRAHMASTRA: LIVE IMAGE TO BASE64
-    // =====================================
-    let logoBase64Data = "";
-    let qrBase64Data = "";
-
-    function loadImagesToMemory() {
-        const convertToBase64 = (url) => {
-            return new Promise((resolve, reject) => {
-                let img = new Image();
-                img.crossOrigin = 'Anonymous'; // PWA block bypass
-                img.onload = () => {
-                    let canvas = document.createElement('canvas');
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    let ctx = canvas.getContext('2d');
-                    
-                    // White background ensure karne ke liye (Transparent black ho jata hai printer me)
-                    ctx.fillStyle = "#FFFFFF";
-                    ctx.fillRect(0, 0, canvas.width, canvas.height);
-                    ctx.drawImage(img, 0, 0);
-                    
-                    resolve(canvas.toDataURL('image/png'));
-                };
-                img.onerror = (e) => reject(e);
-                img.src = url;
-            });
-        };
-
-        // App khulte hi images memory me load ho jayengi
-        convertToBase64('./logo.png').then(data => logoBase64Data = data).catch(() => console.log("Logo nahi mila"));
-        convertToBase64('./qr.png').then(data => qrBase64Data = data).catch(() => console.log("QR nahi mila"));
-    }
-    
-    // Function call kardo
-    loadImagesToMemory();
-
     const cartItemsContainer = document.getElementById('cartItems');
     const cartTotalElement = document.getElementById('cartTotal');
     const activeTableNameEl = document.getElementById('activeTableName');
@@ -324,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (kotBtn) kotBtn.addEventListener('click', () => printKOT(false));
 
     // =====================================
-    // CHECKOUT (FINAL BILL) LOGIC (TIGHT SPACING)
+    // CHECKOUT (FINAL BILL) LOGIC (ANTI-BLOCK HACK)
     // =====================================
     if (checkoutBtn) {
         checkoutBtn.addEventListener('click', async () => {
@@ -336,45 +299,18 @@ document.addEventListener('DOMContentLoaded', () => {
             checkoutBtn.disabled = true;
 
             try {
-                const billId = `SALE_${Date.now()}`;
-                await setDoc(doc(db, "sales_history", billId), {
-                    table: tableName,
-                    customer: customerName,
-                    items: currentCart,
-                    total: total,
-                    timestamp: new Date().toISOString()
-                });
-
-                if(window.saveToGhostHistory) {
-                    let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
-                    window.saveToGhostHistory(orderId, total, currentCart);
-                }
-
-                // ==========================================
-                // FINAL RAWBT PRINT FORMAT (LOGO + QR + BOLD)
-                // ==========================================
+                // 1. BILL TEXT GENERATION (Bina Base64 Image ke)
                 const BOLD_ON = '\x1B\x45\x01';
                 const BOLD_OFF = '\x1B\x45\x00';
-
                 let shortOrderId = String(Date.now()).slice(-5); 
                 
-                let billText = "";
-                
-                // 1. LOGO PRINT (Agar memory me load ho gaya hai toh print hoga)
-                if (logoBase64Data) {
-                    billText += `<center><img>${logoBase64Data}</img></center>\n`;
-                }
-
-                // 2. SHOP NAME (Bada aur Bold - Hardware Tag)
-                billText += `<center><W><b>NEW PIZZA HUT\nAND LIVE CAKE</b></W></center>\n`;
-                
-                // 3. ADDRESS (Normal font, center aligned)
+                let billText = BOLD_ON;
+                billText += centerText("NEW PIZZA HUT AND LIVE CAKE") + "\n";
                 billText += centerText("in front of SBI bank ke tik") + "\n";
                 billText += centerText("samne salempur Deoria, UP") + "\n";
                 billText += centerText("FSSAI: 30230324113093042") + "\n";
                 billText += centerText("Phone: 9628548655") + "\n\n"; 
                 
-                // 4. BILL DETAILS
                 billText += `Bill No: ${shortOrderId}\n`;
                 billText += `Created On: ${getFormattedDate()}\n`;
                 billText += `Bill To: ${getDisplayTitle()}\n\n`; 
@@ -393,26 +329,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 billText += `Total Quantity: ${totalQty}\n`;
                 billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n"; 
                 
-                // 5. TOTAL (Bold command on/off)
-                billText += centerText(`${BOLD_ON}TOTAL: Rs ${total}${BOLD_OFF}`) + "\n\n"; 
+                billText += centerText(`TOTAL: Rs ${total}`) + "\n\n"; 
                 
-                // 6. QR CODE PRINT (Agar memory me hai)
-                if (qrBase64Data) {
-                    billText += `<center><img>${qrBase64Data}</img></center>\n`;
-                }
-                
-                // 7. FOOTER
+                // FOOTER
                 billText += centerText("Scan To Pay") + "\n\n";
-                billText += centerText(`${BOLD_ON}Thank You! Visit Again!${BOLD_OFF}`) + "\n\n\n\n";
-                
-                window.location.href = "rawbt:" + encodeURIComponent(billText);
+                billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
+
+                // 2. 🚀 BYPASS CHROME BLOCK HACK (Direct Link Click)
+                const printUrl = "rawbt:" + encodeURIComponent(billText);
+                const printLink = document.createElement('a');
+                printLink.href = printUrl;
+                printLink.style.display = 'none';
+                document.body.appendChild(printLink);
+                printLink.click(); // JS se link click karwaya taaki Chrome block na kare
+                setTimeout(() => document.body.removeChild(printLink), 500);
+
+                // 3. FIREBASE SAVE (Print command bhejne ke baad save karo taaki delay na ho)
+                const billId = `SALE_${Date.now()}`;
+                await setDoc(doc(db, "sales_history", billId), {
+                    table: tableName,
+                    customer: customerName,
+                    items: currentCart,
+                    total: total,
+                    timestamp: new Date().toISOString()
+                });
+
+                if(window.saveToGhostHistory) {
+                    let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
+                    window.saveToGhostHistory(orderId, total, currentCart);
+                }
 
                 saveLocalCart([]); 
                 currentCart = [];
                 renderCart(); 
                 setTimeout(() => { if(backToTablesBtn) backToTablesBtn.click() }, 500); 
+
             } catch (error) {
                 alert("Database error!");
+                console.error(error);
             } finally {
                 checkoutBtn.innerText = "Bill & Settle";
                 checkoutBtn.disabled = false;
