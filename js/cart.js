@@ -23,14 +23,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = getCartKey();
         if (cartData.length === 0) {
             localStorage.removeItem(key);
-            localStorage.removeItem(getKotTimeKey()); // Order khatam, timer bhi hata do
+            localStorage.removeItem(getKotTimeKey()); 
         } else {
             localStorage.setItem(key, JSON.stringify(cartData));
         }
         window.dispatchEvent(new Event('cart-updated'));
     };
 
-    // UI Updates based on POS mode
     window.addEventListener('pos-opened', (e) => {
         const name = e.detail.name;
         const holdBtn = document.getElementById('holdBtn');
@@ -149,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const cartItemDiv = document.createElement('div');
             cartItemDiv.className = 'cart-item';
-                      cartItemDiv.innerHTML = `
+            cartItemDiv.innerHTML = `
                 <div class="cart-item-header">
                     <span>${item.name} ${unprintedTag}</span>
                     <span>₹${itemTotal}</span>
@@ -186,14 +185,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const getDisplayTitle = () => {
         const tName = getCurrentTable();
         if(tName === 'Direct Entry') return 'Cash Sale';
-        return tName.includes('Parcel') ? tName : `${tName} [${getCurrentCustomer()}]`;
+        // [C1] hat gaya yahan se
+        return tName; 
     };
 
     if (holdBtn) holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
-    // =====================================
-    // PRINT FORMATTING HELPERS
-    // =====================================
     const centerText = (text) => {
         if (text.length >= 32) return text.substring(0, 32);
         const spaces = Math.floor((32 - text.length) / 2);
@@ -243,7 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // =====================================
-    // KOT PRINT LOGIC (TIGHT SPACING)
+    // KOT PRINT LOGIC (CLEAN & BOLD)
     // =====================================
     const printKOT = (isFullKot = false) => {
         if (currentCart.length === 0) return;
@@ -262,27 +259,26 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Order ka timer sirf pehle KOT print par shuru hoga, dobara overwrite nahi hoga
-        const kotTimeKey = getKotTimeKey();
-        if (!localStorage.getItem(kotTimeKey)) {
-            localStorage.setItem(kotTimeKey, Date.now().toString());
-        }
-
         let randKOT = Math.floor(Math.random() * 900) + 100;
         
-        let kotText = "";
-        if (isFullKot) kotText += centerText("--- FULL K.O.T ---") + "\n";
+        // 🔥 BRAHMASTRA FOR BOLD TEXT (Hardware Command) 🔥
+        const BOLD_ON = '\x1B\x45\x01';
+        const BOLD_OFF = '\x1B\x45\x00';
+        
+        // Print start hote hi hardware ko BOLD karne ka signal jayega
+        let kotText = BOLD_ON; 
+        
+        if (isFullKot) kotText += "FULL K.O.T\n";
         kotText += `KOT No: ${randKOT}\n`;
         kotText += `Date: ${getFormattedDate()}\n`;
         kotText += `Table: ${getDisplayTitle()}\n`;
-        kotText += "--------------------------------\n";
+        kotText += "\n"; 
         
         itemsToPrint.forEach(item => {
-            kotText += `${item.name}\n`;
-            kotText += `(${item.printQty})\n`; 
+            kotText += `${item.name} (${item.printQty})\n`; 
         });
         
-        kotText += "--------------------------------\n\n\n";
+        kotText += "\n\n\n" + BOLD_OFF; 
         
         currentCart.forEach(item => { item.printedQty = item.qty; });
         saveLocalCart(currentCart); 
@@ -320,23 +316,26 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.saveToGhostHistory(orderId, total, currentCart);
                 }
 
+                // 🔥 BRAHMASTRA FOR MAIN BILL BOLD TEXT 🔥
+                const BOLD_ON = '\x1B\x45\x01';
+                const BOLD_OFF = '\x1B\x45\x00';
+
                 let shortOrderId = String(Date.now()).slice(-5); 
-                let billText = "";
+                
+                // Poora Bill Hardware se Bold Hoga
+                let billText = BOLD_ON;
                 
                 billText += centerText("NEW PIZZA HUT AND LIVE CAKE") + "\n";
                 billText += centerText("in front of SBI bank ke tik") + "\n";
                 billText += centerText("samne salempur Deoria, UP") + "\n";
                 billText += centerText("FSSAI: 30230324113093042") + "\n";
-                billText += centerText("Phone: 9628548655") + "\n";
-                billText += "--------------------------------\n";
+                billText += centerText("Phone: 9628548655") + "\n\n"; 
                 
                 billText += `Bill No: ${shortOrderId}\n`;
                 billText += `Created On: ${getFormattedDate()}\n`;
-                billText += `Bill To: ${getDisplayTitle()}\n`;
-                billText += "--------------------------------\n";
+                billText += `Bill To: ${getDisplayTitle()}\n\n`; 
                 
-                billText += "Item Name      Qty Rate  Total\n";
-                billText += "--------------------------------\n";
+                billText += "Item Name      Qty Rate  Total\n\n"; 
                 
                 let totalQty = 0;
                 currentCart.forEach(item => {
@@ -344,18 +343,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     billText += formatBillRow(item.name, item.qty, item.price, item.price * item.qty);
                 });
                 
-                billText += "--------------------------------\n";
+                billText += "\n"; 
                 
                 billText += `Total Items: ${currentCart.length}\n`;
                 billText += `Total Quantity: ${totalQty}\n`;
-                billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n";
-                billText += "--------------------------------\n";
-                billText += centerText(`TOTAL: Rs ${total}`) + "\n";
-                billText += "--------------------------------\n";
+                billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n"; 
+                
+                billText += centerText(`TOTAL: Rs ${total}`) + "\n\n"; 
                 
                 billText += `Mode of Payment`.padEnd(24, ' ') + ` UPI\n`;
-                billText += `Received`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n";
-                billText += centerText("Thank You! Visit Again!") + "\n\n\n\n";
+                billText += `Received`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n";
+                
+                billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
                 
                 window.location.href = "rawbt:" + encodeURIComponent(billText);
 
