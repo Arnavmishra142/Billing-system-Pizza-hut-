@@ -465,6 +465,37 @@
         });
     </script>
 
+    <script>
+        // ==========================================
+        // 🔊 SOUND EFFECTS
+        // pop.sfx.mp3  -> literally har click pe (poore app mein)
+        // cash.sfx.mp3 -> Save & Exit aur Bill & Settle pe extra
+        // ==========================================
+        const popSound = new Audio('sounds/pop.sfx.mp3');
+        const cashSound = new Audio('sounds/cash.sfx.mp3');
+
+        // Capture phase pe lagaya hai taaki koi bhi button (chahe uske andar
+        // stopPropagation() ho) is se miss na ho - HAR click pe bajega.
+        document.addEventListener('click', () => {
+            popSound.currentTime = 0;
+            popSound.play().catch(() => {});
+        }, true);
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const checkoutBtn = document.getElementById('checkoutBtn');
+            const saveExitBtn = document.getElementById('saveExitBtn');
+
+            [checkoutBtn, saveExitBtn].forEach(btn => {
+                if (btn) {
+                    btn.addEventListener('click', () => {
+                        cashSound.currentTime = 0;
+                        cashSound.play().catch(() => {});
+                    }, true);
+                }
+            });
+        });
+    </script>
+
     <!-- 🕒 24-HOUR HISTORY DRAWER -->
     <div id="historyOverlay" class="drawer-overlay" onclick="closeHistoryDrawer()"></div>
     <div id="historyDrawer" class="history-drawer">
