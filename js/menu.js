@@ -188,16 +188,138 @@ function syncItemBadges() {
     const qtyMap = {};
     getCurrentCartItems().forEach(i => { qtyMap[i.id] = i.qty; });
 
+    // Regular item cards
     document.querySelectorAll('.item-card').forEach(card => {
         const qty = qtyMap[card.dataset.id] || 0;
         const badge = card.querySelector('.item-qty-badge');
         if (badge) badge.innerText = qty;
         card.classList.toggle('in-cart', qty > 0);
     });
+
+    // Half-full card sides
+    document.querySelectorAll('.half-full-side').forEach(side => {
+        const qty = qtyMap[side.dataset.id] || 0;
+        const qtyBadge    = side.querySelector('.hf-qty');
+        const removeBadge = side.querySelector('.hf-remove');
+        if (qtyBadge) qtyBadge.innerText = qty;
+        const inCart = qty > 0;
+        side.classList.toggle('in-cart', inCart);
+        if (removeBadge) removeBadge.style.display = inCart ? 'flex' : 'none';
+        if (qtyBadge)    qtyBadge.style.display    = inCart ? 'flex' : 'none';
+    });
 }
 
 window.addEventListener('cart-updated', syncItemBadges);
 window.addEventListener('load-table-cart', syncItemBadges);
+
+// ==========================================
+// HALF / FULL VARIANT HELPERS
+// ==========================================
+function isHalfVariant(name) { return /\(\s*half\s*\)/i.test(name); }
+function isFullVariant(name)  { return /\(\s*full\s*\)/i.test(name);  }
+function getHalfFullBase(name) {
+    return name.replace(/\s*\(\s*(half|full)\s*\)\s*/gi, '').trim().toLowerCase();
+}
+function displayBaseName(name) {
+    return name.replace(/\s*\(\s*(half|full)\s*\)\s*/gi, '').trim();
+}
+
+// Shared renderer — used by loadItems AND search
+function renderItemsToGrid(itemsToShow, grid) {
+    const processed = new Set();
+
+    itemsToShow.forEach(item => {
+        if (processed.has(item.id)) return;
+
+        if (isHalfVariant(item.name)) {
+            const base = getHalfFullBase(item.name);
+            const fullItem = itemsToShow.find(i =>
+                !processed.has(i.id) && isFullVariant(i.name) && getHalfFullBase(i.name) === base
+            );
+            if (fullItem) {
+                grid.appendChild(createHalfFullCard(item, fullItem));
+                processed.add(item.id);
+                processed.add(fullItem.id);
+                return;
+            }
+        } else if (isFullVariant(item.name)) {
+            const base = getHalfFullBase(item.name);
+            const halfItem = itemsToShow.find(i =>
+                !processed.has(i.id) && isHalfVariant(i.name) && getHalfFullBase(i.name) === base
+            );
+            if (halfItem) {
+                grid.appendChild(createHalfFullCard(halfItem, item));
+                processed.add(halfItem.id);
+                processed.add(item.id);
+                return;
+            }
+        }
+
+        grid.appendChild(createItemCard(item));
+        processed.add(item.id);
+    });
+}
+
+// Combined Half + Full card
+function createHalfFullCard(halfItem, fullItem) {
+    const baseName = displayBaseName(halfItem.name);
+    const card = document.createElement('div');
+    card.className = 'half-full-card';
+
+    card.innerHTML = `
+        <div class="half-full-heading">${baseName}</div>
+        <div class="half-full-body">
+            <div class="half-full-side" data-id="${halfItem.id}">
+                <div class="item-remove-badge hf-remove" data-id="${halfItem.id}" title="Remove">✕</div>
+                <div class="half-full-label">Half</div>
+                <div class="half-full-price">₹${halfItem.price}</div>
+                <div class="item-qty-badge hf-qty" data-id="${halfItem.id}">0</div>
+            </div>
+            <div class="half-full-divider"></div>
+            <div class="half-full-side" data-id="${fullItem.id}">
+                <div class="item-remove-badge hf-remove" data-id="${fullItem.id}" title="Remove">✕</div>
+                <div class="half-full-label">Full</div>
+                <div class="half-full-price">₹${fullItem.price}</div>
+                <div class="item-qty-badge hf-qty" data-id="${fullItem.id}">0</div>
+            </div>
+        </div>
+    `;
+
+    // Side clicks → add to cart
+    card.querySelectorAll('.half-full-side').forEach(side => {
+        side.addEventListener('click', (e) => {
+            if (e.target.closest('.hf-remove') || e.target.closest('.hf-qty')) return;
+            const id = side.dataset.id;
+            const it = id === halfItem.id ? halfItem : fullItem;
+            window.dispatchEvent(new CustomEvent('add-to-cart', { detail: it }));
+        });
+    });
+
+    // Remove badges
+    card.querySelectorAll('.hf-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            const it = id === halfItem.id ? halfItem : fullItem;
+            window.dispatchEvent(new CustomEvent('set-cart-quantity', {
+                detail: { id: it.id, name: it.name, price: it.price, qty: 0 }
+            }));
+        });
+    });
+
+    // Qty badges → custom modal
+    card.querySelectorAll('.hf-qty').forEach(badge => {
+        badge.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = badge.dataset.id;
+            const it = id === halfItem.id ? halfItem : fullItem;
+            const currentQty = getCurrentCartItems().find(i => i.id === it.id)?.qty || 0;
+            openQtyEditModal(it, currentQty);
+        });
+    });
+
+    return card;
+}
 
 // 3. RENDER ITEMS IN GRID
 function loadItems(categoryFilter) {
@@ -212,10 +334,7 @@ function loadItems(categoryFilter) {
         return;
     }
 
-    itemsToShow.forEach(item => {
-        grid.appendChild(createItemCard(item));
-    });
-
+    renderItemsToGrid(itemsToShow, grid);
     syncItemBadges();
 }
 
@@ -345,10 +464,7 @@ function setupSearch() {
             return;
         }
 
-        searchedItems.forEach(item => {
-            grid.appendChild(createItemCard(item));
-        });
-
+        renderItemsToGrid(searchedItems, grid);
         syncItemBadges();
     });
 }

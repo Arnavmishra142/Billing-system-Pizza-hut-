@@ -353,6 +353,107 @@ body {
     align-content: start; 
 }
 
+/* ==========================================
+   HALF / FULL COMBINED CARD
+   ========================================== */
+.half-full-card {
+    grid-column: span 2;
+    background: #171921;
+    border: 1px solid #262a35;
+    border-radius: 12px;
+    overflow: visible;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    transition: box-shadow 0.2s, border-color 0.15s;
+}
+.half-full-card:hover {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    border-color: #3a3f4d;
+}
+
+/* Heading row */
+.half-full-heading {
+    text-align: center;
+    padding: 10px 12px 8px;
+    font-weight: 900;
+    font-size: 1.05rem;
+    color: #f1f5f9;
+    border-bottom: 1px solid #262a35;
+    letter-spacing: 0.2px;
+}
+
+/* Body: two sides side by side */
+.half-full-body {
+    display: flex;
+    align-items: stretch;
+    min-height: 80px;
+}
+
+/* Each side (Half / Full) */
+.half-full-side {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 8px 14px;
+    cursor: pointer;
+    gap: 4px;
+    transition: background 0.15s;
+    overflow: visible;
+}
+.half-full-side:hover { background: rgba(255,255,255,0.04); }
+.half-full-side:active { background: rgba(99,102,241,0.08); }
+
+/* Thin vertical divider */
+.half-full-divider {
+    width: 1px;
+    background: #262a35;
+    flex-shrink: 0;
+    align-self: stretch;
+    margin: 8px 0;
+}
+
+/* "Half" / "Full" label */
+.half-full-label {
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+/* Price */
+.half-full-price {
+    color: #34d399;
+    font-weight: 800;
+    font-size: 1.15rem;
+}
+
+/* Qty badge inside half-full side — top-right corner */
+.half-full-side .hf-qty {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    display: none; /* shown via JS when qty > 0 */
+}
+
+/* Remove badge inside half-full side — top-left corner */
+.half-full-side .hf-remove {
+    position: absolute;
+    top: -10px;
+    left: -10px;
+    display: none; /* shown via JS when qty > 0 */
+}
+
+/* Highlight side when item is in cart */
+.half-full-side.in-cart {
+    background: rgba(16,185,129,0.07);
+}
+.half-full-side.in-cart .half-full-price {
+    color: #10b981;
+}
+
 .item-card { 
     background: #171921; 
     border: 1px solid #262a35; 
