@@ -1216,7 +1216,118 @@ body {
     filter: brightness(1.1);
 }
 
+.muted-heading { color: #a8b0bd; }
+.muted-note { color: #94a3b8; }
+.drawer-title-text { color: #f1f3f6; }
+
 @keyframes modalPop {
     0% { transform: scale(0.8); opacity: 0; }
     100% { transform: scale(1); opacity: 1; }
+}
+
+/* =========================================================
+   ☀️ LIGHT MODE — restores the original light theme
+   Toggled via the theme button (adds .light-mode on <html>)
+   ========================================================= */
+.light-mode body { background: #f3f4f6 !important; color: #111827 !important; }
+
+.light-mode .home-options { background: #eef2ff !important; }
+.light-mode .home-btn { background: #4f46e5 !important; box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.4) !important; }
+.light-mode .home-btn.parcel-btn { background: #10b981 !important; box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.4) !important; }
+
+.light-mode .table-grid { background: #f9fafb !important; }
+.light-mode .table-card { background: #fff !important; border-color: #e5e7eb !important; box-shadow: 0 4px 6px rgba(0,0,0,0.05) !important; color: #374151 !important; }
+.light-mode .table-card:hover { border-color: #4f46e5 !important; box-shadow: 0 10px 15px rgba(0,0,0,0.1) !important; color: #4f46e5 !important; }
+
+.light-mode .top-nav { background: #1f2937 !important; }
+.light-mode .tab { background: #374151 !important; color: #fff !important; }
+.light-mode .tab.active { background: #4f46e5 !important; color: #fff !important; }
+
+.light-mode .sidebar { background: #fff !important; border-right-color: #e5e7eb !important; }
+.light-mode .main-content { background: #f9fafb !important; }
+.light-mode .search-bar { background: #fff !important; border-bottom-color: #e5e7eb !important; }
+.light-mode .search-bar input { background: #fff !important; color: #111827 !important; border-color: #d1d5db !important; }
+.light-mode .search-bar input::placeholder { color: #9ca3af !important; }
+.light-mode .search-bar input:focus { border-color: #4f46e5 !important; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1) !important; }
+
+.light-mode .item-card { background: #fff !important; border-color: #e5e7eb !important; box-shadow: 0 2px 4px rgba(0,0,0,0.02) !important; }
+.light-mode .item-card:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.1) !important; border-color: #d1d5db !important; }
+.light-mode .item-card.in-cart { background: #ecfdf5 !important; box-shadow: 0 4px 10px rgba(16, 185, 129, 0.25) !important; }
+.light-mode .item-qty-badge { border-color: #fff !important; }
+.light-mode .item-image { background: #f3f4f6 !important; }
+.light-mode .item-title { color: #111827 !important; }
+.light-mode .item-price { color: #059669 !important; }
+
+.light-mode .cart-panel { background: #fff !important; border-left-color: #e5e7eb !important; }
+.light-mode .cart-items { background: #f9fafb !important; }
+.light-mode .cart-item { background: #fff !important; border-color: #e5e7eb !important; box-shadow: 0 2px 4px rgba(0,0,0,0.03) !important; }
+.light-mode .cart-item-header { color: #1f2937 !important; }
+.light-mode .quantity-control { background: #f3f4f6 !important; }
+.light-mode .qty-btn { background: #e5e7eb !important; }
+.light-mode .billing-section { background: #fff !important; border-top-color: #e5e7eb !important; box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.02) !important; }
+.light-mode .total-row { color: #1f2937 !important; }
+
+.light-mode .modal { background: rgba(0,0,0,0.6) !important; }
+.light-mode .modal-content { background: #fff !important; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25) !important; border-color: transparent !important; }
+.light-mode .modal-content h3 { color: #1f2937 !important; }
+.light-mode .modal-content input { background: #fff !important; color: #111827 !important; border-color: #d1d5db !important; }
+.light-mode .modal-content input:focus { border-color: #4f46e5 !important; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1) !important; }
+.light-mode .btn-cancel { background: #6b7280 !important; }
+.light-mode .btn-cancel:hover { background: #4b5563 !important; }
+
+.light-mode .running-orders-section { background: #eef2ff !important; border-top-color: #e5e7eb !important; }
+.light-mode .running-orders-section h3 { color: #1f2937 !important; }
+.light-mode .running-col { background: #fff !important; border-color: #e5e7eb !important; box-shadow: 0 2px 6px rgba(0,0,0,0.05) !important; }
+.light-mode .running-col-title { color: #374151 !important; border-bottom-color: #f3f4f6 !important; }
+.light-mode .running-col-empty { color: #9ca3af !important; }
+.light-mode .running-col-divider { background: #d1d5db !important; }
+.light-mode .running-card { background: #f9fafb !important; box-shadow: 0 2px 4px rgba(0,0,0,0.04) !important; }
+.light-mode .running-card .rc-title { color: #1f2937 !important; }
+.light-mode .running-card .rc-amount { color: #10b981 !important; }
+.light-mode .running-card .rc-items { color: #6b7280 !important; }
+
+.light-mode .order-timer.timer-ok { background: #d1fae5 !important; color: #059669 !important; }
+.light-mode .order-timer.timer-warn { background: #fef3c7 !important; color: #d97706 !important; }
+.light-mode .order-timer.timer-danger { background: #fee2e2 !important; color: #dc2626 !important; }
+
+.light-mode .welcome-banner { background-color: #f8fafc !important; border-bottom-color: #e2e8f0 !important; }
+.light-mode .welcome-banner h2 { color: #1e293b !important; }
+.light-mode .welcome-banner p { color: #64748b !important; }
+.light-mode .muted-heading { color: #4b5563 !important; }
+.light-mode .muted-note { color: #6b7280 !important; }
+.light-mode .drawer-title-text { color: #1e293b !important; }
+
+.light-mode .history-drawer { background: #fff !important; box-shadow: -5px 0 15px rgba(0,0,0,0.2) !important; }
+.light-mode .drawer-header { background: #f8fafc !important; border-bottom-color: #e2e8f0 !important; color: #1f2937 !important; }
+.light-mode .close-btn { color: #1f2937 !important; }
+.light-mode .drawer-content { background: #f1f5f9 !important; }
+.light-mode .history-card { background: #fff !important; box-shadow: 0 2px 4px rgba(0,0,0,0.05) !important; }
+.light-mode .history-card p { color: #475569 !important; }
+
+.light-mode #categoryList button { color: #1f2937 !important; border-bottom-color: #f3f4f6 !important; }
+.light-mode .table-name-header { border-bottom-color: #e5e7eb !important; }
+
+.light-mode #priceEditModal .btn-cancel { background: #6b7280 !important; }
+
+.light-mode .btn-kot { background: #4f46e5 !important; }
+.light-mode .btn-kot:hover { background: #4338ca !important; }
+
+.light-mode .cart-panel.open,
+.light-mode .cart-panel { background: #fff !important; border-left: 1px solid #e5e7eb !important; }
+
+/* Manager price-edit modal stays dark/premium in both themes intentionally */
+.light-mode #priceEditModal .modal-content {
+    background: linear-gradient(145deg, #171921, #0e1015) !important;
+    border: 2px solid #2f3441 !important;
+    box-shadow: 0 25px 50px rgba(0,0,0,0.6) !important;
+}
+.light-mode #priceEditModal h3 { color: #f1f3f6 !important; }
+.light-mode #priceEditModal input[type="number"] {
+    background: #0b0c10 !important;
+    color: #34d399 !important;
+    border-color: #2f3441 !important;
+}
+.light-mode #priceEditModal .btn-cancel {
+    background: #2d323f !important;
+    color: #d1d5db !important;
 }
