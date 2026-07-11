@@ -41,14 +41,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if(kotBtn) kotBtn.style.display = 'none';
             if(saveExitBtn) {
                 saveExitBtn.innerText = "SAVE ENTRY"; 
-                saveExitBtn.style.gridColumn = "span 2"; 
             }
         } else {
             if(holdBtn) holdBtn.style.display = 'block';
             if(kotBtn) kotBtn.style.display = 'block';
             if(saveExitBtn) {
                 saveExitBtn.innerText = "SAVE & EXIT";
-                saveExitBtn.style.gridColumn = "auto";
             }
         }
     });
@@ -132,7 +130,6 @@ document.addEventListener('DOMContentLoaded', () => {
             fullKotBtn.style.background = '#8b5cf6'; 
             fullKotBtn.innerText = 'PRINT FULL K.O.T';
             fullKotBtn.style.display = 'none';
-            fullKotBtn.style.gridColumn = 'span 2'; 
             
             const actionGrid = kotBtn.parentNode;
             if(actionGrid) {

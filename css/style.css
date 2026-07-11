@@ -165,12 +165,35 @@ body {
 .back-btn:hover { background: #dc2626; }
 
 /* =========================================
+   POS TOP BAR (action buttons: KOT, SAVE & EXIT, PRINT FULL K.O.T)
+   ========================================= */
+.pos-top-bar {
+    background: #101218;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    flex-shrink: 0;
+    border-bottom: 1px solid #262a35;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+}
+
+.pos-top-bar .btn {
+    padding: 10px 20px;
+    font-size: 0.95rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    border-radius: 8px;
+    white-space: nowrap;
+}
+
+/* =========================================
    POS MAIN LAYOUT
    ========================================= */
 .pos-layout { 
     display: flex; 
-    flex-grow: 1; 
-    height: calc(100dvh - 66px);
+    flex: 1;
+    min-height: 0;
     overflow: hidden; 
 }
 
