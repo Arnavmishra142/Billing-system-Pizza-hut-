@@ -430,19 +430,19 @@ body {
     font-size: 1.4rem;
 }
 
-/* Qty badge inside half-full side — top-right corner */
+/* Qty badge inside half-full side — top-right corner (inside bounds to avoid centre overlap) */
 .half-full-side .hf-qty {
     position: absolute;
-    top: -10px;
-    right: -10px;
+    top: 5px;
+    right: 5px;
     display: none; /* shown via JS when qty > 0 */
 }
 
-/* Remove badge inside half-full side — top-left corner */
+/* Remove badge inside half-full side — top-left corner (inside bounds to avoid centre overlap) */
 .half-full-side .hf-remove {
     position: absolute;
-    top: -10px;
-    left: -10px;
+    top: 5px;
+    left: 5px;
     display: none; /* shown via JS when qty > 0 */
 }
 
@@ -451,6 +451,100 @@ body {
     background: rgba(16,185,129,0.07);
 }
 .half-full-side.in-cart .half-full-price {
+    color: #10b981;
+}
+
+/* ==========================================
+   TRIPLE (Regular / Medium / Large) CARD
+   ========================================== */
+.triple-card {
+    grid-column: 1 / -1;
+    background: #171921;
+    border: 1px solid #262a35;
+    border-radius: 12px;
+    overflow: visible;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    transition: box-shadow 0.2s, border-color 0.15s;
+}
+.triple-card:hover {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    border-color: #3a3f4d;
+}
+
+.triple-heading {
+    text-align: center;
+    padding: 10px 12px 8px;
+    font-weight: 900;
+    font-size: 1.05rem;
+    color: #f1f5f9;
+    border-bottom: 1px solid #262a35;
+    letter-spacing: 0.2px;
+}
+
+.triple-body {
+    display: flex;
+    align-items: stretch;
+    min-height: 80px;
+}
+
+.triple-side {
+    flex: 1;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 18px 12px 20px;
+    cursor: pointer;
+    gap: 6px;
+    transition: background 0.15s;
+    overflow: visible;
+}
+.triple-side:hover { background: rgba(255,255,255,0.04); }
+.triple-side:active { background: rgba(99,102,241,0.08); }
+
+.triple-divider {
+    width: 1px;
+    background: #262a35;
+    flex-shrink: 0;
+    align-self: stretch;
+    margin: 8px 0;
+}
+
+.triple-label {
+    font-size: 0.8rem;
+    font-weight: 800;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.triple-price {
+    color: #34d399;
+    font-weight: 800;
+    font-size: 1.4rem;
+}
+
+/* Qty badge — inside top-right corner of each section */
+.triple-side .triple-qty {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    display: none;
+}
+
+/* Remove badge — inside top-left corner of each section */
+.triple-side .triple-remove {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    display: none;
+}
+
+.triple-side.in-cart {
+    background: rgba(16,185,129,0.07);
+}
+.triple-side.in-cart .triple-price {
     color: #10b981;
 }
 

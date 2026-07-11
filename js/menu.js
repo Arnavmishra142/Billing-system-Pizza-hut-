@@ -207,6 +207,18 @@ function syncItemBadges() {
         if (removeBadge) removeBadge.style.display = inCart ? 'flex' : 'none';
         if (qtyBadge)    qtyBadge.style.display    = inCart ? 'flex' : 'none';
     });
+
+    // Triple card sides (Regular / Medium / Large)
+    document.querySelectorAll('.triple-side').forEach(side => {
+        const qty = qtyMap[side.dataset.id] || 0;
+        const qtyBadge    = side.querySelector('.triple-qty');
+        const removeBadge = side.querySelector('.triple-remove');
+        if (qtyBadge) qtyBadge.innerText = qty;
+        const inCart = qty > 0;
+        side.classList.toggle('in-cart', inCart);
+        if (removeBadge) removeBadge.style.display = inCart ? 'flex' : 'none';
+        if (qtyBadge)    qtyBadge.style.display    = inCart ? 'flex' : 'none';
+    });
 }
 
 window.addEventListener('cart-updated', syncItemBadges);
@@ -224,6 +236,20 @@ function displayBaseName(name) {
     return name.replace(/\s*\(\s*(half|full)\s*\)\s*/gi, '').trim();
 }
 
+// ==========================================
+// TRIPLE (Regular / Medium / Large) HELPERS
+// ==========================================
+function isRegularVariant(name) { return /\(\s*regular\s*\)/i.test(name); }
+function isMediumVariant(name)  { return /\(\s*medium\s*\)/i.test(name);  }
+function isLargeVariant(name)   { return /\(\s*large\s*\)/i.test(name);   }
+function isTripleVariant(name)  { return isRegularVariant(name) || isMediumVariant(name) || isLargeVariant(name); }
+function getTripleBase(name) {
+    return name.replace(/\s*\(\s*(regular|medium|large)\s*\)\s*/gi, '').trim().toLowerCase();
+}
+function displayTripleBaseName(name) {
+    return name.replace(/\s*\(\s*(regular|medium|large)\s*\)\s*/gi, '').trim();
+}
+
 // Shared renderer — used by loadItems AND search
 function renderItemsToGrid(itemsToShow, grid) {
     const processed = new Set();
@@ -231,6 +257,22 @@ function renderItemsToGrid(itemsToShow, grid) {
     itemsToShow.forEach(item => {
         if (processed.has(item.id)) return;
 
+        // ── Triple card: Regular / Medium / Large ──
+        if (isTripleVariant(item.name)) {
+            const base = getTripleBase(item.name);
+            const regularItem = itemsToShow.find(i => !processed.has(i.id) && isRegularVariant(i.name) && getTripleBase(i.name) === base);
+            const mediumItem  = itemsToShow.find(i => !processed.has(i.id) && isMediumVariant(i.name)  && getTripleBase(i.name) === base);
+            const largeItem   = itemsToShow.find(i => !processed.has(i.id) && isLargeVariant(i.name)   && getTripleBase(i.name) === base);
+            if (regularItem && mediumItem && largeItem) {
+                grid.appendChild(createTripleCard(regularItem, mediumItem, largeItem));
+                processed.add(regularItem.id);
+                processed.add(mediumItem.id);
+                processed.add(largeItem.id);
+                return;
+            }
+        }
+
+        // ── Half / Full card ──
         if (isHalfVariant(item.name)) {
             const base = getHalfFullBase(item.name);
             const fullItem = itemsToShow.find(i =>
@@ -258,6 +300,66 @@ function renderItemsToGrid(itemsToShow, grid) {
         grid.appendChild(createItemCard(item));
         processed.add(item.id);
     });
+}
+
+// Combined Regular + Medium + Large card (Pizza variants)
+function createTripleCard(regularItem, mediumItem, largeItem) {
+    const baseName = displayTripleBaseName(regularItem.name);
+    const card = document.createElement('div');
+    card.className = 'triple-card';
+
+    const makeSide = (item, label) => `
+        <div class="triple-side" data-id="${item.id}">
+            <div class="item-remove-badge triple-remove" data-id="${item.id}" title="Remove">✕</div>
+            <div class="triple-label">${label}</div>
+            <div class="triple-price">₹${item.price}</div>
+            <div class="item-qty-badge triple-qty" data-id="${item.id}">0</div>
+        </div>
+    `;
+
+    card.innerHTML = `
+        <div class="triple-heading">${baseName}</div>
+        <div class="triple-body">
+            ${makeSide(regularItem, 'Regular')}
+            <div class="triple-divider"></div>
+            ${makeSide(mediumItem, 'Medium')}
+            <div class="triple-divider"></div>
+            ${makeSide(largeItem, 'Large')}
+        </div>
+    `;
+
+    const items = { [regularItem.id]: regularItem, [mediumItem.id]: mediumItem, [largeItem.id]: largeItem };
+
+    // Side click → add to cart
+    card.querySelectorAll('.triple-side').forEach(side => {
+        side.addEventListener('click', (e) => {
+            if (e.target.closest('.triple-remove') || e.target.closest('.triple-qty')) return;
+            window.dispatchEvent(new CustomEvent('add-to-cart', { detail: items[side.dataset.id] }));
+        });
+    });
+
+    // Remove badges
+    card.querySelectorAll('.triple-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const it = items[btn.dataset.id];
+            window.dispatchEvent(new CustomEvent('set-cart-quantity', {
+                detail: { id: it.id, name: it.name, price: it.price, qty: 0 }
+            }));
+        });
+    });
+
+    // Qty badges → custom modal
+    card.querySelectorAll('.triple-qty').forEach(badge => {
+        badge.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const it = items[badge.dataset.id];
+            const currentQty = getCurrentCartItems().find(i => i.id === it.id)?.qty || 0;
+            openQtyEditModal(it, currentQty);
+        });
+    });
+
+    return card;
 }
 
 // Combined Half + Full card
