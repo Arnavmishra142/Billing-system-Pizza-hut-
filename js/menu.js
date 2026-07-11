@@ -32,28 +32,20 @@ export async function fetchMenuFromCloud() {
             }
         });
 
-        // ==========================================
-        // FAMILY GROUPING + PRICE SORTING LOGIC
-        // (Margherita Regular ke niche Margherita Medium/Large hi aayega,
-        //  aur family ke andar size-order price ke hisaab se decide hoga)
-        // ==========================================
         const getBaseName = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
 
         allItems.sort((a, b) => {
             const baseA = getBaseName(a.name);
             const baseB = getBaseName(b.name);
 
-            // Rule 1: Pehle family (base name) ke hisaab se A-Z
             if (baseA < baseB) return -1;
             if (baseA > baseB) return 1;
 
-            // Rule 2: Same family ke andar, kam price wala pehle (Half/Regular < Full/Medium < Large)
             return (Number(a.price) || 0) - (Number(b.price) || 0);
         });
 
         categories = Array.from(catSet);
 
-        // Categories ko A-Z order mein sort karo, "All" hamesha sabse upar
         categories.sort((a, b) => {
             if (a === 'All') return -1;
             if (b === 'All') return 1;
@@ -101,37 +93,30 @@ function loadCategories() {
 }
 
 // ==========================================
-// ITEM CARD BANANA (SHARED - grid aur search dono ke liye)
+// ITEM CARD BANANA (NO IMAGE - COMPACT)
 // ==========================================
 function createItemCard(item) {
     let card = document.createElement('div');
     card.className = 'item-card';
     card.dataset.id = item.id;
 
-    let bgImage = item.image ? `url('${item.image}')` : 'none';
-    let bgText = item.image ? '' : '<span style="color:#aaa; font-size:10px;">No Image</span>';
-
+    // ✅ IMAGE HATA DIYA - SIRF NAME + PRICE
     card.innerHTML = `
         <div class="item-qty-badge">0</div>
-        <div class="item-image" style="background-image: ${bgImage}; background-size:cover; background-position:center; height:100px; display:flex; align-items:center; justify-content:center; background-color:#f3f4f6; border-radius:8px 8px 0 0;">
-            ${bgText}
-        </div>
-        <div class="item-title" style="padding:10px 10px 0; font-weight:bold; font-size:0.9rem;">${item.name}</div>
-        <div class="item-price" style="padding:5px 10px 10px; color:#10b981; font-weight:bold;">₹${item.price}</div>
+        <div class="item-title" style="padding:15px 10px 5px; font-weight:900; font-size:1.1rem; color:#f1f5f9;">${item.name}</div>
+        <div class="item-price" style="padding:5px 10px 15px; color:#34d399; font-weight:800; font-size:1.3rem;">₹${item.price}</div>
     `;
 
-    // Card pe kahin bhi tap karo (badge chhod ke) - 1 qty add hoti jayegi, jitni baar tap
     card.onclick = () => {
         window.dispatchEvent(new CustomEvent('add-to-cart', { detail: item }));
     };
 
-    // Badge pe tap karo - custom quantity seedhe daal sakte ho (jaise 5, 10...)
     const badge = card.querySelector('.item-qty-badge');
     badge.onclick = (e) => {
-        e.stopPropagation(); // Card ka add-to-cart trigger na ho isi tap pe
+        e.stopPropagation();
         const currentQty = getCurrentCartItems().find(i => i.id === item.id)?.qty || 0;
         const input = prompt(`${item.name} - kitni quantity chahiye?`, currentQty > 0 ? currentQty : 1);
-        if (input === null) return; // User ne Cancel dabaya
+        if (input === null) return;
         const newQty = parseInt(input);
         if (isNaN(newQty) || newQty < 0) {
             alert('Sahi number daalein.');
@@ -144,7 +129,7 @@ function createItemCard(item) {
 }
 
 // ==========================================
-// CART SE SYNC (green highlight + qty badge live update)
+// CART SE SYNC
 // ==========================================
 function getCurrentCartItems() {
     const activeTableNameEl = document.getElementById('activeTableName');
@@ -171,7 +156,6 @@ function syncItemBadges() {
     });
 }
 
-// Cart kahin bhi (drawer, KOT, customer switch) update ho, badges yahan bhi sync ho jayen
 window.addEventListener('cart-updated', syncItemBadges);
 window.addEventListener('load-table-cart', syncItemBadges);
 
@@ -194,7 +178,6 @@ function loadItems(categoryFilter) {
 
     syncItemBadges();
 }
-
 
 // 4. QUICK ADD LOGIC
 function setupQuickAddPopups() {
@@ -220,7 +203,6 @@ function setupQuickAddPopups() {
     };
     document.getElementById('cancelBillOnlyBtn').onclick = () => document.getElementById('billOnlyModal').classList.add('hidden');
 
-    // SAVE TO GLOBAL FIREBASE
     document.getElementById('saveGlobalBtn').onclick = async () => {
         const name = document.getElementById('globalItemName').value.trim();
         const price = document.getElementById('globalItemPrice').value.trim();
@@ -261,9 +243,6 @@ function setupQuickAddPopups() {
         }
     };
 
-    // ==========================================
-    // SAVE TO BILL ONLY LOGIC (Fixed)
-    // ==========================================
     const saveToBillBtn = document.getElementById('saveToBillBtn'); 
     
     if (saveToBillBtn) {
