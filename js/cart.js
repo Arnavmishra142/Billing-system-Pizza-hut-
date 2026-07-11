@@ -167,6 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const cartItemDiv = document.createElement('div');
             cartItemDiv.className = 'cart-item';
             cartItemDiv.innerHTML = `
+                <button class="cart-item-remove" data-id="${item.id}" title="Remove item">✕</button>
                 <div class="cart-item-header">
                     <span>${item.name} ${unprintedTag}</span>
                     <span class="editable-price" data-id="${item.id}" style="cursor:pointer; color:#10b981; font-weight:bold; border-bottom:1px dashed #10b981;">
@@ -174,10 +175,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     </span>
                 </div>
                 <div class="cart-item-controls">
-                    <span style="color: #4b5563; font-size: 1.1rem; font-weight: bold;">₹${item.price} x ${item.qty}</span>
+                    <span style="color: #4b5563; font-size: 1.1rem; font-weight: bold;">₹${item.price} × ${item.qty}</span>
                     <div class="quantity-control">
-                        <button class="qty-btn qty-minus" data-id="${item.id}">-</button>
-                        <span style="font-weight: bold; font-size: 1.2rem;">${item.qty}</span>
+                        <button class="qty-btn qty-minus" data-id="${item.id}">−</button>
+                        <input type="number" class="qty-input" data-id="${item.id}" value="${item.qty}" min="1">
                         <button class="qty-btn qty-plus" data-id="${item.id}">+</button>
                     </div>
                 </div>
@@ -193,6 +194,41 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         document.querySelectorAll('.qty-plus').forEach(btn => {
             btn.addEventListener('click', (e) => updateQuantity(e.target.dataset.id, 1));
+        });
+
+        // Qty input: direct typing → update on change/blur
+        document.querySelectorAll('.qty-input').forEach(input => {
+            input.addEventListener('change', (e) => {
+                const id = e.target.dataset.id;
+                const newQty = parseInt(e.target.value, 10);
+                const idx = currentCart.findIndex(i => i.id === id);
+                if (idx === -1) return;
+                if (!isNaN(newQty) && newQty > 0) {
+                    if ((currentCart[idx].printedQty || 0) > newQty) {
+                        currentCart[idx].printedQty = newQty;
+                    }
+                    currentCart[idx].qty = newQty;
+                } else {
+                    currentCart.splice(idx, 1);
+                }
+                saveLocalCart(currentCart);
+                renderCart();
+            });
+            // Prevent wheel from accidentally changing qty
+            input.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
+        });
+
+        // Remove button: instant full removal
+        document.querySelectorAll('.cart-item-remove').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = e.currentTarget.dataset.id;
+                const idx = currentCart.findIndex(i => i.id === id);
+                if (idx !== -1) {
+                    currentCart.splice(idx, 1);
+                    saveLocalCart(currentCart);
+                    renderCart();
+                }
+            });
         });
 
         // ✅ CUSTOM MODAL WALA PRICE EDIT — RENDER CART KE ANDAR
