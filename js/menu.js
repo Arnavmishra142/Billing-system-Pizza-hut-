@@ -2,17 +2,8 @@ import { db } from './firebase-config.js';
 import { collection, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 let allItems = [];
-let categories = [];
-let currentCategory = '';
-
-// 🔊 POP SOUND SETUP (Volume 30%)
-const popSound = new Audio('pop.sfx.mp3');
-popSound.volume = 0.3;
-
-function playPopSound() {
-    popSound.currentTime = 0;
-    popSound.play().catch(() => {});
-}
+let categories = ['All'];
+let currentCategory = 'All';
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchMenuFromCloud();
@@ -20,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupSearch();
 });
 
+// 1. FIREBASE SE MENU LAO
 export async function fetchMenuFromCloud() {
     const grid = document.getElementById('itemsGrid');
     if(!grid) return;
@@ -29,7 +21,7 @@ export async function fetchMenuFromCloud() {
     try {
         const querySnapshot = await getDocs(collection(db, "menu_items"));
         allItems = [];
-        let catSet = new Set();
+        let catSet = new Set(['All']);
 
         querySnapshot.forEach((docSnap) => {
             let item = docSnap.data();
@@ -40,40 +32,36 @@ export async function fetchMenuFromCloud() {
             }
         });
 
-        let sortedCats = Array.from(catSet).sort();
-        categories = [...sortedCats];
-
-        if(categories.length > 0) {
-            currentCategory = categories[0];
-        }
+        // ==========================================
+        // FAMILY GROUPING + PRICE SORTING LOGIC
+        // (Margherita Regular ke niche Margherita Medium/Large hi aayega,
+        //  aur family ke andar size-order price ke hisaab se decide hoga)
+        // ==========================================
+        const getBaseName = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
 
         allItems.sort((a, b) => {
-            const getBase = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
-            const getRank = (name) => {
-                let n = name.toLowerCase();
-                if (n.includes('(half)') || n.includes('(regular)')) return 1;
-                if (n.includes('(full)') || n.includes('(medium)')) return 2;
-                if (n.includes('(large)')) return 3;
-                return 0; 
-            };
+            const baseA = getBaseName(a.name);
+            const baseB = getBaseName(b.name);
 
-            let catA = (a.category || "").toLowerCase();
-            let catB = (b.category || "").toLowerCase();
-            if (catA < catB) return -1;
-            if (catA > catB) return 1;
-
-            let baseA = getBase(a.name);
-            let baseB = getBase(b.name);
+            // Rule 1: Pehle family (base name) ke hisaab se A-Z
             if (baseA < baseB) return -1;
             if (baseA > baseB) return 1;
 
-            return getRank(a.name) - getRank(b.name);
+            // Rule 2: Same family ke andar, kam price wala pehle (Half/Regular < Full/Medium < Large)
+            return (Number(a.price) || 0) - (Number(b.price) || 0);
+        });
+
+        categories = Array.from(catSet);
+
+        // Categories ko A-Z order mein sort karo, "All" hamesha sabse upar
+        categories.sort((a, b) => {
+            if (a === 'All') return -1;
+            if (b === 'All') return 1;
+            return a.localeCompare(b);
         });
         
         loadCategories();
-        if(currentCategory) {
-            loadItems(currentCategory);
-        }
+        loadItems('All');
         updateDatalist(); 
         
     } catch (e) {
@@ -82,6 +70,7 @@ export async function fetchMenuFromCloud() {
     }
 }
 
+// 2. RENDER CATEGORIES
 function loadCategories() {
     const list = document.getElementById('categoryList');
     if(!list) return;
@@ -101,7 +90,6 @@ function loadCategories() {
         btn.style.color = cat === currentCategory ? "white" : "#4b5563";
         btn.style.cursor = "pointer";
         btn.style.borderRadius = "8px";
-        btn.style.fontWeight = "bold"; 
         
         btn.onclick = () => {
             currentCategory = cat;
@@ -112,12 +100,88 @@ function loadCategories() {
     });
 }
 
+// ==========================================
+// ITEM CARD BANANA (SHARED - grid aur search dono ke liye)
+// ==========================================
+function createItemCard(item) {
+    let card = document.createElement('div');
+    card.className = 'item-card';
+    card.dataset.id = item.id;
+
+    let bgImage = item.image ? `url('${item.image}')` : 'none';
+    let bgText = item.image ? '' : '<span style="color:#aaa; font-size:10px;">No Image</span>';
+
+    card.innerHTML = `
+        <div class="item-qty-badge">0</div>
+        <div class="item-image" style="background-image: ${bgImage}; background-size:cover; background-position:center; height:100px; display:flex; align-items:center; justify-content:center; background-color:#f3f4f6; border-radius:8px 8px 0 0;">
+            ${bgText}
+        </div>
+        <div class="item-title" style="padding:10px 10px 0; font-weight:bold; font-size:0.9rem;">${item.name}</div>
+        <div class="item-price" style="padding:5px 10px 10px; color:#10b981; font-weight:bold;">₹${item.price}</div>
+    `;
+
+    // Card pe kahin bhi tap karo (badge chhod ke) - 1 qty add hoti jayegi, jitni baar tap
+    card.onclick = () => {
+        window.dispatchEvent(new CustomEvent('add-to-cart', { detail: item }));
+    };
+
+    // Badge pe tap karo - custom quantity seedhe daal sakte ho (jaise 5, 10...)
+    const badge = card.querySelector('.item-qty-badge');
+    badge.onclick = (e) => {
+        e.stopPropagation(); // Card ka add-to-cart trigger na ho isi tap pe
+        const currentQty = getCurrentCartItems().find(i => i.id === item.id)?.qty || 0;
+        const input = prompt(`${item.name} - kitni quantity chahiye?`, currentQty > 0 ? currentQty : 1);
+        if (input === null) return; // User ne Cancel dabaya
+        const newQty = parseInt(input);
+        if (isNaN(newQty) || newQty < 0) {
+            alert('Sahi number daalein.');
+            return;
+        }
+        window.dispatchEvent(new CustomEvent('set-cart-quantity', { detail: { id: item.id, name: item.name, price: item.price, qty: newQty } }));
+    };
+
+    return card;
+}
+
+// ==========================================
+// CART SE SYNC (green highlight + qty badge live update)
+// ==========================================
+function getCurrentCartItems() {
+    const activeTableNameEl = document.getElementById('activeTableName');
+    if (!activeTableNameEl) return [];
+    const tableName = activeTableNameEl.innerText;
+    const customer = activeTableNameEl.dataset.customer || 'C1';
+    try {
+        const data = localStorage.getItem(`cart_${tableName}_${customer}`);
+        return data ? JSON.parse(data) : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function syncItemBadges() {
+    const qtyMap = {};
+    getCurrentCartItems().forEach(i => { qtyMap[i.id] = i.qty; });
+
+    document.querySelectorAll('.item-card').forEach(card => {
+        const qty = qtyMap[card.dataset.id] || 0;
+        const badge = card.querySelector('.item-qty-badge');
+        if (badge) badge.innerText = qty;
+        card.classList.toggle('in-cart', qty > 0);
+    });
+}
+
+// Cart kahin bhi (drawer, KOT, customer switch) update ho, badges yahan bhi sync ho jayen
+window.addEventListener('cart-updated', syncItemBadges);
+window.addEventListener('load-table-cart', syncItemBadges);
+
+// 3. RENDER ITEMS IN GRID
 function loadItems(categoryFilter) {
     const grid = document.getElementById('itemsGrid');
     if(!grid) return;
     grid.innerHTML = '';
 
-    let itemsToShow = allItems.filter(item => item.category === categoryFilter);
+    let itemsToShow = categoryFilter === 'All' ? allItems : allItems.filter(item => item.category === categoryFilter);
 
     if(itemsToShow.length === 0) {
         grid.innerHTML = '<div style="padding:20px; color:gray;">Is category me item nahi hai.</div>';
@@ -125,30 +189,14 @@ function loadItems(categoryFilter) {
     }
 
     itemsToShow.forEach(item => {
-        let card = document.createElement('div');
-        card.className = 'item-card';
-        
-        let bgImage = item.image ? `url('${item.image}')` : 'none';
-        let bgText = item.image ? '' : '<span style="color:#aaa; font-size:10px;">No Image</span>';
-
-        card.innerHTML = `
-            <div class="item-image" style="background-image: ${bgImage}; background-size:cover; background-position:center; height:100px; display:flex; align-items:center; justify-content:center; background-color:#f3f4f6; border-radius:8px 8px 0 0;">
-                ${bgText}
-            </div>
-            <div class="item-title" style="padding:10px 10px 0; font-weight:bold; font-size:0.9rem;">${item.name}</div>
-            <div class="item-price" style="padding:5px 10px 10px; color:#10b981; font-weight:bold;">₹${item.price}</div>
-        `;
-        
-        // 🔊 POP SOUND ON CLICK
-        card.onclick = () => {
-            playPopSound();
-            window.dispatchEvent(new CustomEvent('add-to-cart', { detail: item }));
-        };
-
-        grid.appendChild(card);
+        grid.appendChild(createItemCard(item));
     });
+
+    syncItemBadges();
 }
 
+
+// 4. QUICK ADD LOGIC
 function setupQuickAddPopups() {
     const mainBtn = document.getElementById('qckAddBtn');
     const choiceModal = document.getElementById('quickAddChoiceModal');
@@ -172,6 +220,7 @@ function setupQuickAddPopups() {
     };
     document.getElementById('cancelBillOnlyBtn').onclick = () => document.getElementById('billOnlyModal').classList.add('hidden');
 
+    // SAVE TO GLOBAL FIREBASE
     document.getElementById('saveGlobalBtn').onclick = async () => {
         const name = document.getElementById('globalItemName').value.trim();
         const price = document.getElementById('globalItemPrice').value.trim();
@@ -212,6 +261,9 @@ function setupQuickAddPopups() {
         }
     };
 
+    // ==========================================
+    // SAVE TO BILL ONLY LOGIC (Fixed)
+    // ==========================================
     const saveToBillBtn = document.getElementById('saveToBillBtn'); 
     
     if (saveToBillBtn) {
@@ -230,7 +282,6 @@ function setupQuickAddPopups() {
                 price: Number(price)
             };
 
-            playPopSound(); // 🔊 Custom item add pe bhi pop sound
             window.dispatchEvent(new CustomEvent('add-custom-item-to-bill', { detail: customItem }));
 
             document.getElementById('tempItemName').value = '';
@@ -245,10 +296,13 @@ function updateDatalist() {
     if(!datalist) return;
     datalist.innerHTML = '';
     categories.forEach(cat => {
-        datalist.innerHTML += `<option value="${cat}">`;
+        if(cat !== 'All') datalist.innerHTML += `<option value="${cat}">`;
     });
 }
 
+// ==========================================
+// SEARCH LOGIC
+// ==========================================
 function setupSearch() {
     const searchInput = document.getElementById('searchInput');
     if (!searchInput) return;
@@ -273,27 +327,9 @@ function setupSearch() {
         }
 
         searchedItems.forEach(item => {
-            let card = document.createElement('div');
-            card.className = 'item-card';
-            
-            let bgImage = item.image ? `url('${item.image}')` : 'none';
-            let bgText = item.image ? '' : '<span style="color:#aaa; font-size:10px;">No Image</span>';
-
-            card.innerHTML = `
-                <div class="item-image" style="background-image: ${bgImage}; background-size:cover; background-position:center; height:100px; display:flex; align-items:center; justify-content:center; background-color:#f3f4f6; border-radius:8px 8px 0 0;">
-                    ${bgText}
-                </div>
-                <div class="item-title" style="padding:10px 10px 0; font-weight:bold; font-size:0.9rem;">${item.name}</div>
-                <div class="item-price" style="padding:5px 10px 10px; color:#10b981; font-weight:bold;">₹${item.price}</div>
-            `;
-            
-            // 🔊 POP SOUND ON SEARCH ITEM CLICK
-            card.onclick = () => {
-                playPopSound();
-                window.dispatchEvent(new CustomEvent('add-to-cart', { detail: item }));
-            };
-            
-            grid.appendChild(card);
+            grid.appendChild(createItemCard(item));
         });
+
+        syncItemBadges();
     });
 }

@@ -225,12 +225,50 @@ body {
     text-align: center; 
     display: flex; 
     flex-direction: column; 
-    transition: transform 0.1s, box-shadow 0.2s; 
+    transition: transform 0.1s, box-shadow 0.2s, background 0.15s, border-color 0.15s; 
     box-shadow: 0 2px 4px rgba(0,0,0,0.02); 
+    position: relative; /* Qty badge isi ke andar absolute position hoga */
 }
 
 .item-card:active { transform: scale(0.95); }
 .item-card:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.1); border-color: #d1d5db; }
+
+/* Cart mein add hote hi card green ho jayega */
+.item-card.in-cart {
+    background: #ecfdf5;
+    border: 2px solid #10b981;
+    box-shadow: 0 4px 10px rgba(16, 185, 129, 0.25);
+}
+
+/* Quantity badge - top right corner, tap karke custom quantity daal sakte ho */
+.item-qty-badge {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    min-width: 32px;
+    height: 32px;
+    padding: 0 6px;
+    background: #10b981;
+    color: white;
+    border: 3px solid #fff;
+    border-radius: 20px;
+    display: none; /* qty 0 hone tak chhupa rahega */
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    font-size: 1rem;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.25);
+    cursor: pointer;
+    z-index: 3;
+}
+
+.item-card.in-cart .item-qty-badge {
+    display: flex; /* qty > 0 hote hi dikhega */
+}
+
+.item-qty-badge:active {
+    transform: scale(0.85);
+}
 
 .item-image { 
     height: 80px; 

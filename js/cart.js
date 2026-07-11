@@ -74,6 +74,27 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCart();
     });
 
+    // Badge tap karke custom quantity daalne ke liye (item-card ka green badge)
+    window.addEventListener('set-cart-quantity', (e) => {
+        const item = e.detail;
+        currentCart = getLocalCart();
+        const existingIndex = currentCart.findIndex(i => i.id === item.id);
+
+        if (item.qty <= 0) {
+            if (existingIndex > -1) currentCart.splice(existingIndex, 1);
+        } else if (existingIndex > -1) {
+            currentCart[existingIndex].qty = item.qty;
+            if ((currentCart[existingIndex].printedQty || 0) > item.qty) {
+                currentCart[existingIndex].printedQty = item.qty;
+            }
+        } else {
+            currentCart.push({ id: item.id, name: item.name, price: item.price, qty: item.qty, printedQty: 0 });
+        }
+
+        saveLocalCart(currentCart);
+        renderCart();
+    });
+
     function updateQuantity(id, delta) {
         currentCart = getLocalCart();
         const itemIndex = currentCart.findIndex(item => item.id === id);
