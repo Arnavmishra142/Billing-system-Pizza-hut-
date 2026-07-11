@@ -871,8 +871,9 @@ body {
     padding: 15px !important;
     display: flex !important;
     flex-direction: column !important;
-    height: auto !important; 
-    min-height: 180px !important; /* Phone ke liye chhota height */
+    height: 165px !important; /* Fixed height - ab card kabhi bhi bada nahi hoga */
+    min-height: 0 !important;
+    overflow: hidden !important;
     border-radius: 12px !important;
     box-shadow: 0 4px 6px rgba(0,0,0,0.08) !important;
 }
@@ -887,10 +888,16 @@ body {
     align-items: center !important;
     justify-content: space-between !important;
     gap: 8px !important;
+    flex-shrink: 0 !important; /* Title kabhi chhota na ho */
 }
 
 .table-items-container {
+    display: flex !important;
+    flex-direction: column !important;
     gap: 5px !important;
+    flex: 1 !important;
+    min-height: 0 !important; /* Flex-child ko sahi se shrink/scroll karne dega */
+    overflow-y: auto !important; /* Zyada items ho to andar hi scroll ho, card bade na */
 }
 
 .table-item-row {
@@ -917,7 +924,9 @@ body {
 
     .table-card {
         padding: 20px !important;
-        min-height: 38vh !important; /* Tablet par lambe boxes */
+        height: 34vh !important; /* Fixed height - tablet par bhi kabhi bada nahi hoga */
+        min-height: 0 !important;
+        overflow: hidden !important;
         border-radius: 16px !important;
     }
 
@@ -930,10 +939,16 @@ body {
         align-items: center !important;
         justify-content: space-between !important;
         gap: 10px !important;
+        flex-shrink: 0 !important;
     }
 
     .table-items-container {
+        display: flex !important;
+        flex-direction: column !important;
         gap: 8px !important;
+        flex: 1 !important;
+        min-height: 0 !important;
+        overflow-y: auto !important;
     }
 
     .table-item-row {
@@ -971,7 +986,9 @@ body {
         padding: 12px !important;
     }
     .table-card {
-        min-height: 165px !important;
+        height: 165px !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
         padding: 15px !important;
     }
 }
@@ -990,7 +1007,9 @@ body {
         padding: 20px !important;
     }
     .table-card {
-        min-height: 34vh !important;
+        height: 34vh !important;
+        min-height: 0 !important;
+        overflow: hidden !important;
         padding: 20px !important;
     }
 }
