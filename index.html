@@ -466,13 +466,17 @@
     </script>
 
     <script>
-        // ==========================================
+       // ==========================================
         // 🔊 SOUND EFFECTS
         // pop.sfx.mp3  -> literally har click pe (poore app mein)
         // cash.sfx.mp3 -> Save & Exit aur Bill & Settle pe extra
         // ==========================================
         const popSound = new Audio('sounds/pop.sfx.mp3');
         const cashSound = new Audio('sounds/cash.sfx.mp3');
+        popSound.volume = 0.6;
+        cashSound.volume = 0.6;
+        
+        
 
         // Capture phase pe lagaya hai taaki koi bhi button (chahe uske andar
         // stopPropagation() ho) is se miss na ho - HAR click pe bajega.
