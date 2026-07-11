@@ -180,9 +180,9 @@
         <!-- BOTTOM FOOTER: action buttons (left) + table name (right) -->
         <header class="top-nav pos-header">
             <div class="footer-left-btns">
-                <button id="floatingCartBtn" class="btn footer-view-btn">🛒 View Details <span class="fab-badge" id="fabTotal">₹0.00</span></button>
                 <button class="btn btn-kot" id="kotBtn">KOT</button>
-                <button class="btn btn-details" id="saveExitBtn" style="background:#dc2626;">SAVE & EXIT</button>
+                <!-- PRINT FULL K.O.T injected here by cart.js -->
+                <button class="btn btn-hold" id="holdBtn">HOLD</button>
             </div>
             <h2 id="activeTableName" class="footer-table-name">Table / Parcel</h2>
         </header>
@@ -217,12 +217,17 @@
                         <span id="cartTotal" class="total-amount">₹0.00</span>
                     </div>
                     <div class="action-grid">
-                        <button class="btn btn-hold" id="holdBtn">HOLD</button>
+                        <button class="btn btn-save-exit" id="saveExitBtn">SAVE & EXIT</button>
                         <button class="btn btn-checkout" id="checkoutBtn">Bill & Settle</button>
                     </div>
                 </div>
             </aside>
         </div>
+
+        <!-- FLOATING VIEW DETAILS FAB -->
+        <button id="floatingCartBtn" class="floating-cart-fab">🛒 View Details <span class="fab-badge" id="fabTotal">₹0.00</span></button>
+        <!-- Overlay: tap outside cart to close -->
+        <div id="cartOverlay" class="cart-overlay"></div>
 
     </div>
 
@@ -477,21 +482,29 @@
             const closeCartBtn = document.getElementById('closeCartBtn');
             const backToTablesBtn = document.getElementById('backToTablesBtn');
             
-            // Open Drawer
-            floatingCartBtn.addEventListener('click', () => {
+            const cartOverlay = document.getElementById('cartOverlay');
+
+            function openCart() {
                 cartPanel.classList.add('open');
-            });
-            
-            // Close Drawer
-            closeCartBtn.addEventListener('click', () => {
+                cartOverlay.classList.add('active');
+            }
+            function closeCart() {
                 cartPanel.classList.remove('open');
-            });
+                cartOverlay.classList.remove('active');
+            }
+
+            // Open Drawer
+            floatingCartBtn.addEventListener('click', openCart);
+            
+            // Close Drawer (X button)
+            closeCartBtn.addEventListener('click', closeCart);
+
+            // Click anywhere outside cart to close
+            cartOverlay.addEventListener('click', closeCart);
 
             // Agar Back dabayein, toh drawer band karo
             if(backToTablesBtn) {
-                backToTablesBtn.addEventListener('click', () => {
-                    cartPanel.classList.remove('open');
-                });
+                backToTablesBtn.addEventListener('click', closeCart);
             }
 
             // Sync Cart Total to Floating Button
