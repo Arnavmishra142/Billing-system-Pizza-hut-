@@ -1117,94 +1117,83 @@ body {
     font-weight: 900;
 }
 /* =========================================
-   CUSTOM PRICE EDIT MODAL STYLES
+   🔥 MINIMAL DARK OVERRIDE (Jugad)
    ========================================= */
-#priceEditModal {
-    display: flex;
-    align-items: flex-start !important; /* Center ki jagah top se start */
-    justify-content: flex-start !important; /* Center ki jagah left se start */
-    padding-top: 80px !important; /* Upar se gap */
-    padding-left: 20px !important; /* Left se gap */
+
+/* Sirf background aur text color dark karo */
+body, 
+#screen-home,
+#screen-grid,
+#screen-pos,
+.pos-layout,
+.main-content,
+.items-grid,
+.sidebar,
+.cart-items,
+.billing-section,
+.search-bar,
+.top-nav,
+.welcome-banner,
+.running-orders-section,
+.drawer-content,
+.history-drawer {
+    background: #0f172a !important;
+    color: #e2e8f0 !important;
 }
 
+/* Cards halka dark */
+.item-card,
+.table-card,
+.cart-item,
+.running-card,
+.running-col,
+.history-card,
+.modal-content,
 #priceEditModal .modal-content {
-    background: linear-gradient(145deg, #1f2937, #111827);
-    border: 2px solid #374151;
-    border-radius: 16px;
-    padding: 25px;
-    box-shadow: 0 25px 50px rgba(0,0,0,0.5);
-    animation: modalPop 0.2s ease-out;
-    margin: 0 !important; /* Auto margin hatao */
-    max-width: 300px; /* Thoda chhota */
+    background: #1e293b !important;
+    border-color: #334155 !important;
 }
 
-/* Baaki same rahega */
-#priceEditModal h3 {
-    color: #f3f4f6;
-    margin: 0 0 5px 0;
-    font-size: 1.2rem;
+/* White text jo dikhe nahi */
+.item-title,
+.cart-item-header,
+.table-card,
+.rc-title,
+.welcome-banner h2,
+.modal-content h3,
+.drawer-header h3,
+.total-row {
+    color: #f1f5f9 !important;
 }
 
-#priceEditModal input[type="number"] {
-    width: 100%;
-    padding: 15px 15px 15px 40px;
-    border: 2px solid #374151;
-    border-radius: 12px;
-    background: #111827;
-    color: #10b981;
-    font-size: 1.5rem;
-    font-weight: 900;
-    text-align: center;
-    outline: none;
-    transition: all 0.2s;
+/* Price green soft */
+.item-price,
+.total-amount,
+.editable-price,
+.rc-amount {
+    color: #34d399 !important;
 }
 
-#priceEditModal input[type="number"]:focus {
-    border-color: #10b981;
-    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15);
+/* Input fields dark */
+input,
+.search-bar input,
+.modal-content input,
+#priceEditModal input {
+    background: #1e293b !important;
+    color: #e2e8f0 !important;
+    border-color: #334155 !important;
 }
 
-#priceEditModal .modal-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 5px;
+/* Modal overlay dark */
+.modal,
+.drawer-overlay {
+    background: rgba(15, 23, 42, 0.85) !important;
 }
 
-#priceEditModal .btn-cancel {
-    flex: 1;
-    background: #374151;
-    color: #d1d5db;
-    border: none;
-    padding: 12px;
-    border-radius: 10px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: all 0.2s;
+/* Scrollbar dark */
+::-webkit-scrollbar-track {
+    background: #0f172a;
 }
-
-#priceEditModal .btn-cancel:active {
-    background: #4b5563;
-    transform: scale(0.98);
-}
-
-#priceEditModal .btn-print {
-    flex: 1;
-    background: linear-gradient(135deg, #10b981, #059669);
-    color: white;
-    border: none;
-    padding: 12px;
-    border-radius: 10px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-#priceEditModal .btn-print:active {
-    transform: scale(0.98);
-    filter: brightness(1.1);
-}
-
-@keyframes modalPop {
-    0% { transform: scale(0.8); opacity: 0; }
-    100% { transform: scale(1); opacity: 1; }
+::-webkit-scrollbar-thumb {
+    background: #334155;
 }
