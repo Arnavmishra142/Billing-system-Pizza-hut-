@@ -1116,3 +1116,84 @@ body {
     font-size: 1.1rem;
     font-weight: 900;
 }
+/* =========================================
+   CUSTOM PRICE EDIT MODAL STYLES
+   ========================================= */
+#priceEditModal .modal-content {
+    background: linear-gradient(145deg, #1f2937, #111827);
+    border: 2px solid #374151;
+    border-radius: 16px;
+    padding: 25px;
+    box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+    animation: modalPop 0.2s ease-out;
+}
+
+#priceEditModal h3 {
+    color: #f3f4f6;
+    margin: 0 0 5px 0;
+    font-size: 1.2rem;
+}
+
+#priceEditModal input[type="number"] {
+    width: 100%;
+    padding: 15px 15px 15px 40px;
+    border: 2px solid #374151;
+    border-radius: 12px;
+    background: #111827;
+    color: #10b981;
+    font-size: 1.5rem;
+    font-weight: 900;
+    text-align: center;
+    outline: none;
+    transition: all 0.2s;
+}
+
+#priceEditModal input[type="number"]:focus {
+    border-color: #10b981;
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15);
+}
+
+#priceEditModal .modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 5px;
+}
+
+#priceEditModal .btn-cancel {
+    flex: 1;
+    background: #374151;
+    color: #d1d5db;
+    border: none;
+    padding: 12px;
+    border-radius: 10px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+#priceEditModal .btn-cancel:active {
+    background: #4b5563;
+    transform: scale(0.98);
+}
+
+#priceEditModal .btn-print {
+    flex: 1;
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    border: none;
+    padding: 12px;
+    border-radius: 10px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+#priceEditModal .btn-print:active {
+    transform: scale(0.98);
+    filter: brightness(1.1);
+}
+
+@keyframes modalPop {
+    0% { transform: scale(0.8); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+}

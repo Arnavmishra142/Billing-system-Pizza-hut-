@@ -230,6 +230,22 @@
             </div>
         </div>
     </div>
+    <!-- CUSTOM PRICE EDIT MODAL -->
+<div id="priceEditModal" class="modal hidden">
+    <div class="modal-content" style="max-width: 320px;">
+        <h3>✏️ Edit Price</h3>
+        <p id="priceEditItemName" style="color: #6b7280; margin-bottom: 15px; font-size: 0.9rem;"></p>
+        <div style="position: relative; margin-bottom: 20px;">
+            <span style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: #10b981; font-weight: bold; font-size: 1.2rem;">₹</span>
+            <input type="number" id="newPriceInput" placeholder="0" style="padding-left: 35px; font-size: 1.3rem; font-weight: bold; text-align: center;">
+        </div>
+        <div class="modal-actions">
+            <button id="cancelPriceEditBtn" class="btn btn-cancel">Cancel</button>
+            <button id="savePriceBtn" class="btn btn-print">Save</button>
+        </div>
+    </div>
+</div>
+
 
     <div id="globalMenuModal" class="modal hidden">
         <div class="modal-content">

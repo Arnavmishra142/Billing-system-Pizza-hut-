@@ -74,7 +74,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCart();
     });
 
-    // Badge tap karke custom quantity daalne ke liye (item-card ka green badge)
     window.addEventListener('set-cart-quantity', (e) => {
         const item = e.detail;
         currentCart = getLocalCart();
@@ -116,7 +115,10 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCart();
     });
 
-        function renderCart() {
+    // =====================================
+    // RENDER CART (COMPLETE FUNCTION)
+    // =====================================
+    function renderCart() {
         cartItemsContainer.innerHTML = '';
         let totalAmount = 0;
 
@@ -198,21 +200,57 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.addEventListener('click', (e) => updateQuantity(e.target.dataset.id, 1));
         });
 
-        // ✅ EDITABLE PRICE CLICK LISTENER
+        // ✅ CUSTOM MODAL WALA PRICE EDIT — RENDER CART KE ANDAR
         document.querySelectorAll('.editable-price').forEach(span => {
             span.addEventListener('click', (e) => {
                 const itemId = e.target.dataset.id;
                 let item = currentCart.find(i => i.id === itemId);
                 
-                let newPrice = prompt("Naya Price daalo:", item.price);
-                if (newPrice !== null && !isNaN(newPrice) && newPrice !== "") {
-                    item.price = Number(newPrice);
-                    saveLocalCart(currentCart);
-                    renderCart();
-                }
+                const modal = document.getElementById('priceEditModal');
+                const itemNameEl = document.getElementById('priceEditItemName');
+                const inputEl = document.getElementById('newPriceInput');
+                const saveBtn = document.getElementById('savePriceBtn');
+                const cancelBtn = document.getElementById('cancelPriceEditBtn');
+                
+                itemNameEl.textContent = item.name;
+                inputEl.value = item.price;
+                modal.classList.remove('hidden');
+                
+                setTimeout(() => inputEl.focus(), 100);
+                
+                const handleSave = () => {
+                    const newPrice = inputEl.value;
+                    if (newPrice !== "" && !isNaN(newPrice) && Number(newPrice) > 0) {
+                        item.price = Number(newPrice);
+                        saveLocalCart(currentCart);
+                        renderCart();
+                    }
+                    modal.classList.add('hidden');
+                    cleanup();
+                };
+                
+                const handleCancel = () => {
+                    modal.classList.add('hidden');
+                    cleanup();
+                };
+                
+                const handleKey = (ev) => {
+                    if (ev.key === 'Enter') handleSave();
+                    if (ev.key === 'Escape') handleCancel();
+                };
+                
+                const cleanup = () => {
+                    saveBtn.removeEventListener('click', handleSave);
+                    cancelBtn.removeEventListener('click', handleCancel);
+                    inputEl.removeEventListener('keydown', handleKey);
+                };
+                
+                saveBtn.addEventListener('click', handleSave);
+                cancelBtn.addEventListener('click', handleCancel);
+                inputEl.addEventListener('keydown', handleKey);
             });
         });
-    } // renderCart() end
+    } // renderCart() END
 
     const holdBtn = document.getElementById('holdBtn');
     const kotBtn = document.getElementById('kotBtn');
@@ -228,12 +266,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (holdBtn) holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
-    // =====================================
-    // 🖨️ FAST PRINT TRIGGER
-    // location.href se custom scheme (rawbt:) khulne mein Android/Chrome
-    // top-level navigation ka overhead lagta hai (1-3 sec tak). Hidden <a> 
-    // tag pe click() karna wahi kaam turant karta hai, bina us delay ke.
-    // =====================================
     const triggerRawBTPrint = (text) => {
         const uri = "rawbt:" + encodeURIComponent(text);
         const a = document.createElement('a');
@@ -292,13 +324,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return res;
     };
 
-    // =====================================
-    // KOT PRINT LOGIC (ULTRA FAST)
-    // =====================================
     const printKOT = (isFullKot = false) => {
         if (!currentCart || currentCart.length === 0) return;
         
-        // Filter in one pass
         const itemsToPrint = isFullKot 
             ? currentCart.map(item => ({name: item.name, printQty: item.qty}))
             : currentCart
@@ -310,13 +338,11 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Order ka timer sirf pehle KOT print par shuru hoga, dobara overwrite nahi hoga
         const kotTimeKey = getKotTimeKey();
         if (!localStorage.getItem(kotTimeKey)) {
             localStorage.setItem(kotTimeKey, Date.now().toString());
         }
 
-        // Build string fast
         const BOLD_ON = '\x1B\x45\x01';
         const BOLD_OFF = '\x1B\x45\x00';
         const now = new Date();
@@ -334,10 +360,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         kotText += "\n\n\n" + BOLD_OFF;
 
-        // 🚀 PRINT IMMEDIATELY
         triggerRawBTPrint(kotText);
 
-        // Background update
         setTimeout(() => {
             for (const item of currentCart) {
                 item.printedQty = item.qty;
@@ -347,14 +371,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 0);
     };
 
-    // ✅ SINGLE LISTENER — renderCart() mein nahi hai
     if (kotBtn) {
         kotBtn.addEventListener('click', () => printKOT(false));
     }
 
-    // =====================================
-    // CHECKOUT (SIMPLE BOLD ONLY)
-    // =====================================
     if (checkoutBtn) {
         checkoutBtn.addEventListener('click', async () => {
             if (currentCart.length === 0) return;
@@ -427,9 +447,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // =====================================
-    // SAVE & EXIT LOGIC
-    // =====================================
     if (saveExitBtn) {
         saveExitBtn.addEventListener('click', async () => {
             if (currentCart.length === 0) {
