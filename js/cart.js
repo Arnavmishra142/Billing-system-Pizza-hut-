@@ -8,15 +8,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentCart = [];
 
-    // 🔊 CASH SOUND SETUP (Volume 30%)
-    const cashSound = new Audio('cash.sfx.mp3');
-    cashSound.volume = 0.3;
-
-    function playCashSound() {
-        cashSound.currentTime = 0;
-        cashSound.play().catch(() => {});
-    }
-
     const getCurrentTable = () => activeTableNameEl.innerText;
     const getCurrentCustomer = () => activeTableNameEl.dataset.customer || 'C1';
     
@@ -248,52 +239,58 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // =====================================
-    // KOT PRINT LOGIC (SIMPLE BOLD ONLY)
+    // KOT PRINT LOGIC (ULTRA FAST)
     // =====================================
     const printKOT = (isFullKot = false) => {
-        if (currentCart.length === 0) return;
+        if (!currentCart || currentCart.length === 0) return;
         
-        let itemsToPrint = [];
-        if (isFullKot) {
-            itemsToPrint = currentCart.map(item => ({...item, printQty: item.qty}));
-        } else {
-            itemsToPrint = currentCart
+        // Filter in one pass
+        const itemsToPrint = isFullKot 
+            ? currentCart.map(item => ({name: item.name, printQty: item.qty}))
+            : currentCart
                 .filter(item => item.qty > (item.printedQty || 0))
-                .map(item => ({...item, printQty: item.qty - (item.printedQty || 0)}));
-        }
+                .map(item => ({name: item.name, printQty: item.qty - (item.printedQty || 0)}));
 
         if (itemsToPrint.length === 0) {
             alert("Koi naya item nahi hai! Puraana order print karne ke liye 'PRINT FULL K.O.T' dabayein.");
             return;
         }
 
-        let randKOT = Math.floor(Math.random() * 900) + 100;
-        
+        // Build string fast
         const BOLD_ON = '\x1B\x45\x01';
         const BOLD_OFF = '\x1B\x45\x00';
+        const now = new Date();
+        const timeStr = `${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getFullYear()).slice(-2)} ${now.getHours()%12||12}:${String(now.getMinutes()).padStart(2,'0')} ${now.getHours()>=12?'PM':'AM'}`;
         
-        let kotText = BOLD_ON; 
-        
+        let kotText = BOLD_ON;
         if (isFullKot) kotText += "FULL K.O.T\n";
-        kotText += `KOT No: ${randKOT}\n`;
-        kotText += `Date: ${getFormattedDate()}\n`;
-        kotText += `Table: ${getDisplayTitle()}\n`;
-        kotText += "\n"; 
+        kotText += `KOT No: ${Math.floor(Math.random()*900)+100}\n`;
+        kotText += `Time: ${timeStr}\n`;
+        kotText += `Table: ${getDisplayTitle()}\n\n`;
         
-        itemsToPrint.forEach(item => {
-            kotText += `${item.name} (${item.printQty})\n`; 
-        });
+        for (const item of itemsToPrint) {
+            kotText += `${item.name} (${item.printQty})\n`;
+        }
         
-        kotText += "\n\n\n" + BOLD_OFF; 
-        
-        currentCart.forEach(item => { item.printedQty = item.qty; });
-        saveLocalCart(currentCart); 
-        renderCart(); 
+        kotText += "\n\n\n" + BOLD_OFF;
 
+        // 🚀 PRINT IMMEDIATELY
         window.location.href = "rawbt:" + encodeURIComponent(kotText);
+
+        // Background update
+        setTimeout(() => {
+            for (const item of currentCart) {
+                item.printedQty = item.qty;
+            }
+            saveLocalCart(currentCart);
+            renderCart();
+        }, 0);
     };
 
-    if (kotBtn) kotBtn.addEventListener('click', () => printKOT(false));
+    // ✅ SINGLE LISTENER — renderCart() mein nahi hai
+    if (kotBtn) {
+        kotBtn.addEventListener('click', () => printKOT(false));
+    }
 
     // =====================================
     // CHECKOUT (SIMPLE BOLD ONLY)
@@ -355,9 +352,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 billText += centerText(`TOTAL: Rs ${total}`) + "\n\n"; 
                 billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
                 
-                // 🔊 CASH SOUND BEFORE PRINT
-                playCashSound();
-
                 window.location.href = "rawbt:" + encodeURIComponent(billText);
 
                 saveLocalCart([]); 
@@ -403,9 +397,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
                     window.saveToGhostHistory(orderId + " (HOLD)", total, currentCart);
                 }
-
-                // 🔊 CASH SOUND ON SAVE & EXIT
-                playCashSound();
 
                 saveLocalCart([]); 
                 currentCart = [];
