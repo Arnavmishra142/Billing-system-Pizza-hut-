@@ -116,7 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCart();
     });
 
-    function renderCart() {
+        function renderCart() {
         cartItemsContainer.innerHTML = '';
         let totalAmount = 0;
 
@@ -172,7 +172,9 @@ document.addEventListener('DOMContentLoaded', () => {
             cartItemDiv.innerHTML = `
                 <div class="cart-item-header">
                     <span>${item.name} ${unprintedTag}</span>
-                    <span>₹${itemTotal}</span>
+                    <span class="editable-price" data-id="${item.id}" style="cursor:pointer; color:#10b981; font-weight:bold; border-bottom:1px dashed #10b981;">
+                        ₹${itemTotal}
+                    </span>
                 </div>
                 <div class="cart-item-controls">
                     <span style="color: #4b5563; font-size: 1.1rem; font-weight: bold;">₹${item.price} x ${item.qty}</span>
@@ -195,7 +197,22 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.qty-plus').forEach(btn => {
             btn.addEventListener('click', (e) => updateQuantity(e.target.dataset.id, 1));
         });
-    }
+
+        // ✅ EDITABLE PRICE CLICK LISTENER
+        document.querySelectorAll('.editable-price').forEach(span => {
+            span.addEventListener('click', (e) => {
+                const itemId = e.target.dataset.id;
+                let item = currentCart.find(i => i.id === itemId);
+                
+                let newPrice = prompt("Naya Price daalo:", item.price);
+                if (newPrice !== null && !isNaN(newPrice) && newPrice !== "") {
+                    item.price = Number(newPrice);
+                    saveLocalCart(currentCart);
+                    renderCart();
+                }
+            });
+        });
+    } // renderCart() end
 
     const holdBtn = document.getElementById('holdBtn');
     const kotBtn = document.getElementById('kotBtn');
