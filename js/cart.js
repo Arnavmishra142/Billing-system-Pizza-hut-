@@ -190,6 +190,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (holdBtn) holdBtn.addEventListener('click', () => backToTablesBtn.click());
 
+    // =====================================
+    // 🖨️ FAST PRINT TRIGGER
+    // location.href se custom scheme (rawbt:) khulne mein Android/Chrome
+    // top-level navigation ka overhead lagta hai (1-3 sec tak). Hidden <a> 
+    // tag pe click() karna wahi kaam turant karta hai, bina us delay ke.
+    // =====================================
+    const triggerRawBTPrint = (text) => {
+        const uri = "rawbt:" + encodeURIComponent(text);
+        const a = document.createElement('a');
+        a.href = uri;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
     const centerText = (text) => {
         if (text.length >= 32) return text.substring(0, 32);
         const spaces = Math.floor((32 - text.length) / 2);
@@ -275,7 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
         kotText += "\n\n\n" + BOLD_OFF;
 
         // 🚀 PRINT IMMEDIATELY
-        window.location.href = "rawbt:" + encodeURIComponent(kotText);
+        triggerRawBTPrint(kotText);
 
         // Background update
         setTimeout(() => {
@@ -352,7 +368,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 billText += centerText(`TOTAL: Rs ${total}`) + "\n\n"; 
                 billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
                 
-                window.location.href = "rawbt:" + encodeURIComponent(billText);
+                triggerRawBTPrint(billText);
 
                 saveLocalCart([]); 
                 currentCart = [];
