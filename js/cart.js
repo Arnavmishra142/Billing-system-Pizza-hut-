@@ -272,6 +272,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Order ka timer sirf pehle KOT print par shuru hoga, dobara overwrite nahi hoga
+        const kotTimeKey = getKotTimeKey();
+        if (!localStorage.getItem(kotTimeKey)) {
+            localStorage.setItem(kotTimeKey, Date.now().toString());
+        }
+
         // Build string fast
         const BOLD_ON = '\x1B\x45\x01';
         const BOLD_OFF = '\x1B\x45\x00';

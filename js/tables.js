@@ -108,6 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
         screenGrid.classList.add('hidden');
         screenHome.classList.remove('hidden');
         screenHome.classList.add('active');
+        renderRunningOrders(); // Home dikh raha hai, isliye ab list fresh honi chahiye
     });
 
     // Open POS Screen
@@ -318,5 +319,14 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(refreshTimers, 30000); // Har 30 sec mein sab timers live update honge
 
     renderRunningOrders();
-    window.addEventListener('cart-updated', renderRunningOrders);
+
+    // Running Orders sirf tab rebuild karo jab home screen actually dikh raha ho.
+    // Pehle ye HAR cart change (item add, qty+/-, KOT ke baad) pe chalta tha,
+    // chahe user POS screen ke andar ho - isi wajah se Full KOT print karte
+    // waqt lag/lag mehsoos hota tha, kyunki ye heavy rebuild beech mein aa jaata tha.
+    window.addEventListener('cart-updated', () => {
+        if (screenHome.classList.contains('active')) {
+            renderRunningOrders();
+        }
+    });
 });
