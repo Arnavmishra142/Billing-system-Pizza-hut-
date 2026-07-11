@@ -357,7 +357,7 @@ body {
    HALF / FULL COMBINED CARD
    ========================================== */
 .half-full-card {
-    grid-column: span 2;
+    grid-column: 1 / -1;   /* always full grid width */
     background: #171921;
     border: 1px solid #262a35;
     border-radius: 12px;
@@ -396,9 +396,9 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 12px 8px 14px;
+    padding: 18px 12px 20px;
     cursor: pointer;
-    gap: 4px;
+    gap: 6px;
     transition: background 0.15s;
     overflow: visible;
 }
@@ -416,18 +416,18 @@ body {
 
 /* "Half" / "Full" label */
 .half-full-label {
-    font-size: 0.7rem;
+    font-size: 0.8rem;
     font-weight: 800;
     color: #6b7280;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 1px;
 }
 
 /* Price */
 .half-full-price {
     color: #34d399;
     font-weight: 800;
-    font-size: 1.15rem;
+    font-size: 1.4rem;
 }
 
 /* Qty badge inside half-full side — top-right corner */
