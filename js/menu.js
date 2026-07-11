@@ -102,6 +102,7 @@ function createItemCard(item) {
 
     // ✅ IMAGE HATA DIYA - SIRF NAME + PRICE
     card.innerHTML = `
+        <div class="item-remove-badge" title="Remove from cart">✕</div>
         <div class="item-qty-badge">0</div>
         <div class="item-title" style="padding:15px 10px 5px; font-weight:900; font-size:1.1rem; color:#f1f5f9;">${item.name}</div>
         <div class="item-price" style="padding:5px 10px 15px; color:#34d399; font-weight:800; font-size:1.3rem;">₹${item.price}</div>
@@ -111,18 +112,19 @@ function createItemCard(item) {
         window.dispatchEvent(new CustomEvent('add-to-cart', { detail: item }));
     };
 
+    // ✕ remove badge — top-left, instantly removes item from cart
+    const removeBadge = card.querySelector('.item-remove-badge');
+    removeBadge.onclick = (e) => {
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent('set-cart-quantity', { detail: { id: item.id, name: item.name, price: item.price, qty: 0 } }));
+    };
+
+    // Qty badge — top-right, opens custom modal (no browser prompt)
     const badge = card.querySelector('.item-qty-badge');
     badge.onclick = (e) => {
         e.stopPropagation();
         const currentQty = getCurrentCartItems().find(i => i.id === item.id)?.qty || 0;
-        const input = prompt(`${item.name} - kitni quantity chahiye?`, currentQty > 0 ? currentQty : 1);
-        if (input === null) return;
-        const newQty = parseInt(input);
-        if (isNaN(newQty) || newQty < 0) {
-            alert('Sahi number daalein.');
-            return;
-        }
-        window.dispatchEvent(new CustomEvent('set-cart-quantity', { detail: { id: item.id, name: item.name, price: item.price, qty: newQty } }));
+        openQtyEditModal(item, currentQty);
     };
 
     return card;
@@ -142,6 +144,44 @@ function getCurrentCartItems() {
     } catch (e) {
         return [];
     }
+}
+
+// Custom qty-edit modal — same UX as price-edit modal
+function openQtyEditModal(item, currentQty) {
+    const modal    = document.getElementById('qtyEditModal');
+    const nameEl   = document.getElementById('qtyEditItemName');
+    const inputEl  = document.getElementById('newQtyInput');
+    const saveBtn  = document.getElementById('saveQtyBtn');
+    const cancelBtn = document.getElementById('cancelQtyEditBtn');
+
+    nameEl.textContent = item.name;
+    inputEl.value = currentQty > 0 ? currentQty : 1;
+    modal.classList.remove('hidden');
+    setTimeout(() => { inputEl.focus(); inputEl.select(); }, 80);
+
+    const handleSave = () => {
+        const newQty = parseInt(inputEl.value, 10);
+        if (!isNaN(newQty) && newQty >= 0) {
+            window.dispatchEvent(new CustomEvent('set-cart-quantity', {
+                detail: { id: item.id, name: item.name, price: item.price, qty: newQty }
+            }));
+        }
+        modal.classList.add('hidden');
+        cleanup();
+    };
+    const handleCancel = () => { modal.classList.add('hidden'); cleanup(); };
+    const handleKey = (ev) => {
+        if (ev.key === 'Enter') handleSave();
+        if (ev.key === 'Escape') handleCancel();
+    };
+    const cleanup = () => {
+        saveBtn.removeEventListener('click', handleSave);
+        cancelBtn.removeEventListener('click', handleCancel);
+        inputEl.removeEventListener('keydown', handleKey);
+    };
+    saveBtn.addEventListener('click', handleSave);
+    cancelBtn.addEventListener('click', handleCancel);
+    inputEl.addEventListener('keydown', handleKey);
 }
 
 function syncItemBadges() {

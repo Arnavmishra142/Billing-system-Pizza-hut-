@@ -271,6 +271,22 @@
         </div>
     </div>
     <!-- CUSTOM PRICE EDIT MODAL -->
+<!-- QTY EDIT MODAL — same UI as price-edit modal -->
+<div id="qtyEditModal" class="modal hidden">
+    <div class="modal-content" style="max-width: 320px;">
+        <h3>✏️ Edit Quantity</h3>
+        <p id="qtyEditItemName" class="muted-note" style="margin-bottom: 15px; font-size: 0.9rem;"></p>
+        <div style="position: relative; margin-bottom: 20px;">
+            <span style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: #6366f1; font-weight: bold; font-size: 1.2rem;">#</span>
+            <input type="number" id="newQtyInput" placeholder="1" min="0" style="padding-left: 35px; font-size: 1.3rem; font-weight: bold; text-align: center;">
+        </div>
+        <div class="modal-actions">
+            <button id="cancelQtyEditBtn" class="btn btn-cancel">Cancel</button>
+            <button id="saveQtyBtn" class="btn btn-print">Set Qty</button>
+        </div>
+    </div>
+</div>
+
 <div id="priceEditModal" class="modal hidden">
     <div class="modal-content" style="max-width: 320px;">
         <h3>✏️ Edit Price</h3>
