@@ -131,10 +131,8 @@ document.addEventListener('DOMContentLoaded', () => {
             fullKotBtn.innerText = 'PRINT FULL K.O.T';
             fullKotBtn.style.display = 'none';
             
-            const actionGrid = kotBtn.parentNode;
-            if(actionGrid) {
-                actionGrid.insertBefore(fullKotBtn, actionGrid.firstChild);
-            }
+            // Insert right after KOT: View Details | KOT | PRINT FULL K.O.T | SAVE & EXIT
+            kotBtn.insertAdjacentElement('afterend', fullKotBtn);
             
             fullKotBtn.addEventListener('click', () => printKOT(true)); 
         }

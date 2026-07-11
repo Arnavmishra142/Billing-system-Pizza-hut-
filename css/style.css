@@ -113,15 +113,16 @@ body {
 .top-nav { 
     background: #101218; 
     color: white; 
-    padding: 15px 25px; 
-    padding-bottom: max(15px, calc(env(safe-area-inset-bottom) + 12px)); /* niche gesture bar se bachne ke liye */
+    padding: 12px 20px; 
+    padding-bottom: max(12px, calc(env(safe-area-inset-bottom) + 10px));
     display: flex; 
-    align-items: center; 
-    gap: 20px; 
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px; 
     flex-shrink: 0;
     flex-wrap: wrap;
-    box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.1); /* ab ye bottom bar hai, isliye shadow upar ki taraf */
-    order: 2; /* Screen ke sabse niche le jaane ke liye (flex-direction column hai) */
+    box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.3);
+    order: 2;
 }
 
 .customer-tabs { 
@@ -165,7 +166,7 @@ body {
 .back-btn:hover { background: #dc2626; }
 
 /* =========================================
-   POS TOP BAR (action buttons: KOT, SAVE & EXIT, PRINT FULL K.O.T)
+   POS TOP BAR: Back to Grid (left) + Customer Tabs (center)
    ========================================= */
 .pos-top-bar {
     background: #101218;
@@ -176,15 +177,68 @@ body {
     flex-shrink: 0;
     border-bottom: 1px solid #262a35;
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+    position: relative;
+    min-height: 58px;
 }
 
-.pos-top-bar .btn {
-    padding: 10px 20px;
-    font-size: 0.95rem;
+/* Back btn stays left — override global order:3 / margin-left:auto */
+.pos-top-bar .back-btn {
+    order: 0;
+    margin-left: 0;
+    flex-shrink: 0;
+}
+
+/* Customer tabs pinned to absolute center of the bar */
+.pos-top-bar .customer-tabs {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-left: 0;
+}
+
+/* =========================================
+   BOTTOM FOOTER: left button group + table name
+   ========================================= */
+.footer-left-btns {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: nowrap;
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+.footer-left-btns .btn {
+    padding: 10px 14px;
+    font-size: 0.88rem;
     font-weight: 800;
-    letter-spacing: 0.5px;
-    border-radius: 8px;
     white-space: nowrap;
+    letter-spacing: 0.3px;
+}
+
+.footer-view-btn {
+    background: linear-gradient(135deg, #4f46e5, #6366f1) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+
+.footer-view-btn .fab-badge {
+    background: white;
+    color: #4f46e5;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    font-weight: 900;
+}
+
+.footer-table-name {
+    font-size: 1rem;
+    font-weight: 800;
+    color: #e3e6eb;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin: 0;
 }
 
 /* =========================================
@@ -410,9 +464,13 @@ body {
 .total-amount { color: #10b981; }
 
 .action-grid { 
-    display: grid; 
-    grid-template-columns: 1fr 1fr; 
+    display: flex;
     gap: 12px; 
+}
+
+.action-grid .btn {
+    flex: 1;
+    min-width: 0;
 }
 
 .btn { 
@@ -662,8 +720,8 @@ body {
 
 .running-card .rc-amount { color: #34d399; font-weight: 800; font-size: 1rem; }
 .running-card .rc-items { font-size: 0.85rem; color: #8b93a1; }
-/* Checkout button ko lamba karne ke liye */
-.btn-checkout { grid-column: span 2; }
+/* Checkout button — flex: 1 handled by .action-grid .btn */
+.btn-checkout { grid-column: auto; }
 
 /* =========================================
    THERMAL PRINTER STYLES (58mm EZO PRINTER)

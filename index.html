@@ -168,20 +168,23 @@
     </div>
 
     <div id="screen-pos" class="screen hidden">
-        <!-- NEW TOP BAR: action buttons -->
+        <!-- TOP BAR: Back to Grid (left) + Customer Tabs (center) -->
         <div class="pos-top-bar" id="posTopBar">
-            <button class="btn btn-kot" id="kotBtn">KOT</button>
-            <button class="btn btn-details" id="saveExitBtn" style="background:#dc2626;">SAVE & EXIT</button>
-        </div>
-
-        <header class="top-nav pos-header">
             <button id="backToTablesBtn" class="back-btn">⬅ Back to Grid</button>
-            <h2 id="activeTableName">Table / Parcel</h2>
-            
             <div class="customer-tabs" id="customerTabsContainer">
                 <button class="tab active" data-id="C1">Customer 1</button>
                 <button class="tab add-tab-btn" id="addCustomerBtn">+</button>
             </div>
+        </div>
+
+        <!-- BOTTOM FOOTER: action buttons (left) + table name (right) -->
+        <header class="top-nav pos-header">
+            <div class="footer-left-btns">
+                <button id="floatingCartBtn" class="btn footer-view-btn">🛒 View Details <span class="fab-badge" id="fabTotal">₹0.00</span></button>
+                <button class="btn btn-kot" id="kotBtn">KOT</button>
+                <button class="btn btn-details" id="saveExitBtn" style="background:#dc2626;">SAVE & EXIT</button>
+            </div>
+            <h2 id="activeTableName" class="footer-table-name">Table / Parcel</h2>
         </header>
 
         <div class="pos-layout">
@@ -220,11 +223,6 @@
                 </div>
             </aside>
         </div>
-
-        <!-- FLOATING CART BUTTON -->
-        <button id="floatingCartBtn" class="floating-cart-btn">
-            🛒 View Details & Pay <span class="fab-badge" id="fabTotal">₹0.00</span>
-        </button>
 
     </div>
 
@@ -482,20 +480,17 @@
             // Open Drawer
             floatingCartBtn.addEventListener('click', () => {
                 cartPanel.classList.add('open');
-                floatingCartBtn.style.display = 'none'; 
             });
             
             // Close Drawer
             closeCartBtn.addEventListener('click', () => {
                 cartPanel.classList.remove('open');
-                floatingCartBtn.style.display = 'flex'; 
             });
 
-            // Agar Back dabayein, toh drawer band karke button wapas dikhao
+            // Agar Back dabayein, toh drawer band karo
             if(backToTablesBtn) {
                 backToTablesBtn.addEventListener('click', () => {
                     cartPanel.classList.remove('open');
-                    floatingCartBtn.style.display = 'flex';
                 });
             }
 
