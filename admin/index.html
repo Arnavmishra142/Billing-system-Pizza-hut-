@@ -27,10 +27,22 @@
     <header class="topbar">
         <span class="topbar-title">⚙️ Admin</span>
         <div class="topbar-actions">
-            <button id="pwaDownloadBtn" class="btn btn-sm btn-purple" style="display:none;">⬇️ Install</button>
             <button class="btn btn-sm btn-lock" id="logoutBtn">🔒</button>
         </div>
     </header>
+
+    <!-- INSTALL BANNER (shown only when PWA is installable) -->
+    <div id="installBanner" style="display:none;">
+        <div class="install-banner-inner">
+            <img src="/admin/admin-logo.png" class="install-banner-icon" alt="Admin">
+            <div class="install-banner-text">
+                <strong>Install Admin App</strong>
+                <span>Add to home screen for quick access</span>
+            </div>
+            <button class="btn btn-install-big" id="installNowBtn">📲 Install</button>
+            <button class="install-banner-dismiss" id="dismissBannerBtn" title="Dismiss">✕</button>
+        </div>
+    </div>
 
     <!-- CONTENT -->
     <main class="main-workspace">
@@ -207,17 +219,67 @@
 
 <script type="module" src="../js/admin.js?v=20"></script>
 <script>
-    let adminPrompt;
-    const installBtn = document.getElementById('pwaDownloadBtn');
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
+(function () {
+    // ── Service Worker ──
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' })
+            .catch(err => console.warn('SW reg failed:', err));
+    }
+
+    let installPrompt = null;
+    const banner      = document.getElementById('installBanner');
+    const installBtn  = document.getElementById('installNowBtn');
+    const dismissBtn  = document.getElementById('dismissBannerBtn');
+
+    // Already installed as PWA — stay hidden
+    if (window.matchMedia('(display-mode: standalone)').matches) return;
+
+    // Browser signals installable
     window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault(); adminPrompt = e;
-        if (installBtn) installBtn.style.display = 'inline-block';
+        e.preventDefault();
+        installPrompt = e;
+        // Only show banner if the user is logged in (dashboard visible)
+        const dashboard = document.getElementById('adminContent');
+        if (dashboard && dashboard.style.display !== 'none') {
+            banner.style.display = 'block';
+        } else {
+            // Wait until dashboard is shown — poll once a second
+            const tid = setInterval(() => {
+                if (dashboard && dashboard.style.display !== 'none') {
+                    clearInterval(tid);
+                    banner.style.display = 'block';
+                }
+            }, 1000);
+        }
     });
-    if (installBtn) installBtn.addEventListener('click', () => {
-        if (adminPrompt) { adminPrompt.prompt(); adminPrompt.userChoice.then(() => { installBtn.style.display = 'none'; adminPrompt = null; }); }
+
+    // Tap Install
+    installBtn && installBtn.addEventListener('click', async () => {
+        if (!installPrompt) return;
+        installBtn.textContent = '⏳ Installing…';
+        installBtn.disabled = true;
+        installPrompt.prompt();
+        const { outcome } = await installPrompt.userChoice;
+        installPrompt = null;
+        if (outcome === 'accepted') {
+            banner.style.display = 'none';
+        } else {
+            installBtn.textContent = '📲 Install';
+            installBtn.disabled = false;
+        }
     });
-    window.addEventListener('appinstalled', () => { if (installBtn) installBtn.style.display = 'none'; });
+
+    // Dismiss without installing
+    dismissBtn && dismissBtn.addEventListener('click', () => {
+        banner.style.display = 'none';
+    });
+
+    // After successful install (fires on the installed PWA's first launch)
+    window.addEventListener('appinstalled', () => {
+        banner.style.display = 'none';
+        installPrompt = null;
+    });
+})();
 </script>
 </body>
 </html>

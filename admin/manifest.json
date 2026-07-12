@@ -1,20 +1,25 @@
 {
-  "name": "Pizza Hut Admin",
-  "short_name": "Admin",
-  "start_url": "./index.html",
+  "name": "New Pizza Hut Admin",
+  "short_name": "PH Admin",
+  "description": "Admin panel for New Pizza Hut & Live Cake POS",
+  "start_url": "/admin/index.html",
+  "scope": "/admin/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#8b5cf6",
+  "orientation": "portrait",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
   "icons": [
     {
-      "src": "admin-logo.png",
+      "src": "/admin/admin-logo.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
-      "src": "admin-logo.png",
+      "src": "/admin/admin-logo.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }
