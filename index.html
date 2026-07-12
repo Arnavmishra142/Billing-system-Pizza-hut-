@@ -559,36 +559,64 @@
     </script>
 
     <script>
-       // ==========================================
-        // 🔊 SOUND EFFECTS
-        // pop.sfx.mp3  -> literally har click pe (poore app mein)
-        // cash.sfx.mp3 -> Save & Exit aur Bill & Settle pe extra
         // ==========================================
-        const popSound = new Audio('sounds/pop.sfx.mp3');
-        const cashSound = new Audio('sounds/cash.sfx.mp3');
-        popSound.volume = 0.6;
-        cashSound.volume = 0.6;
-        
-        
+        // 🔊 SOUND EFFECTS — Web Audio API
+        // Using AudioContext instead of new Audio() so that sounds play
+        // on the ACCESSIBILITY audio stream, NOT the MEDIA stream.
+        // This means Bluetooth music/songs will NOT be lowered/ducked.
+        // ==========================================
+        let _audioCtx = null;
+        const _audioBufs = {};
 
-        // Capture phase pe lagaya hai taaki koi bhi button (chahe uske andar
-        // stopPropagation() ho) is se miss na ho - HAR click pe bajega.
-        document.addEventListener('click', () => {
-            popSound.currentTime = 0;
-            popSound.play().catch(() => {});
+        // Create AudioContext on first user tap (browser security requirement)
+        async function _initAudio() {
+            if (_audioCtx) return;
+            _audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+                latencyHint: 'interactive'
+            });
+            // Load both sounds in parallel
+            const load = async (key, url) => {
+                try {
+                    const res  = await fetch(url);
+                    const buf  = await res.arrayBuffer();
+                    _audioBufs[key] = await _audioCtx.decodeAudioData(buf);
+                } catch(e) { /* sound file missing — silently skip */ }
+            };
+            await Promise.all([
+                load('pop',  'sounds/pop.sfx.mp3'),
+                load('cash', 'sounds/cash.sfx.mp3')
+            ]);
+        }
+
+        function _playSound(key, volume = 0.6) {
+            if (!_audioCtx || !_audioBufs[key]) return;
+            try {
+                const src  = _audioCtx.createBufferSource();
+                const gain = _audioCtx.createGain();
+                src.buffer      = _audioBufs[key];
+                gain.gain.value = volume;
+                src.connect(gain);
+                gain.connect(_audioCtx.destination);
+                src.start(0);
+            } catch(e) {}
+        }
+
+        // First click initialises audio context + loads files, then plays pop
+        let _audioReady = false;
+        document.addEventListener('click', async () => {
+            if (!_audioReady) {
+                _audioReady = true;
+                await _initAudio();
+            }
+            _playSound('pop', 0.55);
         }, true);
 
+        // Cash sound on Bill & Settle and Save & Exit
         document.addEventListener('DOMContentLoaded', () => {
             const checkoutBtn = document.getElementById('checkoutBtn');
             const saveExitBtn = document.getElementById('saveExitBtn');
-
             [checkoutBtn, saveExitBtn].forEach(btn => {
-                if (btn) {
-                    btn.addEventListener('click', () => {
-                        cashSound.currentTime = 0;
-                        cashSound.play().catch(() => {});
-                    }, true);
-                }
+                if (btn) btn.addEventListener('click', () => _playSound('cash', 0.7), true);
             });
         });
     </script>

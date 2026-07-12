@@ -412,109 +412,91 @@ document.addEventListener('DOMContentLoaded', () => {
             const tableName = getCurrentTable();
             const customerName = getCurrentCustomer();
             const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-            checkoutBtn.innerText = "Processing...";
-            checkoutBtn.disabled = true;
 
-            try {
-                const billId = `SALE_${Date.now()}`;
-                await setDoc(doc(db, "sales_history", billId), {
-                    table: tableName,
-                    customer: customerName,
-                    items: currentCart,
-                    total: total,
-                    timestamp: new Date().toISOString()
-                });
+            // ── Build bill text immediately (no network wait) ──
+            const BOLD_ON = '\x1B\x45\x01';
+            const BOLD_OFF = '\x1B\x45\x00';
+            let shortOrderId = String(Date.now()).slice(-5);
+            let billText = BOLD_ON;
+            billText += centerText("NEW PIZZA HUT AND LIVE CAKE") + "\n";
+            billText += centerText("in front of SBI bank ke tik") + "\n";
+            billText += centerText("samne salempur Deoria, UP") + "\n";
+            billText += centerText("FSSAI: 30230324113093042") + "\n";
+            billText += centerText("Phone: 9628548655") + "\n\n";
+            billText += `Bill No: ${shortOrderId}\n`;
+            billText += `Created On: ${getFormattedDate()}\n`;
+            billText += `Bill To: ${getDisplayTitle()}\n\n`;
+            billText += "Item Name      Qty Rate  Total\n\n";
+            let totalQty = 0;
+            currentCart.forEach(item => {
+                totalQty += item.qty;
+                billText += formatBillRow(item.name, item.qty, item.price, item.price * item.qty);
+            });
+            billText += "\n";
+            billText += `Total Items: ${currentCart.length}\n`;
+            billText += `Total Quantity: ${totalQty}\n`;
+            billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n";
+            billText += centerText(`TOTAL: Rs ${total}`) + "\n\n";
+            billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
 
-                if(window.saveToGhostHistory) {
-                    let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
-                    window.saveToGhostHistory(orderId, total, currentCart);
-                }
+            // ── Snapshot cart before clearing ──
+            const cartSnapshot = currentCart.slice();
 
-                const BOLD_ON = '\x1B\x45\x01';
-                const BOLD_OFF = '\x1B\x45\x00';
+            // ── Instant actions — no Firestore wait ──
+            triggerRawBTPrint(billText);           // print fires immediately
+            saveLocalCart([]);
+            currentCart = [];
+            renderCart();
+            setTimeout(() => { if (backToTablesBtn) backToTablesBtn.click(); }, 300);
 
-                let shortOrderId = String(Date.now()).slice(-5); 
-                let billText = BOLD_ON;
-                
-                billText += centerText("NEW PIZZA HUT AND LIVE CAKE") + "\n";
-                billText += centerText("in front of SBI bank ke tik") + "\n";
-                billText += centerText("samne salempur Deoria, UP") + "\n";
-                billText += centerText("FSSAI: 30230324113093042") + "\n";
-                billText += centerText("Phone: 9628548655") + "\n\n"; 
-                
-                billText += `Bill No: ${shortOrderId}\n`;
-                billText += `Created On: ${getFormattedDate()}\n`;
-                billText += `Bill To: ${getDisplayTitle()}\n\n`; 
-                
-                billText += "Item Name      Qty Rate  Total\n\n"; 
-                
-                let totalQty = 0;
-                currentCart.forEach(item => {
-                    totalQty += item.qty;
-                    billText += formatBillRow(item.name, item.qty, item.price, item.price * item.qty);
-                });
-                
-                billText += "\n"; 
-                
-                billText += `Total Items: ${currentCart.length}\n`;
-                billText += `Total Quantity: ${totalQty}\n`;
-                billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n"; 
-                
-                billText += centerText(`TOTAL: Rs ${total}`) + "\n\n"; 
-                billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
-                
-                triggerRawBTPrint(billText);
+            // ── Save to Firestore in background (fire & forget) ──
+            const billId = `SALE_${Date.now()}`;
+            setDoc(doc(db, "sales_history", billId), {
+                table: tableName,
+                customer: customerName,
+                items: cartSnapshot,
+                total: total,
+                timestamp: new Date().toISOString()
+            }).catch(err => console.error("Bill save failed:", err));
 
-                saveLocalCart([]); 
-                currentCart = [];
-                renderCart(); 
-                setTimeout(() => { if(backToTablesBtn) backToTablesBtn.click() }, 500); 
-            } catch (error) {
-                alert("Database error!");
-            } finally {
-                checkoutBtn.innerText = "Bill & Settle";
-                checkoutBtn.disabled = false;
+            if (window.saveToGhostHistory) {
+                let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
+                window.saveToGhostHistory(orderId, total, cartSnapshot);
             }
         });
     }
 
     if (saveExitBtn) {
-        saveExitBtn.addEventListener('click', async () => {
+        saveExitBtn.addEventListener('click', () => {
             if (currentCart.length === 0) {
-                if (backToTablesBtn) backToTablesBtn.click(); 
+                if (backToTablesBtn) backToTablesBtn.click();
                 return;
             }
-            const tableName = getCurrentTable();
+            const tableName    = getCurrentTable();
             const customerName = getCurrentCustomer();
-            const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-            
-            const textBackup = saveExitBtn.innerText;
-            saveExitBtn.innerText = "Saving...";
-            saveExitBtn.disabled = true;
+            const total        = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
-            try {
-                await setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
-                    table: tableName,
-                    customer: customerName,
-                    items: currentCart,
-                    total: total,
-                    timestamp: new Date().toISOString()
-                });
+            // ── Snapshot cart before clearing ──
+            const cartSnapshot = currentCart.slice();
 
-                if(window.saveToGhostHistory) {
-                    let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
-                    window.saveToGhostHistory(orderId + " (HOLD)", total, currentCart);
-                }
+            // ── Instant UI — go back immediately, no network wait ──
+            saveLocalCart([]);
+            currentCart = [];
+            renderCart();
+            if (backToTablesBtn) backToTablesBtn.click();
 
-                saveLocalCart([]); 
-                currentCart = [];
-                renderCart();
-                if (backToTablesBtn) backToTablesBtn.click();
-            } catch (e) {
-                alert("Database save fail!");
-            } finally {
-                saveExitBtn.innerText = textBackup;
-                saveExitBtn.disabled = false;
+            // ── Save to Firestore in background (fire & forget) ──
+            setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
+                table: tableName,
+                customer: customerName,
+                items: cartSnapshot,
+                total: total,
+                timestamp: new Date().toISOString()
+            }).catch(err => console.error("Save & Exit Firestore failed:", err));
+
+            if (window.saveToGhostHistory) {
+                let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
+                window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot);
             }
         });
     }
