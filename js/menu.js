@@ -1,5 +1,8 @@
 import { db } from './firebase-config.js';
-import { collection, getDocs, addDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import {
+    collection, getDocs, addDoc,
+    getDocsFromCache, getDocsFromServer
+} from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 let allItems = [];
 let categories = ['All'];
@@ -11,55 +14,114 @@ document.addEventListener('DOMContentLoaded', () => {
     setupSearch();
 });
 
-// 1. FIREBASE SE MENU LAO
+// ── Helper: parse a Firestore snapshot into allItems + categories ──
+const MENU_SORT_BASE = (name) =>
+    name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
+
+function processSnapshot(querySnapshot) {
+    const items = [];
+    const catSet = new Set(['All']);
+
+    querySnapshot.forEach((docSnap) => {
+        const item = { ...docSnap.data(), id: docSnap.id };
+        if (item.inStock !== false) {
+            items.push(item);
+            if (item.category) catSet.add(item.category);
+        }
+    });
+
+    items.sort((a, b) => {
+        const baseA = MENU_SORT_BASE(a.name);
+        const baseB = MENU_SORT_BASE(b.name);
+        if (baseA < baseB) return -1;
+        if (baseA > baseB) return 1;
+        return (Number(a.price) || 0) - (Number(b.price) || 0);
+    });
+
+    const cats = Array.from(catSet).sort((a, b) => {
+        if (a === 'All') return -1;
+        if (b === 'All') return 1;
+        return a.localeCompare(b);
+    });
+
+    return { items, cats };
+}
+
+// ── Save / load menu from localStorage (instant fallback) ──
+const MENU_LS_KEY = 'pos_menu_cache_v1';
+
+function saveMenuToLS(items, cats) {
+    try {
+        localStorage.setItem(MENU_LS_KEY, JSON.stringify({ items, cats, ts: Date.now() }));
+    } catch (e) { /* storage full? ignore */ }
+}
+
+function loadMenuFromLS() {
+    try {
+        const raw = localStorage.getItem(MENU_LS_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (e) { return null; }
+}
+
+// ── Apply data to UI ──
+function applyMenuData(items, cats) {
+    allItems = items;
+    categories = cats;
+    loadCategories();
+    loadItems(currentCategory);
+    updateDatalist();
+    syncItemBadges();
+}
+
+// 1. FIREBASE SE MENU LAO  (two-phase: cache → network)
 export async function fetchMenuFromCloud() {
     const grid = document.getElementById('itemsGrid');
-    if(!grid) return;
-    
-    grid.innerHTML = '<div style="padding:20px; color:gray; width:100%; text-align:center;">Cloud se Menu aa raha hai... ☁️⏳</div>';
-    
-    try {
-        const querySnapshot = await getDocs(collection(db, "menu_items"));
-        allItems = [];
-        let catSet = new Set(['All']);
+    if (!grid) return;
 
-        querySnapshot.forEach((docSnap) => {
-            let item = docSnap.data();
-            item.id = docSnap.id;
-            if(item.inStock !== false) {
-                allItems.push(item);
-                if(item.category) catSet.add(item.category);
-            }
-        });
-
-        const getBaseName = (name) => name.includes('(') ? name.split('(')[0].trim().toLowerCase() : name.trim().toLowerCase();
-
-        allItems.sort((a, b) => {
-            const baseA = getBaseName(a.name);
-            const baseB = getBaseName(b.name);
-
-            if (baseA < baseB) return -1;
-            if (baseA > baseB) return 1;
-
-            return (Number(a.price) || 0) - (Number(b.price) || 0);
-        });
-
-        categories = Array.from(catSet);
-
-        categories.sort((a, b) => {
-            if (a === 'All') return -1;
-            if (b === 'All') return 1;
-            return a.localeCompare(b);
-        });
-        
-        loadCategories();
-        loadItems('All');
-        updateDatalist(); 
-        
-    } catch (e) {
-        console.error("Menu fetch error:", e);
-        grid.innerHTML = '<div style="color:red; padding:20px;">Menu load fail hua. Internet check karo!</div>';
+    // ── Phase 0: localStorage instant render ──
+    const cached = loadMenuFromLS();
+    if (cached && cached.items && cached.items.length > 0) {
+        applyMenuData(cached.items, cached.cats);
+        // Show a subtle "refreshing" note instead of full spinner
+        const note = document.createElement('div');
+        note.id = 'menuRefreshNote';
+        note.style.cssText = 'position:fixed;bottom:160px;left:50%;transform:translateX(-50%);background:#1f2937;color:#9ca3af;padding:6px 16px;border-radius:20px;font-size:0.82rem;z-index:9995;pointer-events:none;';
+        note.textContent = '🔄 Syncing menu...';
+        document.body.appendChild(note);
+    } else {
+        grid.innerHTML = '<div style="padding:20px;color:gray;width:100%;text-align:center;">Menu load ho raha hai... ☁️⏳</div>';
     }
+
+    // ── Phase 1: Firestore IndexedDB cache (near-instant, no network) ──
+    try {
+        const cacheSnap = await getDocsFromCache(collection(db, "menu_items"));
+        if (!cacheSnap.empty) {
+            const { items, cats } = processSnapshot(cacheSnap);
+            applyMenuData(items, cats);
+            saveMenuToLS(items, cats);
+        }
+    } catch (e) {
+        // No Firestore cache yet — that's fine, continue to server fetch
+    }
+
+    // ── Phase 2: Live server fetch (always runs to get fresh data) ──
+    try {
+        const serverSnap = await getDocsFromServer(collection(db, "menu_items"));
+        const { items, cats } = processSnapshot(serverSnap);
+        applyMenuData(items, cats);
+        saveMenuToLS(items, cats);
+    } catch (e) {
+        console.error("Server fetch error:", e);
+        // If we already rendered from cache, this is silent — user sees menu fine
+        if (!cached || !cached.items || cached.items.length === 0) {
+            grid.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Menu load nahi hua.<br>Internet check karo ya refresh karo.</div>';
+        }
+    }
+
+    // Remove sync note
+    const note = document.getElementById('menuRefreshNote');
+    if (note) note.remove();
 }
 
 // 2. RENDER CATEGORIES

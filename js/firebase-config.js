@@ -1,6 +1,10 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-import { getStorage } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js"; 
+import {
+    initializeFirestore,
+    persistentLocalCache,
+    persistentMultipleTabManager
+} from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { getStorage } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyBLzGd0DlItKShk0eJoQR4CjRx1sP3-o-w",
@@ -13,5 +17,13 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+
+// Enable IndexedDB offline persistence — data survives app close/reopen
+// Multi-tab manager so multiple browser tabs don't conflict
+export const db = initializeFirestore(app, {
+    localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+    })
+});
+
 export const storage = getStorage(app);
