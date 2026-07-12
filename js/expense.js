@@ -1,6 +1,6 @@
 import { db } from './firebase-config.js';
 import {
-    collection, addDoc,
+    collection, addDoc, deleteDoc, doc,
     getDocsFromCache, getDocsFromServer
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
@@ -56,9 +56,17 @@ function renderTodayExpenses(notes) {
                 <div class="expense-note" style="text-transform:capitalize;">${exp.note}</div>
                 <div class="expense-time">${timeStr}</div>
             </div>
-            <div class="expense-amt">₹${exp.amount}</div>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <div class="expense-amt">₹${exp.amount}</div>
+                <button class="delete-expense-btn" data-id="${exp.id}" title="Delete">🗑️</button>
+            </div>
         `;
         listEl.appendChild(row);
+    });
+
+    // Attach delete handlers
+    listEl.querySelectorAll('.delete-expense-btn').forEach(btn => {
+        btn.addEventListener('click', () => deleteExpense(btn.dataset.id));
     });
 
     // Refill datalist suggestions if notes provided
@@ -105,6 +113,28 @@ async function loadExpenseData() {
         if (!cached || cached.length === 0) {
             listEl.innerHTML = '<div style="color:red;text-align:center;">Load nahi hua. Internet check karo.</div>';
         }
+    }
+}
+
+// ── Delete expense — optimistic: remove from UI instantly, then Firestore ──
+async function deleteExpense(expId) {
+    if (!confirm("Yeh expense delete karna hai?")) return;
+
+    // Optimistic: remove from local state immediately
+    allExpenses = allExpenses.filter(e => e.id !== expId);
+    renderTodayExpenses(null);
+    saveExpensesToLS(allExpenses);
+
+    // Skip Firestore delete for temp items (not yet saved)
+    if (expId.startsWith('temp_')) return;
+
+    try {
+        await deleteDoc(doc(db, "daily_expenses", expId));
+    } catch (e) {
+        console.error("Delete failed:", e);
+        alert("Delete nahi hua. Internet check karo.");
+        // Reload from server to restore correct state
+        await loadExpenseData();
     }
 }
 
