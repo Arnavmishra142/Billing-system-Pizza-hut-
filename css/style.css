@@ -1225,6 +1225,12 @@ body {
     border-left: 4px solid #f59e0b; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
 }
 .history-card p { margin: 5px 0; font-size: 0.9rem; color: #9199a8; }
+.btn-view-details {
+    margin-top: 0; background: #8b5cf6; color: white; border: none;
+    padding: 8px; border-radius: 5px; cursor: pointer; font-weight: bold;
+    transition: background 0.2s;
+}
+.btn-view-details:hover { background: #7c3aed; }
 .btn-reprint {
     margin-top: 10px; background: #0ea5e9; color: white; border: none;
     padding: 8px; border-radius: 5px; cursor: pointer; width: 100%; font-weight: bold;

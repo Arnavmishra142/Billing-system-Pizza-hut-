@@ -413,12 +413,14 @@
             }
 
             history.forEach(bill => {
+                const encodedId = encodeURIComponent(bill.id);
                 list.innerHTML += `
                     <div class="history-card">
                         <p><strong>Order No:</strong> ${bill.id}</p>
                         <p><strong>Time:</strong> ${bill.timeStr}</p>
                         <p><strong>Amount:</strong> ₹${bill.total}</p>
                         <div style="display: flex; gap: 8px; margin-top: 10px;">
+                            <button class="btn-view-details" style="flex: 1;" onclick="window.location.href='details.html?id=${encodedId}'">👁️ Details</button>
                             <button class="btn-reprint" style="flex: 1;" onclick="reprintGhostBill('${bill.id}')">🖨️ Print</button>
                             <button class="btn-delete-ghost" onclick="deleteGhostBill('${bill.id}')">🗑️</button>
                         </div>
