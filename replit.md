@@ -11,10 +11,10 @@ A browser-based POS and billing system for "New Pizza Hut & Live Cake". Built wi
 
 ## How to run
 
-The workflow `Start application` serves the project with Python's built-in HTTP server on port 5000:
+The workflow `Start application` serves the project with `serve` (static file server) on port 5000:
 
 ```
-python3 -m http.server 5000
+npx serve . -l 5000
 ```
 
 ## Firebase
