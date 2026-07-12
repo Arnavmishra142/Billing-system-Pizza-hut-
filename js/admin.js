@@ -1,7 +1,7 @@
 import { db, storage } from './firebase-config.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
-    getDocsFromCache, getDocsFromServer, enableNetwork
+    getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
 
@@ -439,7 +439,10 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
 // ==========================================
 // EXPENSES
 // ==========================================
-window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
+// Holds the active expense listener so we can cancel it before starting a new one
+let _expenseUnsub = null;
+
+window.loadAdminExpenses = function(filterType, filterValue, btnContext) {
     if (btnContext) {
         document.querySelectorAll('#expenseSection .filter-pill').forEach(b => b.classList.remove('active'));
         btnContext.classList.add('active');
@@ -447,61 +450,61 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
 
     const listEl = document.getElementById('expenseCardList');
     listEl.innerHTML = '<div class="loading-state">Loading... ☁️</div>';
+    document.getElementById('totalExpenseBox').textContent = '₹0';
 
-    const applySnap = (snap) => {
-        const now = new Date();
-        let filtered = [];
-        snap.forEach(d => {
-            const exp     = { ...d.data(), id: d.id };
-            const expDate = new Date(exp.timestamp);
-            const diff    = Math.ceil(Math.abs(now - expDate) / 864e5);
-            if (filterType === 'days') {
-                if (filterValue === 1 && expDate.toDateString() === now.toDateString()) filtered.push(exp);
-                else if (filterValue !== 1 && diff <= filterValue) filtered.push(exp);
-            } else if (filterType === 'date') {
-                if (expDate.toDateString() === new Date(filterValue).toDateString()) filtered.push(exp);
+    // Cancel any previous listener before starting a fresh one
+    if (_expenseUnsub) { _expenseUnsub(); _expenseUnsub = null; }
+
+    // Wake Firestore network in case PWA suspended it, then attach live listener.
+    // onSnapshot fires immediately from IndexedDB cache, then again whenever
+    // the server sends fresh data — no manual refresh needed.
+    enableNetwork(db).catch(() => {}).finally(() => {
+        _expenseUnsub = onSnapshot(
+            collection(db, "daily_expenses"),
+            (snap) => {
+                const now = new Date();
+                let filtered = [];
+                snap.forEach(d => {
+                    const exp     = { ...d.data(), id: d.id };
+                    const expDate = new Date(exp.timestamp);
+                    const diff    = Math.ceil(Math.abs(now - expDate) / 864e5);
+                    if (filterType === 'days') {
+                        if (filterValue === 1 && expDate.toDateString() === now.toDateString()) filtered.push(exp);
+                        else if (filterValue !== 1 && diff <= filterValue) filtered.push(exp);
+                    } else if (filterType === 'date') {
+                        if (expDate.toDateString() === new Date(filterValue).toDateString()) filtered.push(exp);
+                    }
+                });
+                filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
+                document.getElementById('totalExpenseBox').textContent = `₹${total.toFixed(0)}`;
+                if (!filtered.length) {
+                    listEl.innerHTML = '<div class="empty-state">No expenses found. 🎉</div>';
+                    return;
+                }
+                listEl.innerHTML = filtered.map(exp => {
+                    const timeStr = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
+                    return `
+                    <div class="expense-card">
+                        <div class="exp-left">
+                            <div class="exp-note">${exp.note}</div>
+                            <div class="exp-time">${timeStr}</div>
+                        </div>
+                        <div class="exp-right">
+                            <div class="exp-amount">₹${exp.amount}</div>
+                            <button class="exp-del-btn" onclick="deleteExpense('${exp.id}')">🗑</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            },
+            (err) => {
+                console.error("Expense listener error:", err);
+                if (listEl.innerHTML.includes('Loading')) {
+                    listEl.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load. Check internet.</div>';
+                }
             }
-        });
-        filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
-        document.getElementById('totalExpenseBox').textContent = `₹${total.toFixed(0)}`;
-        if (!filtered.length) {
-            listEl.innerHTML = '<div class="empty-state">No expenses found. 🎉</div>';
-            return;
-        }
-        listEl.innerHTML = filtered.map(exp => {
-            const timeStr = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
-            return `
-            <div class="expense-card">
-                <div class="exp-left">
-                    <div class="exp-note">${exp.note}</div>
-                    <div class="exp-time">${timeStr}</div>
-                </div>
-                <div class="exp-right">
-                    <div class="exp-amount">₹${exp.amount}</div>
-                    <button class="exp-del-btn" onclick="deleteExpense('${exp.id}')">🗑</button>
-                </div>
-            </div>`;
-        }).join('');
-    };
-
-    // Phase 1: show cached data instantly
-    try {
-        const cacheSnap = await getDocsFromCache(collection(db, "daily_expenses"));
-        if (!cacheSnap.empty) applySnap(cacheSnap);
-    } catch(e) {}
-
-    // Phase 2: wake Firestore network (PWA may have suspended it), then fetch fresh
-    try {
-        await enableNetwork(db);
-        const serverSnap = await getDocsFromServer(collection(db, "daily_expenses"));
-        applySnap(serverSnap);
-    } catch (e) {
-        console.error(e);
-        if (listEl.innerHTML.includes('Loading')) {
-            listEl.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load. Check internet.</div>';
-        }
-    }
+        );
+    });
 };
 
 document.getElementById('expenseDateSearch').addEventListener('change', (e) => {
