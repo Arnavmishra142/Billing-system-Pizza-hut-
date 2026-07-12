@@ -1,7 +1,7 @@
 import { db, storage } from './firebase-config.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
-    getDocsFromCache, getDocsFromServer
+    getDocsFromCache, getDocsFromServer, enableNetwork
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
 
@@ -491,8 +491,9 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
         if (!cacheSnap.empty) applySnap(cacheSnap);
     } catch(e) {}
 
-    // Phase 2: always fetch from server so new expenses are never missed
+    // Phase 2: wake Firestore network (PWA may have suspended it), then fetch fresh
     try {
+        await enableNetwork(db);
         const serverSnap = await getDocsFromServer(collection(db, "daily_expenses"));
         applySnap(serverSnap);
     } catch (e) {
