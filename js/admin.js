@@ -1,685 +1,527 @@
-
-
 import { db, storage } from './firebase-config.js';
-import { collection, getDocs, doc, deleteDoc, addDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import {
+    collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
+    getDocsFromCache, getDocsFromServer
+} from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
 
 // ==========================================
-// LOGIN & SESSION LOGIC
+// LOGIN & SESSION
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
     if (localStorage.getItem('adminLoggedIn') === 'true') {
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('adminContent').style.display = 'flex';
-        loadSalesData('days', 1);
+        showDashboard();
     }
+
+    // Enter key on PIN
+    document.getElementById('pinInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('loginBtn').click();
+    });
 });
 
 document.getElementById('loginBtn').addEventListener('click', () => {
     const pin = document.getElementById('pinInput').value;
-    if(pin === "1414") { 
+    if (pin === "1414") {
         localStorage.setItem('adminLoggedIn', 'true');
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('adminContent').style.display = 'flex';
-        loadSalesData('days', 1); 
+        showDashboard();
     } else {
-        alert("Incorrect PIN!");
         document.getElementById('pinInput').value = '';
+        document.getElementById('pinInput').placeholder = 'Wrong PIN!';
+        setTimeout(() => { document.getElementById('pinInput').placeholder = '••••'; }, 1500);
     }
 });
 
-window.switchTab = function(tabName) {
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    
-    document.getElementById(tabName + 'Section').classList.add('active');
-    event.target.classList.add('active');
+document.getElementById('logoutBtn').addEventListener('click', () => {
+    localStorage.removeItem('adminLoggedIn');
+    location.reload();
+});
 
-    if(tabName === 'menu') {
-        loadMenuData();
-    }
+function showDashboard() {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('adminContent').style.display = 'flex';
+    loadSalesData('days', 1);
 }
 
 // ==========================================
-// SALES LOGIC
+// TAB SWITCHER (bottom nav)
 // ==========================================
-let allSales = []; 
-async function fetchAllSalesFromDB() {
+let currentTab = 'sales';
+
+window.switchTab = function(tabName, navBtn) {
+    currentTab = tabName;
+
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.bnav-btn').forEach(b => b.classList.remove('active'));
+
+    document.getElementById(tabName + 'Section').classList.add('active');
+    if (navBtn) navBtn.classList.add('active');
+
+    if (tabName === 'menu') loadMenuData();
+    if (tabName === 'expense') {
+        const todayBtn = document.querySelector('#expenseSection .filter-pill[data-val="1"]');
+        loadAdminExpenses('days', 1, todayBtn);
+    }
+    if (tabName === 'sales') loadSalesData('days', 1);
+};
+
+// ==========================================
+// SALES SUB-TAB (Table vs Quick Sale)
+// ==========================================
+window.switchSalesSubtab = function(which) {
+    document.getElementById('subtab-table').classList.toggle('active', which === 'table');
+    document.getElementById('subtab-qs').classList.toggle('active', which === 'qs');
+    document.getElementById('salesPanel-table').classList.toggle('hidden', which !== 'table');
+    document.getElementById('salesPanel-qs').classList.toggle('hidden', which !== 'qs');
+};
+
+// ==========================================
+// SALES DATA
+// ==========================================
+let allSales = [];
+
+async function fetchAllSales() {
+    // Cache-first for speed
     try {
-        const querySnapshot = await getDocs(collection(db, "sales_history"));
+        const snap = await getDocsFromCache(collection(db, "sales_history"));
+        if (!snap.empty) {
+            allSales = [];
+            snap.forEach(d => { allSales.push({ ...d.data(), id: d.id }); });
+        }
+    } catch (e) {}
+
+    // Then update from server
+    try {
+        const snap = await getDocsFromServer(collection(db, "sales_history"));
         allSales = [];
-        querySnapshot.forEach((docSnap) => {
-            let data = docSnap.data(); data.id = docSnap.id; allSales.push(data);
-        });
-    } catch (error) { console.error(error); }
+        snap.forEach(d => { allSales.push({ ...d.data(), id: d.id }); });
+    } catch (e) { console.error("Sales fetch error:", e); }
 }
 
 window.loadSalesData = async function(filterType, filterValue) {
+    // Show skeletons
     document.getElementById('tableSalesTableBody').innerHTML = '<tr><td colspan="3" class="loading">Loading...</td></tr>';
-    document.getElementById('qsSalesTableBody').innerHTML = '<tr><td colspan="3" class="loading">Loading...</td></tr>';
-    await fetchAllSalesFromDB();
-    const now = new Date();
-    let filteredSales = [];
+    document.getElementById('qsSalesTableBody').innerHTML    = '<tr><td colspan="3" class="loading">Loading...</td></tr>';
+    document.getElementById('tableBillsList').innerHTML = '<div class="loading-state">Loading...</div>';
+    document.getElementById('qsBillsList').innerHTML    = '<div class="loading-state">Loading...</div>';
 
-    allSales.forEach(sale => {
-        if(!sale.timestamp) return; 
-        const saleDate = new Date(sale.timestamp);
-        if (filterType === 'date') {
-            if (saleDate.toDateString() === new Date(filterValue).toDateString()) filteredSales.push(sale);
-        } else if (filterType === 'days') {
-            const diffDays = Math.ceil(Math.abs(now - saleDate) / (1000 * 60 * 60 * 24)); 
-            if (filterValue === 1 && saleDate.toDateString() === now.toDateString()) filteredSales.push(sale);
-            else if (filterValue !== 1 && diffDays <= filterValue) filteredSales.push(sale);
-        }
+    await fetchAllSales();
+    const now = new Date();
+
+    let filteredSales = allSales.filter(sale => {
+        if (!sale.timestamp) return false;
+        const d = new Date(sale.timestamp);
+        if (filterType === 'date') return d.toDateString() === new Date(filterValue).toDateString();
+        if (filterValue === 1)     return d.toDateString() === now.toDateString();
+        const diff = Math.ceil(Math.abs(now - d) / 864e5);
+        return diff <= filterValue;
     });
 
     filteredSales.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     let totalRevenue = 0;
     let tableRevenue = 0, tableOrders = 0, tableItemStats = {};
-    let qsRevenue = 0, qsOrders = 0, qsItemStats = {};
-
-    const tableBillsTbody = document.getElementById('tableBillsTableBody'); tableBillsTbody.innerHTML = '';
-    const qsBillsTbody = document.getElementById('qsBillsTableBody'); qsBillsTbody.innerHTML = '';
+    let qsRevenue = 0,    qsOrders = 0,    qsItemStats = {};
+    const tableBills = [], qsBills = [];
 
     filteredSales.forEach(sale => {
-        const saleTotal = Number(sale.total) || 0;
-        totalRevenue += saleTotal;
+        const total     = Number(sale.total) || 0;
+        totalRevenue   += total;
+        const isQS      = sale.table === 'Direct Entry';
+        const timeStr   = sale.timestamp
+            ? new Date(sale.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })
+            : '—';
+        let label = sale.table || 'Unknown';
+        if (isQS)                           label = 'Cash Sale';
+        else if (!label.includes('Parcel')) label = `${label} [${sale.customer || 'C1'}]`;
 
-        const isQuickSale = sale.table === 'Direct Entry';
-        let timeString = sale.timestamp ? new Date(sale.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' }) : 'N/A';
-
-        let displayName = sale.table || 'Unknown';
-        if (isQuickSale) {
-            displayName = 'Cash Sale';
-        } else if (!displayName.includes('Parcel')) {
-            displayName = `${displayName} [${sale.customer || 'C1'}]`;
-        }
-
-        const rowHTML = `
-            <tr>
-                <td style="color:#94a3b8; white-space:nowrap;">${timeString}</td>
-                <td style="font-weight:bold; color:white; white-space:nowrap;">${displayName}</td>
-                <td class="text-right" style="color:#10b981; font-weight:bold;">₹${saleTotal.toFixed(2)}</td>
-                <td class="text-center"><button class="btn btn-danger" style="padding: 6px 12px; font-size: 0.9rem;" onclick="deleteSale('${sale.id}')">🗑️</button></td>
-            </tr>
-        `;
-
-        const targetStats = isQuickSale ? qsItemStats : tableItemStats;
+        const targetStats = isQS ? qsItemStats : tableItemStats;
         (sale.items || []).forEach(item => {
-            const itemName = item.name || 'Unknown Item';
-            if (!targetStats[itemName]) targetStats[itemName] = { qty: 0, rev: 0 };
-            targetStats[itemName].qty += Number(item.qty) || 0;
-            targetStats[itemName].rev += (Number(item.qty) || 0) * (Number(item.price) || 0);
+            const n = item.name || 'Unknown';
+            if (!targetStats[n]) targetStats[n] = { qty: 0, rev: 0 };
+            targetStats[n].qty += Number(item.qty) || 0;
+            targetStats[n].rev += (Number(item.qty) || 0) * (Number(item.price) || 0);
         });
 
-        if (isQuickSale) {
-            qsRevenue += saleTotal;
-            qsOrders++;
-            qsBillsTbody.innerHTML += rowHTML;
-        } else {
-            tableRevenue += saleTotal;
-            tableOrders++;
-            tableBillsTbody.innerHTML += rowHTML;
-        }
+        const card = { id: sale.id, label, timeStr, total };
+        if (isQS) { qsRevenue += total; qsOrders++; qsBills.push(card); }
+        else       { tableRevenue += total; tableOrders++; tableBills.push(card); }
     });
 
-    if (tableOrders === 0) tableBillsTbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:#64748b;">No bills found.</td></tr>';
-    if (qsOrders === 0) qsBillsTbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:#64748b;">No bills found.</td></tr>';
+    // ── Stats ──
+    document.getElementById('totalRevenueBox').textContent = `₹${totalRevenue.toFixed(0)}`;
+    document.getElementById('totalOrdersBox').textContent  = filteredSales.length;
+    document.getElementById('tableRevenueBox').textContent = `₹${tableRevenue.toFixed(0)}`;
+    document.getElementById('tableOrdersBox').textContent  = tableOrders;
+    document.getElementById('qsRevenueBox').textContent    = `₹${qsRevenue.toFixed(0)}`;
+    document.getElementById('qsOrdersBox').textContent     = qsOrders;
 
-    document.getElementById('totalRevenueBox').innerText = `₹${totalRevenue.toFixed(2)}`;
-    document.getElementById('totalOrdersBox').innerText = filteredSales.length;
-    document.getElementById('tableRevenueBox').innerText = `₹${tableRevenue.toFixed(2)}`;
-    document.getElementById('tableOrdersBox').innerText = tableOrders;
-    document.getElementById('qsRevenueBox').innerText = `₹${qsRevenue.toFixed(2)}`;
-    document.getElementById('qsOrdersBox').innerText = qsOrders;
-
-    const renderItemStats = (tbodyId, statsObj) => {
+    // ── Item breakdown tables ──
+    const renderItemTable = (tbodyId, statsObj) => {
         const tbody = document.getElementById(tbodyId);
-        tbody.innerHTML = '';
-        let sortedItems = Object.keys(statsObj).map(key => ({ name: key, qty: statsObj[key].qty, rev: statsObj[key].rev })).sort((a, b) => b.qty - a.qty);
-
-        if (sortedItems.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:30px; color:#64748b;">No items sold.</td></tr>';
-        } else {
-            sortedItems.forEach(stat => {
-                tbody.innerHTML += `<tr><td style="font-weight:bold; color:white;">${stat.name}</td><td class="text-right" style="color:#38bdf8; font-weight:bold;">${stat.qty}</td><td class="text-right" style="color:#10b981; font-weight:bold;">₹${stat.rev.toFixed(2)}</td></tr>`;
-            });
-        }
-    };
-
-    renderItemStats('tableSalesTableBody', tableItemStats);
-    renderItemStats('qsSalesTableBody', qsItemStats);
-}
-window.deleteSale = async function(saleId) {
-    if (confirm("Delete this bill?")) {
-        await deleteDoc(doc(db, "sales_history", saleId));
-        const activeBtn = document.querySelector('.filter-btn.active');
-        if(activeBtn) loadSalesData('days', parseInt(activeBtn.dataset.val)); 
-        else loadSalesData('date', document.getElementById('customDateSearch').value);
-    }
-}
-
-document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-        e.target.classList.add('active');
-        document.getElementById('customDateSearch').value = ''; 
-        loadSalesData('days', parseInt(e.target.dataset.val));
-    });
-});
-document.getElementById('refreshBtn').addEventListener('click', async (e) => {
-    const btn = e.target; btn.innerText = "🔄..."; btn.disabled = true;
-    const activeBtn = document.querySelector('.filter-btn.active');
-    if(activeBtn) await loadSalesData('days', parseInt(activeBtn.dataset.val));
-    else await loadSalesData('date', document.getElementById('customDateSearch').value || new Date());
-    btn.innerText = "🔄 Refresh Data"; btn.disabled = false;
-});
-document.getElementById('customDateSearch').addEventListener('change', (e) => {
-    if (e.target.value) { document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active')); loadSalesData('date', e.target.value); }
-});
-
-// ==========================================
-// MENU MANAGEMENT & UI UPDATES
-// ==========================================
-const itemModal = document.getElementById('itemModal');
-const imagePreview = document.getElementById('imagePreview');
-const itemImageInput = document.getElementById('itemImageInput');
-const imagePreviewText = document.getElementById('imagePreviewText');
-
-let selectedImageFile = null; 
-let currentEditId = null; 
-let allMenuItems = []; 
-
-window.loadMenuData = async function() {
-    const tbody = document.getElementById('menuTableBody');
-    tbody.innerHTML = '<tr><td colspan="6" class="loading">Loading Menu from Cloud... ☁️</td></tr>';
-    
-    try {
-        const querySnapshot = await getDocs(collection(db, "menu_items"));
-        tbody.innerHTML = '';
-        allMenuItems = []; 
-        
-        if (querySnapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="padding:30px; color:#64748b;">Your menu is empty. Click "+ Add New Item".</td></tr>';
+        const rows = Object.entries(statsObj)
+            .map(([name, s]) => ({ name, ...s }))
+            .sort((a, b) => b.qty - a.qty);
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="3" class="empty-row"><td>No items sold.</td></td></tr>';
             return;
         }
+        tbody.innerHTML = rows.map(r => `
+            <tr>
+                <td style="color:#e6edf3;font-weight:700;">${r.name}</td>
+                <td style="color:#58a6ff;font-weight:800;text-align:right;">${r.qty}</td>
+                <td style="color:#3fb950;font-weight:800;text-align:right;">₹${r.rev.toFixed(0)}</td>
+            </tr>
+        `).join('');
+    };
+    renderItemTable('tableSalesTableBody', tableItemStats);
+    renderItemTable('qsSalesTableBody', qsItemStats);
 
-        querySnapshot.forEach((docSnap) => {
-            let item = docSnap.data();
-            item.id = docSnap.id;
-            allMenuItems.push(item); 
-        });
+    // ── Bill cards ──
+    const renderBillCards = (containerId, bills) => {
+        const el = document.getElementById(containerId);
+        if (!bills.length) {
+            el.innerHTML = '<div class="empty-state">No bills found.</div>';
+            return;
+        }
+        el.innerHTML = bills.map(b => `
+            <div class="bill-card">
+                <div class="bill-card-left">
+                    <div class="bill-card-name">${b.label}</div>
+                    <div class="bill-card-time">${b.timeStr}</div>
+                </div>
+                <div class="bill-card-right">
+                    <div class="bill-card-amt">₹${Number(b.total).toFixed(0)}</div>
+                    <button class="bill-del-btn" onclick="deleteSale('${b.id}')">🗑</button>
+                </div>
+            </div>
+        `).join('');
+    };
+    renderBillCards('tableBillsList', tableBills);
+    renderBillCards('qsBillsList', qsBills);
+};
 
-        // NAYA LOGIC: Sorting by Category then by Name
-        allMenuItems.sort((a, b) => {
-            let catA = (a.category || "").toUpperCase();
-            let catB = (b.category || "").toUpperCase();
-            if (catA < catB) return -1;
-            if (catA > catB) return 1;
-            
-            let nameA = (a.name || "").toUpperCase();
-            let nameB = (b.name || "").toUpperCase();
-            if (nameA < nameB) return -1;
-            if (nameA > nameB) return 1;
-            return 0;
-        });
+window.deleteSale = async function(saleId) {
+    if (!confirm("Delete this bill?")) return;
+    try {
+        await deleteDoc(doc(db, "sales_history", saleId));
+        const activeFilter = document.querySelector('#salesSection .filter-pill.active');
+        const customDate   = document.getElementById('customDateSearch').value;
+        if (customDate) loadSalesData('date', customDate);
+        else loadSalesData('days', parseInt(activeFilter?.dataset.val || '1'));
+    } catch (e) { alert("Delete failed. Check internet."); }
+};
 
-        // Table mein print karna (Category wise format)
-        let currentCategoryTrack = "";
-
-        allMenuItems.forEach((item) => {
-            if(item.category !== currentCategoryTrack) {
-                currentCategoryTrack = item.category;
-                tbody.innerHTML += `
-                    <tr style="background: #334155;">
-                        <td colspan="6" style="color: #f8fafc; font-weight: 800; font-size: 1.1rem; padding: 10px 15px; letter-spacing: 1px; text-transform: uppercase;">
-                            📌 ${item.category}
-                        </td>
-                    </tr>
-                `;
-            }
-
-            let checked = item.inStock !== false ? 'checked' : '';
-            let imageTag = item.image ? `<img src="${item.image}" class="menu-thumb">` : `<div class="menu-thumb" style="display:flex;align-items:center;justify-content:center;font-size:10px;color:gray;">No Img</div>`;
-
-            tbody.innerHTML += `
-                <tr>
-                    <td>${imageTag}</td>
-                    <td style="font-weight: bold; color: white;">${item.name}</td>
-                    <td style="color: #38bdf8;">${item.category}</td>
-                    <td style="color: #10b981; font-weight: bold;">₹${item.price}</td>
-                    <td class="text-center">
-                        <label class="switch">
-                            <input type="checkbox" ${checked} onchange="toggleStock('${item.id}', this.checked)">
-                            <span class="slider"></span>
-                        </label>
-                    </td>
-                    <td class="text-center" style="white-space: nowrap;">
-                        <button class="action-btn btn-edit" onclick="editMenuItem('${item.id}')">✏️</button>
-                        <button class="action-btn btn-delete" onclick="deleteMenuItem('${item.id}')">🗑️</button>
-                    </td>
-                </tr>
-            `;
-        });
-    } catch (e) {
-        console.error("Error loading menu:", e);
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center" style="color:red;">Error loading menu. Internet check karo.</td></tr>';
+// Filter pills in sales section
+document.querySelectorAll('#salesSection .filter-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('#salesSection .filter-pill').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('customDateSearch').value = '';
+        loadSalesData('days', parseInt(btn.dataset.val));
+    });
+});
+document.getElementById('customDateSearch').addEventListener('change', (e) => {
+    if (e.target.value) {
+        document.querySelectorAll('#salesSection .filter-pill').forEach(b => b.classList.remove('active'));
+        loadSalesData('date', e.target.value);
     }
+});
+document.getElementById('refreshBtn').addEventListener('click', async (e) => {
+    e.target.textContent = '⏳'; e.target.disabled = true;
+    const active     = document.querySelector('#salesSection .filter-pill.active');
+    const customDate = document.getElementById('customDateSearch').value;
+    if (customDate) await loadSalesData('date', customDate);
+    else await loadSalesData('days', parseInt(active?.dataset.val || '1'));
+    e.target.textContent = '↻'; e.target.disabled = false;
+});
+
+// ==========================================
+// MENU MANAGEMENT
+// ==========================================
+const itemModal        = document.getElementById('itemModal');
+const imagePreview     = document.getElementById('imagePreview');
+const itemImageInput   = document.getElementById('itemImageInput');
+const imagePreviewText = document.getElementById('imagePreviewText');
+
+let selectedImageFile = null;
+let currentEditId     = null;
+let allMenuItems      = [];
+
+window.loadMenuData = async function() {
+    const grid = document.getElementById('menuCardGrid');
+    grid.innerHTML = '<div class="loading-state">Loading menu... ☁️</div>';
+
+    try {
+        // Cache-first
+        let snap;
+        try { snap = await getDocsFromCache(collection(db, "menu_items")); } catch(e) {}
+        if (!snap || snap.empty) snap = await getDocsFromServer(collection(db, "menu_items"));
+
+        allMenuItems = [];
+        snap.forEach(d => allMenuItems.push({ ...d.data(), id: d.id }));
+
+        allMenuItems.sort((a, b) => {
+            const ca = (a.category || '').toUpperCase(), cb = (b.category || '').toUpperCase();
+            if (ca < cb) return -1; if (ca > cb) return 1;
+            const na = (a.name || '').toUpperCase(), nb = (b.name || '').toUpperCase();
+            return na < nb ? -1 : na > nb ? 1 : 0;
+        });
+
+        renderMenuCards();
+    } catch (e) {
+        console.error(e);
+        grid.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load menu. Check internet.</div>';
+    }
+};
+
+function renderMenuCards() {
+    const grid = document.getElementById('menuCardGrid');
+    if (!allMenuItems.length) {
+        grid.innerHTML = '<div class="empty-state">Menu is empty. Add your first item!</div>';
+        return;
+    }
+    let html = '';
+    let lastCat = '';
+    allMenuItems.forEach(item => {
+        if (item.category !== lastCat) {
+            lastCat = item.category;
+            html += `<div class="menu-category-header">📌 ${item.category || 'Uncategorised'}</div>`;
+        }
+        const checked  = item.inStock !== false ? 'checked' : '';
+        const imgTag   = item.image
+            ? `<div class="menu-thumb"><img src="${item.image}" alt="${item.name}"></div>`
+            : `<div class="menu-thumb" style="font-size:1.4rem;">🍽️</div>`;
+
+        html += `
+        <div class="menu-item-card">
+            ${imgTag}
+            <div class="menu-item-info">
+                <div class="menu-item-name">${item.name}</div>
+                <div class="menu-item-price">₹${item.price}</div>
+            </div>
+            <div class="menu-item-actions">
+                <label class="switch" title="In Stock">
+                    <input type="checkbox" ${checked} onchange="toggleStock('${item.id}', this.checked)">
+                    <span class="slider"></span>
+                </label>
+                <button class="btn-edit-sm" onclick="editMenuItem('${item.id}')">✏️</button>
+                <button class="btn-del-sm"  onclick="deleteMenuItem('${item.id}')">🗑️</button>
+            </div>
+        </div>`;
+    });
+    grid.innerHTML = html;
 }
 
-// MISSING FUNCTIONS RESTORED
-window.toggleStock = async function(id, isStockStatus) {
-    try { await updateDoc(doc(db, "menu_items", id), { inStock: isStockStatus }); } 
-    catch(e) { alert("Stock update fail hua!"); }
-}
+window.toggleStock = async function(id, status) {
+    try { await updateDoc(doc(db, "menu_items", id), { inStock: status }); }
+    catch(e) { alert("Stock update failed!"); }
+};
 
 window.deleteMenuItem = async function(id) {
-    if(confirm("Are you sure you want to delete this item permanently?")) {
-        await deleteDoc(doc(db, "menu_items", id));
-        loadMenuData(); 
-    }
-}
+    if (!confirm("Delete this item permanently?")) return;
+    await deleteDoc(doc(db, "menu_items", id));
+    loadMenuData();
+};
 
-function populateCategoryDropdown(selectedCategory = null) {
-    const select = document.getElementById('itemCategoryInput');
-    const newCatInput = document.getElementById('newCategoryInput');
-    select.innerHTML = '';
-    
-    const uniqueCategories = [...new Set(allMenuItems.map(item => item.category))].filter(Boolean);
-    
-    uniqueCategories.forEach(cat => {
-        select.innerHTML += `<option value="${cat}">${cat}</option>`;
-    });
-    
-    select.innerHTML += `<option value="NEW_CATEGORY" style="font-weight:bold; color:#10b981;">+ Add Custom Category</option>`;
-    
-    if(selectedCategory) {
-        select.value = selectedCategory;
-    }
-    
-    newCatInput.classList.add('hidden');
-    newCatInput.value = '';
+function populateCategoryDropdown(selectedCat = null) {
+    const sel = document.getElementById('itemCategoryInput');
+    const cats = [...new Set(allMenuItems.map(i => i.category))].filter(Boolean).sort();
+    sel.innerHTML = cats.map(c => `<option value="${c}">${c}</option>`).join('');
+    sel.innerHTML += `<option value="NEW_CATEGORY" style="font-weight:bold;color:#3fb950;">+ New Category</option>`;
+    if (selectedCat) sel.value = selectedCat;
+    document.getElementById('newCategoryInput').classList.add('hidden');
+    document.getElementById('newCategoryInput').value = '';
 }
 
 document.getElementById('itemCategoryInput').addEventListener('change', (e) => {
-    if(e.target.value === 'NEW_CATEGORY') {
-        document.getElementById('newCategoryInput').classList.remove('hidden');
-        document.getElementById('newCategoryInput').focus();
-    } else {
-        document.getElementById('newCategoryInput').classList.add('hidden');
-    }
+    const show = e.target.value === 'NEW_CATEGORY';
+    document.getElementById('newCategoryInput').classList.toggle('hidden', !show);
+    if (show) document.getElementById('newCategoryInput').focus();
 });
 
 document.getElementById('addNewItemBtn').addEventListener('click', () => {
-    currentEditId = null; 
-    document.getElementById('modalTitle').innerText = 'Add New Item';
-    document.getElementById('saveItemBtn').innerText = 'Save Item';
-    
-    document.getElementById('itemNameInput').value = '';
-    document.getElementById('itemPriceInput').value = '';
-    
-    populateCategoryDropdown(); 
-    
-    imagePreview.style.backgroundImage = 'none';
-    imagePreviewText.style.display = 'block';
-    itemImageInput.value = '';
+    currentEditId = null;
     selectedImageFile = null;
-    
+    document.getElementById('modalTitle').textContent     = 'Add New Item';
+    document.getElementById('saveItemBtn').textContent    = 'Save Item';
+    document.getElementById('itemNameInput').value        = '';
+    document.getElementById('itemPriceInput').value       = '';
+    imagePreview.style.backgroundImage = 'none';
+    imagePreviewText.style.display = 'flex';
+    itemImageInput.value = '';
+    populateCategoryDropdown();
     itemModal.classList.remove('hidden');
 });
 
 window.editMenuItem = function(id) {
-    const item = allMenuItems.find(i => i.id === id); 
-    if(!item) return;
-
-    currentEditId = id; 
-    selectedImageFile = null; 
-
-    document.getElementById('modalTitle').innerText = 'Edit Item';
-    document.getElementById('saveItemBtn').innerText = 'Update Item';
-    document.getElementById('itemNameInput').value = item.name;
-    document.getElementById('itemPriceInput').value = item.price;
-    
-    populateCategoryDropdown(item.category); 
-
-    if(item.image) {
+    const item = allMenuItems.find(i => i.id === id);
+    if (!item) return;
+    currentEditId     = id;
+    selectedImageFile = null;
+    document.getElementById('modalTitle').textContent     = 'Edit Item';
+    document.getElementById('saveItemBtn').textContent    = 'Update Item';
+    document.getElementById('itemNameInput').value        = item.name;
+    document.getElementById('itemPriceInput').value       = item.price;
+    populateCategoryDropdown(item.category);
+    if (item.image) {
         imagePreview.style.backgroundImage = `url(${item.image})`;
         imagePreviewText.style.display = 'none';
     } else {
         imagePreview.style.backgroundImage = 'none';
-        imagePreviewText.style.display = 'block';
+        imagePreviewText.style.display = 'flex';
     }
-
-    itemImageInput.value = ''; 
+    itemImageInput.value = '';
     itemModal.classList.remove('hidden');
-}
+};
 
-document.getElementById('closeModalBtn').addEventListener('click', () => {
-    itemModal.classList.add('hidden');
-});
+function closeModal() { itemModal.classList.add('hidden'); }
+document.getElementById('closeModalBtn').addEventListener('click', closeModal);
+document.getElementById('closeModalBtnBottom').addEventListener('click', closeModal);
+// Tap outside modal box to close
+itemModal.addEventListener('click', (e) => { if (e.target === itemModal) closeModal(); });
 
 imagePreview.addEventListener('click', () => itemImageInput.click());
 itemImageInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
-    if (file) {
-        selectedImageFile = file;
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            imagePreview.style.backgroundImage = `url(${e.target.result})`;
-            imagePreviewText.style.display = 'none'; 
-        }
-        reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    selectedImageFile = file;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        imagePreview.style.backgroundImage = `url(${ev.target.result})`;
+        imagePreviewText.style.display = 'none';
+    };
+    reader.readAsDataURL(file);
 });
 
 document.getElementById('saveItemBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('saveItemBtn');
-    const name = document.getElementById('itemNameInput').value.trim();
-    const price = document.getElementById('itemPriceInput').value.trim();
-    
-    let category = document.getElementById('itemCategoryInput').value;
-    if(category === 'NEW_CATEGORY') {
+    const btn      = document.getElementById('saveItemBtn');
+    const name     = document.getElementById('itemNameInput').value.trim();
+    const price    = document.getElementById('itemPriceInput').value.trim();
+    let category   = document.getElementById('itemCategoryInput').value;
+
+    if (category === 'NEW_CATEGORY') {
         category = document.getElementById('newCategoryInput').value.trim();
-        if(!category) {
-            alert("Bhai nayi category ka naam toh daal!");
-            return;
-        }
+        if (!category) { alert("Enter category name!"); return; }
     }
+    if (!name || !price) { alert("Name and Price are required!"); return; }
 
-    if(!name || !price) {
-        alert("Bhai Name aur Price zaroori hain!");
-        return;
-    }
-
-    btn.innerText = "Saving... ⏳";
-    btn.disabled = true;
+    btn.textContent = "Saving... ⏳";
+    btn.disabled    = true;
 
     try {
         let imageUrl = null;
-
-        if(selectedImageFile) {
-            const imageRef = ref(storage, `menu_images/${Date.now()}_${selectedImageFile.name}`);
-            await uploadBytes(imageRef, selectedImageFile);
-            imageUrl = await getDownloadURL(imageRef);
+        if (selectedImageFile) {
+            const imgRef = ref(storage, `menu_images/${Date.now()}_${selectedImageFile.name}`);
+            await uploadBytes(imgRef, selectedImageFile);
+            imageUrl = await getDownloadURL(imgRef);
         }
 
-        if(currentEditId) {
-            let updateData = {
-                name: name,
-                price: Number(price),
-                category: category
-            };
-            if(imageUrl) updateData.image = imageUrl;
-            
-            await updateDoc(doc(db, "menu_items", currentEditId), updateData);
-            
+        if (currentEditId) {
+            const update = { name, price: Number(price), category };
+            if (imageUrl) update.image = imageUrl;
+            await updateDoc(doc(db, "menu_items", currentEditId), update);
         } else {
             await addDoc(collection(db, "menu_items"), {
-                name: name,
-                price: Number(price),
-                category: category,
-                image: imageUrl,
-                inStock: true
+                name, price: Number(price), category, image: imageUrl, inStock: true
             });
         }
-        itemModal.classList.add('hidden');
-        loadMenuData(); 
+        closeModal();
+        loadMenuData();
+    } catch (e) {
+        console.error(e);
+        alert("Save failed! Check internet.");
+    } finally {
+        btn.textContent = currentEditId ? "Update Item" : "Save Item";
+        btn.disabled    = false;
+    }
+});
+
+// ==========================================
+// EXPENSES
+// ==========================================
+window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
+    if (btnContext) {
+        document.querySelectorAll('#expenseSection .filter-pill').forEach(b => b.classList.remove('active'));
+        btnContext.classList.add('active');
+    }
+
+    const listEl = document.getElementById('expenseCardList');
+    listEl.innerHTML = '<div class="loading-state">Loading... ☁️</div>';
+
+    try {
+        let snap;
+        try { snap = await getDocsFromCache(collection(db, "daily_expenses")); } catch(e) {}
+        if (!snap || snap.empty) snap = await getDocsFromServer(collection(db, "daily_expenses"));
+
+        const now = new Date();
+        let filtered = [];
+
+        snap.forEach(d => {
+            const exp     = { ...d.data(), id: d.id };
+            const expDate = new Date(exp.timestamp);
+            const diff    = Math.ceil(Math.abs(now - expDate) / 864e5);
+            if (filterType === 'days') {
+                if (filterValue === 1 && expDate.toDateString() === now.toDateString()) filtered.push(exp);
+                else if (filterValue !== 1 && diff <= filterValue) filtered.push(exp);
+            } else if (filterType === 'date') {
+                if (expDate.toDateString() === new Date(filterValue).toDateString()) filtered.push(exp);
+            }
+        });
+
+        filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+        const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
+        document.getElementById('totalExpenseBox').textContent = `₹${total.toFixed(0)}`;
+
+        if (!filtered.length) {
+            listEl.innerHTML = '<div class="empty-state">No expenses found. 🎉</div>';
+            return;
+        }
+
+        listEl.innerHTML = filtered.map(exp => {
+            const timeStr = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
+            return `
+            <div class="expense-card">
+                <div class="exp-left">
+                    <div class="exp-note">${exp.note}</div>
+                    <div class="exp-time">${timeStr}</div>
+                </div>
+                <div class="exp-right">
+                    <div class="exp-amount">₹${exp.amount}</div>
+                    <button class="exp-del-btn" onclick="deleteExpense('${exp.id}')">🗑</button>
+                </div>
+            </div>`;
+        }).join('');
 
     } catch (e) {
-        console.error("Save error: ", e);
-        alert("Error saving item! Internet check karo.");
-    } finally {
-        btn.innerText = currentEditId ? "Update Item" : "Save Item";
-        btn.disabled = false;
+        console.error(e);
+        listEl.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load. Check internet.</div>';
+    }
+};
+
+document.getElementById('expenseDateSearch').addEventListener('change', (e) => {
+    if (e.target.value) {
+        document.querySelectorAll('#expenseSection .filter-pill').forEach(b => b.classList.remove('active'));
+        loadAdminExpenses('date', e.target.value, null);
     }
 });
-// Tab switcher update taaki expense load ho
-window.switchTab = function(tabName) {
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    
-    document.getElementById(tabName + 'Section').classList.add('active');
-    event.target.classList.add('active');
 
-    if(tabName === 'menu') loadMenuData();
-    if(tabName === 'expense') loadAdminExpenses('days', 1);
-}
+document.getElementById('refreshExpenseBtn').addEventListener('click', async (e) => {
+    e.target.textContent = '⏳'; e.target.disabled = true;
+    const active    = document.querySelector('#expenseSection .filter-pill.active');
+    const dateVal   = document.getElementById('expenseDateSearch').value;
+    if (dateVal) await loadAdminExpenses('date', dateVal, null);
+    else await loadAdminExpenses('days', parseInt(active?.dataset.val || '1'), active);
+    e.target.textContent = '↻'; e.target.disabled = false;
+});
 
-// Expense fetcher
-window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
-    if(btnContext) {
-        document.querySelectorAll('#expenseSection .filter-btn').forEach(b => b.classList.remove('active'));
-        btnContext.classList.add('active');
-    }
-
-    const tbody = document.getElementById('expenseTableBody');
-    tbody.innerHTML = '<tr><td colspan="3" class="loading">Loading...</td></tr>';
-    
+window.deleteExpense = async function(id) {
+    if (!confirm("Delete this expense?")) return;
     try {
-        const querySnapshot = await getDocs(collection(db, "daily_expenses"));
-        let filteredExpenses = [];
-        const now = new Date();
-
-        querySnapshot.forEach((docSnap) => {
-            let exp = docSnap.data();
-            const expDate = new Date(exp.timestamp);
-            const diffDays = Math.ceil(Math.abs(now - expDate) / (1000 * 60 * 60 * 24)); 
-            
-            if (filterType === 'days') {
-                if (filterValue === 1 && expDate.toDateString() === now.toDateString()) filteredExpenses.push(exp);
-                else if (filterValue !== 1 && diffDays <= filterValue) filteredExpenses.push(exp);
-            }
-        });
-
-        filteredExpenses.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        
-        tbody.innerHTML = '';
-        let totalExp = 0;
-
-        if(filteredExpenses.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" class="text-center" style="padding:20px; color:gray;">No expenses found.</td></tr>';
-        } else {
-            filteredExpenses.forEach(exp => {
-                totalExp += Number(exp.amount);
-                let timeString = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
-                tbody.innerHTML += `
-                    <tr>
-                        <td style="color:#94a3b8;">${timeString}</td>
-                        <td style="font-weight:bold; color:white; text-transform: capitalize;">${exp.note}</td>
-                        <td class="text-right" style="color:#ef4444; font-weight:bold;">₹${exp.amount}</td>
-                    </tr>
-                `;
-            });
-        }
-        document.getElementById('totalExpenseBox').innerText = `₹${totalExp}`;
-    } catch (error) {
-        console.error(error);
-        tbody.innerHTML = '<tr><td colspan="3" style="color:red; text-align:center;">Error loading expenses.</td></tr>';
-    }
-}
-// ==========================================
-// EXPENSE LOGIC & REFRESH BUTTON
-// ==========================================
-
-// Tab switcher logic (Ensure expense is handled)
-window.switchTab = function(tabName) {
-    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    
-    document.getElementById(tabName + 'Section').classList.add('active');
-    event.target.classList.add('active');
-
-    if(tabName === 'menu') loadMenuData();
-    if(tabName === 'expense') {
-        if(document.getElementById('expenseDateSearch')) document.getElementById('expenseDateSearch').value = '';
-        loadAdminExpenses('days', 1, document.querySelector('#expenseSection .filter-btn[data-val="1"]'));
-    }
-}
-
-window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
-    if(btnContext) {
-        document.querySelectorAll('#expenseSection .filter-btn').forEach(b => b.classList.remove('active'));
-        btnContext.classList.add('active');
-        if(document.getElementById('expenseDateSearch')) document.getElementById('expenseDateSearch').value = ''; // Reset date if button clicked
-    }
-
-    const tbody = document.getElementById('expenseTableBody');
-    if(!tbody) return;
-    
-    tbody.innerHTML = '<tr><td colspan="4" class="loading">Loading Expenses... ☁️</td></tr>';
-    
-    try {
-        const querySnapshot = await getDocs(collection(db, "daily_expenses"));
-        let filteredExpenses = [];
-        const now = new Date();
-
-        querySnapshot.forEach((docSnap) => {
-            let exp = docSnap.data();
-            exp.id = docSnap.id;
-            const expDate = new Date(exp.timestamp);
-            const diffDays = Math.ceil(Math.abs(now - expDate) / (1000 * 60 * 60 * 24)); 
-            
-            if (filterType === 'days') {
-                if (filterValue === 1 && expDate.toDateString() === now.toDateString()) {
-                    filteredExpenses.push(exp);
-                }
-                else if (filterValue !== 1 && diffDays <= filterValue) {
-                    filteredExpenses.push(exp);
-                }
-            } else if (filterType === 'date') {
-                // NAYA: Particular date ka logic
-                if (expDate.toDateString() === new Date(filterValue).toDateString()) {
-                    filteredExpenses.push(exp);
-                }
-            }
-        });
-
-        // Naye kharche sabse upar
-        filteredExpenses.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-        
-        tbody.innerHTML = '';
-        let totalExp = 0;
-
-        if(filteredExpenses.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center" style="padding:20px; color:gray;">No expenses found for this date.</td></tr>';
-        } else {
-            filteredExpenses.forEach(exp => {
-                totalExp += Number(exp.amount);
-                let timeString = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
-                tbody.innerHTML += `
-                    <tr>
-                        <td style="color:#94a3b8;">${timeString}</td>
-                        <td style="font-weight:bold; color:white; text-transform: capitalize;">${exp.note}</td>
-                        <td class="text-right" style="color:#ef4444; font-weight:bold;">₹${exp.amount}</td>
-                        <td class="text-center">
-                            <button class="btn btn-danger" onclick="deleteExpense('${exp.id}')" style="padding: 5px 10px; font-size: 0.9rem;">🗑️</button>
-                        </td>
-                    </tr>
-                `;
-            });
-        }
-        document.getElementById('totalExpenseBox').innerText = `₹${totalExp}`;
-    } catch (error) {
-        console.error(error);
-        tbody.innerHTML = '<tr><td colspan="4" style="color:red; text-align:center;">Error loading expenses. Internet check karo.</td></tr>';
-    }
-}
-
-// NAYA: Date Picker Event Listener
-const expenseDateSearch = document.getElementById('expenseDateSearch');
-if(expenseDateSearch) {
-    expenseDateSearch.addEventListener('change', (e) => {
-        if (e.target.value) {
-            // Un-highlight normal buttons
-            document.querySelectorAll('#expenseSection .filter-btn').forEach(b => b.classList.remove('active'));
-            loadAdminExpenses('date', e.target.value, null);
-        }
-    });
-}
-
-// NAYA: Refresh Button Click Listener
-const refreshExpBtn = document.getElementById('refreshExpenseBtn');
-if(refreshExpBtn) {
-    refreshExpBtn.addEventListener('click', async (e) => {
-        const btn = e.target;
-        btn.innerText = "🔄..."; 
-        btn.disabled = true;
-        
-        const activeBtn = document.querySelector('#expenseSection .filter-btn.active');
+        await deleteDoc(doc(db, "daily_expenses", id));
+        const active  = document.querySelector('#expenseSection .filter-pill.active');
         const dateVal = document.getElementById('expenseDateSearch').value;
-        
-        if(activeBtn) {
-            await loadAdminExpenses('days', parseInt(activeBtn.dataset.val));
-        } else if(dateVal) {
-            await loadAdminExpenses('date', dateVal);
-        } else {
-            await loadAdminExpenses('days', 1);
-        }
-        
-        btn.innerText = "🔄 Refresh Data";
-        btn.disabled = false;
-    });
-}
-
-// ==========================================
-// PWA INSTALL LOGIC (APP DOWNLOAD)
-// ==========================================
-let deferredPrompt;
-const pwaBtn = document.getElementById('pwaDownloadBtn');
-
-if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').then(() => {
-        console.log("Service Worker Active!");
-    }).catch(err => console.log("SW Error:", err));
-}
-
-window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault(); 
-    deferredPrompt = e; 
-    if(pwaBtn) pwaBtn.style.display = 'block'; 
-});
-
-if(pwaBtn) {
-    pwaBtn.addEventListener('click', () => {
-        if (deferredPrompt) {
-            deferredPrompt.prompt(); 
-            deferredPrompt.userChoice.then((choiceResult) => {
-                if (choiceResult.outcome === 'accepted') {
-                    console.log('App Installed!');
-                }
-                deferredPrompt = null;
-                pwaBtn.style.display = 'none'; 
-            });
-        }
-    });
-}
-
-window.addEventListener('appinstalled', () => {
-    if(pwaBtn) pwaBtn.style.display = 'none';
-});
-
-// ==========================================
-// EXPENSE DELETE LOGIC
-// ==========================================
-window.deleteExpense = async function(expenseId) {
-    if(!confirm("Pakka delete karna hai ye kharcha?")) return;
-    
-    try {
-        await deleteDoc(doc(db, "daily_expenses", expenseId));
-        
-        const activeBtn = document.querySelector('#expenseSection .filter-btn.active');
-        const dateVal = document.getElementById('expenseDateSearch').value;
-        
-        if(activeBtn) {
-            await loadAdminExpenses('days', parseInt(activeBtn.dataset.val));
-        } else if (dateVal) {
-            await loadAdminExpenses('date', dateVal);
-        } else {
-            await loadAdminExpenses('days', 1);
-        }
-    } catch (error) {
-        console.error("Delete error: ", error);
-        alert("Delete nahi hua. Internet check kar!");
-    }
-}
+        if (dateVal) loadAdminExpenses('date', dateVal, null);
+        else loadAdminExpenses('days', parseInt(active?.dataset.val || '1'), active);
+    } catch (e) { alert("Delete failed. Check internet."); }
+};
