@@ -448,14 +448,9 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
     const listEl = document.getElementById('expenseCardList');
     listEl.innerHTML = '<div class="loading-state">Loading... ☁️</div>';
 
-    try {
-        let snap;
-        try { snap = await getDocsFromCache(collection(db, "daily_expenses")); } catch(e) {}
-        if (!snap || snap.empty) snap = await getDocsFromServer(collection(db, "daily_expenses"));
-
+    const applySnap = (snap) => {
         const now = new Date();
         let filtered = [];
-
         snap.forEach(d => {
             const exp     = { ...d.data(), id: d.id };
             const expDate = new Date(exp.timestamp);
@@ -467,17 +462,13 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
                 if (expDate.toDateString() === new Date(filterValue).toDateString()) filtered.push(exp);
             }
         });
-
         filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
         const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
         document.getElementById('totalExpenseBox').textContent = `₹${total.toFixed(0)}`;
-
         if (!filtered.length) {
             listEl.innerHTML = '<div class="empty-state">No expenses found. 🎉</div>';
             return;
         }
-
         listEl.innerHTML = filtered.map(exp => {
             const timeStr = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
             return `
@@ -492,10 +483,23 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
                 </div>
             </div>`;
         }).join('');
+    };
 
+    // Phase 1: show cached data instantly
+    try {
+        const cacheSnap = await getDocsFromCache(collection(db, "daily_expenses"));
+        if (!cacheSnap.empty) applySnap(cacheSnap);
+    } catch(e) {}
+
+    // Phase 2: always fetch from server so new expenses are never missed
+    try {
+        const serverSnap = await getDocsFromServer(collection(db, "daily_expenses"));
+        applySnap(serverSnap);
     } catch (e) {
         console.error(e);
-        listEl.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load. Check internet.</div>';
+        if (listEl.innerHTML.includes('Loading')) {
+            listEl.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load. Check internet.</div>';
+        }
     }
 };
 
