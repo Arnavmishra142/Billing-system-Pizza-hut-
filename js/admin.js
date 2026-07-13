@@ -247,31 +247,39 @@ let selectedImageFile = null;
 let currentEditId     = null;
 let allMenuItems      = [];
 
-window.loadMenuData = async function() {
+let _menuUnsub = null;
+
+window.loadMenuData = function() {
     const grid = document.getElementById('menuCardGrid');
     grid.innerHTML = '<div class="loading-state">Loading menu... ☁️</div>';
 
-    try {
-        // Cache-first
-        let snap;
-        try { snap = await getDocsFromCache(collection(db, "menu_items")); } catch(e) {}
-        if (!snap || snap.empty) snap = await getDocsFromServer(collection(db, "menu_items"));
+    // Cancel previous listener before starting fresh
+    if (_menuUnsub) { _menuUnsub(); _menuUnsub = null; }
 
-        allMenuItems = [];
-        snap.forEach(d => allMenuItems.push({ ...d.data(), id: d.id }));
-
-        allMenuItems.sort((a, b) => {
-            const ca = (a.category || '').toUpperCase(), cb = (b.category || '').toUpperCase();
-            if (ca < cb) return -1; if (ca > cb) return 1;
-            const na = (a.name || '').toUpperCase(), nb = (b.name || '').toUpperCase();
-            return na < nb ? -1 : na > nb ? 1 : 0;
-        });
-
-        renderMenuCards();
-    } catch (e) {
-        console.error(e);
-        grid.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load menu. Check internet.</div>';
-    }
+    // Wake network then attach live listener — fires from cache instantly,
+    // then again from server automatically (handles PWA reconnection)
+    enableNetwork(db).catch(() => {}).finally(() => {
+        _menuUnsub = onSnapshot(
+            collection(db, "menu_items"),
+            (snap) => {
+                allMenuItems = [];
+                snap.forEach(d => allMenuItems.push({ ...d.data(), id: d.id }));
+                allMenuItems.sort((a, b) => {
+                    const ca = (a.category || '').toUpperCase(), cb = (b.category || '').toUpperCase();
+                    if (ca < cb) return -1; if (ca > cb) return 1;
+                    const na = (a.name || '').toUpperCase(), nb = (b.name || '').toUpperCase();
+                    return na < nb ? -1 : na > nb ? 1 : 0;
+                });
+                renderMenuCards();
+            },
+            (err) => {
+                console.error("Menu listener error:", err);
+                if (grid.innerHTML.includes('Loading')) {
+                    grid.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load menu. Check internet.</div>';
+                }
+            }
+        );
+    });
 };
 
 function renderMenuCards() {
@@ -514,13 +522,14 @@ document.getElementById('expenseDateSearch').addEventListener('change', (e) => {
     }
 });
 
-document.getElementById('refreshExpenseBtn').addEventListener('click', async (e) => {
+document.getElementById('refreshExpenseBtn').addEventListener('click', (e) => {
     e.target.textContent = '⏳'; e.target.disabled = true;
-    const active    = document.querySelector('#expenseSection .filter-pill.active');
-    const dateVal   = document.getElementById('expenseDateSearch').value;
-    if (dateVal) await loadAdminExpenses('date', dateVal, null);
-    else await loadAdminExpenses('days', parseInt(active?.dataset.val || '1'), active);
-    e.target.textContent = '↻'; e.target.disabled = false;
+    const active  = document.querySelector('#expenseSection .filter-pill.active');
+    const dateVal = document.getElementById('expenseDateSearch').value;
+    if (dateVal) loadAdminExpenses('date', dateVal, null);
+    else loadAdminExpenses('days', parseInt(active?.dataset.val || '1'), active);
+    // Reset button after listener is set up (onSnapshot is not awaitable)
+    setTimeout(() => { e.target.textContent = '↻'; e.target.disabled = false; }, 1500);
 });
 
 window.deleteExpense = async function(id) {
