@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Manager — New Pizza Hut</title>
+    <link rel="stylesheet" href="../css/admin.css">
+    <style>
+        /* ── Page layout ── */
+        body {
+            display: flex;
+            flex-direction: column;
+            height: 100dvh;
+            overflow: hidden;
+            background: #0d1117;
+        }
+
+        /* ── Header ── */
+        .ai-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 16px;
+            background: #161b22;
+            border-bottom: 1px solid #21262d;
+            flex-shrink: 0;
+            min-height: 62px;
+        }
+        .ai-back-btn {
+            background: #21262d;
+            border: none;
+            color: #e6edf3;
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.15s;
+        }
+        .ai-back-btn:hover { background: #30363d; }
+        .ai-header-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            flex-shrink: 0;
+        }
+        .ai-header-text { flex: 1; min-width: 0; }
+        .ai-header-title {
+            font-weight: 700;
+            font-size: 1rem;
+            color: #e6edf3;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ai-header-sub {
+            font-size: 0.72rem;
+            color: #3b82f6;
+            font-weight: 600;
+            margin-top: 1px;
+        }
+        .ai-header-badge {
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            color: #fff;
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 20px;
+            letter-spacing: 0.03em;
+            flex-shrink: 0;
+        }
+
+        /* ── Context pill (shows injected stats) ── */
+        .ai-context-bar {
+            background: #161b22;
+            border-bottom: 1px solid #21262d;
+            padding: 8px 16px;
+            flex-shrink: 0;
+            overflow-x: auto;
+            white-space: nowrap;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            scrollbar-width: none;
+        }
+        .ai-context-bar::-webkit-scrollbar { display: none; }
+        .ai-ctx-label {
+            font-size: 0.68rem;
+            color: #484f58;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            flex-shrink: 0;
+        }
+        .ai-ctx-pill {
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 20px;
+            padding: 4px 10px;
+            font-size: 0.73rem;
+            color: #8b949e;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .ai-ctx-pill span { color: #58a6ff; font-weight: 600; }
+
+        /* ── Messages area ── */
+        .ai-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            scroll-behavior: smooth;
+        }
+        .ai-messages::-webkit-scrollbar { width: 4px; }
+        .ai-messages::-webkit-scrollbar-track { background: transparent; }
+        .ai-messages::-webkit-scrollbar-thumb { background: #21262d; border-radius: 4px; }
+
+        /* Date divider */
+        .ai-date-divider {
+            text-align: center;
+            color: #484f58;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            margin: 4px 0;
+            text-transform: uppercase;
+        }
+
+        /* Message rows */
+        .ai-msg { display: flex; align-items: flex-end; gap: 8px; }
+        .ai-msg--user { flex-direction: row-reverse; }
+        .ai-msg--ai  { flex-direction: row; }
+
+        .ai-msg-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            flex-shrink: 0;
+            align-self: flex-end;
+        }
+
+        /* Bubbles */
+        .ai-bubble {
+            max-width: 78%;
+            padding: 11px 14px;
+            font-size: 0.9rem;
+            line-height: 1.55;
+            word-break: break-word;
+        }
+        .ai-msg--user .ai-bubble {
+            background: linear-gradient(135deg, #1f6feb 0%, #6366f1 100%);
+            color: #fff;
+            border-radius: 18px 18px 4px 18px;
+        }
+        .ai-msg--ai .ai-bubble {
+            background: #161b22;
+            color: #d1d9e6;
+            border: 1px solid #21262d;
+            border-radius: 18px 18px 18px 4px;
+        }
+        .ai-bubble strong { color: #58a6ff; }
+
+        /* Timestamp under bubble */
+        .ai-bubble-wrap { display: flex; flex-direction: column; gap: 3px; max-width: 78%; }
+        .ai-msg--user .ai-bubble-wrap { align-items: flex-end; }
+        .ai-msg--ai  .ai-bubble-wrap { align-items: flex-start; }
+        .ai-bubble { max-width: 100%; }
+        .ai-timestamp {
+            font-size: 0.65rem;
+            color: #484f58;
+            padding: 0 4px;
+        }
+
+        /* Thinking dots */
+        .ai-thinking {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 14px 16px;
+            min-width: 60px;
+        }
+        .ai-thinking span {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #3b82f6;
+            animation: aiDot 1.2s infinite ease-in-out;
+        }
+        .ai-thinking span:nth-child(2) { animation-delay: 0.2s; }
+        .ai-thinking span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes aiDot {
+            0%, 80%, 100% { transform: scale(0.65); opacity: 0.4; }
+            40%            { transform: scale(1.1);  opacity: 1; }
+        }
+
+        /* ── Input bar ── */
+        .ai-input-bar {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            padding: 10px 14px;
+            padding-bottom: max(10px, calc(env(safe-area-inset-bottom) + 10px));
+            background: #161b22;
+            border-top: 1px solid #21262d;
+            flex-shrink: 0;
+        }
+        #aiInputField {
+            flex: 1;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 22px;
+            padding: 11px 16px;
+            color: #e6edf3;
+            font-size: 0.92rem;
+            font-family: inherit;
+            outline: none;
+            resize: none;
+            line-height: 1.4;
+            max-height: 100px;
+            overflow-y: auto;
+            transition: border-color 0.15s;
+        }
+        #aiInputField::placeholder { color: #484f58; }
+        #aiInputField:focus { border-color: #3b82f6; }
+        .ai-send-btn {
+            width: 44px;
+            height: 44px;
+            flex-shrink: 0;
+            background: linear-gradient(135deg, #1f6feb, #6366f1);
+            border: none;
+            border-radius: 50%;
+            color: #fff;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.15s, transform 0.15s;
+        }
+        .ai-send-btn:hover  { opacity: 0.85; }
+        .ai-send-btn:active { transform: scale(0.93); }
+        .ai-send-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+        /* ── Suggestions (quick prompts) ── */
+        .ai-suggestions {
+            display: flex;
+            gap: 8px;
+            padding: 0 14px 10px;
+            overflow-x: auto;
+            scrollbar-width: none;
+            flex-shrink: 0;
+            background: #0d1117;
+        }
+        .ai-suggestions::-webkit-scrollbar { display: none; }
+        .ai-suggestion-chip {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 20px;
+            padding: 7px 13px;
+            font-size: 0.78rem;
+            color: #8b949e;
+            white-space: nowrap;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+            font-family: inherit;
+        }
+        .ai-suggestion-chip:hover {
+            background: #21262d;
+            color: #e6edf3;
+            border-color: #3b82f6;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header class="ai-header">
+    <button class="ai-back-btn" id="backBtn" aria-label="Go back">&#8592;</button>
+    <div class="ai-header-avatar">🤖</div>
+    <div class="ai-header-text">
+        <div class="ai-header-title">Smart AI Manager</div>
+        <div class="ai-header-sub">New Pizza Hut &amp; Live Cake</div>
+    </div>
+    <span class="ai-header-badge">Gemini</span>
+</header>
+
+<!-- ── Context bar (live stats pills) ── -->
+<div class="ai-context-bar" id="contextBar">
+    <span class="ai-ctx-label">Live</span>
+</div>
+
+<!-- ── Messages ── -->
+<div class="ai-messages" id="aiMessages">
+    <div class="ai-date-divider" id="dateDivider"></div>
+</div>
+
+<!-- ── Quick suggestion chips ── -->
+<div class="ai-suggestions" id="suggestions">
+    <button class="ai-suggestion-chip">💰 Aaj ka profit?</button>
+    <button class="ai-suggestion-chip">📦 Top selling item?</button>
+    <button class="ai-suggestion-chip">📉 Expenses kitne hain?</button>
+    <button class="ai-suggestion-chip">🍕 Table vs Quick Sale compare karo</button>
+    <button class="ai-suggestion-chip">📊 Kya improve karna chahiye?</button>
+</div>
+
+<!-- ── Input bar ── -->
+<div class="ai-input-bar">
+    <textarea id="aiInputField" rows="1" placeholder="Kuch poochho... e.g. aaj kitna revenue hua?"></textarea>
+    <button class="ai-send-btn" id="sendBtn" aria-label="Send">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+    </button>
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    const GEMINI_ENDPOINT =
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-latest:generateContent';
+    const GEMINI_KEY = 'AQ.Ab8RN6KCu_7z5VrWP5UxnnspZthp52IBthKXi9Sgct28y2nmKg';
+
+    const messagesEl  = document.getElementById('aiMessages');
+    const inputEl     = document.getElementById('aiInputField');
+    const sendBtn     = document.getElementById('sendBtn');
+    const contextBar  = document.getElementById('contextBar');
+    const suggestions = document.getElementById('suggestions');
+    const dateDivider = document.getElementById('dateDivider');
+    const backBtn     = document.getElementById('backBtn');
+
+    /* ── Back button ─────────────────────────────────────────── */
+    backBtn.addEventListener('click', () => {
+        if (document.referrer && document.referrer.includes(location.hostname)) {
+            history.back();
+        } else {
+            location.href = 'index.html';
+        }
+    });
+
+    /* ── Date divider ────────────────────────────────────────── */
+    const now = new Date();
+    dateDivider.textContent = now.toLocaleDateString('en-IN', {
+        weekday: 'long', day: 'numeric', month: 'long'
+    });
+
+    /* ── Load context from sessionStorage ────────────────────── */
+    let ctx = {};
+    try {
+        const raw = sessionStorage.getItem('ai_dashboard_ctx');
+        if (raw) ctx = JSON.parse(raw);
+    } catch (_) {}
+
+    // Render context pills
+    const pills = [
+        { label: 'Revenue', value: ctx.totalRevenue || '—' },
+        { label: 'Orders',  value: ctx.totalOrders  || '—' },
+        { label: 'Expenses',value: ctx.totalExpenses|| '—' },
+        { label: 'Table Rev',value: ctx.tableRevenue|| '—' },
+        { label: 'QS Rev',  value: ctx.qsRevenue    || '—' },
+    ];
+    pills.forEach(p => {
+        const pill = document.createElement('span');
+        pill.className = 'ai-ctx-pill';
+        pill.innerHTML = `${p.label}: <span>${p.value}</span>`;
+        contextBar.appendChild(pill);
+    });
+
+    /* ── Welcome message ─────────────────────────────────────── */
+    appendMsg('ai', `👋 Hello Boss! Main hoon aapka **Smart AI Manager**.\n\nAbhi ke live stats dekh raha hoon — Revenue **${ctx.totalRevenue || 'N/A'}**, Orders **${ctx.totalOrders || 'N/A'}**. Kuch bhi poochho! 🚀`);
+
+    /* ── Suggestion chips ────────────────────────────────────── */
+    suggestions.querySelectorAll('.ai-suggestion-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            inputEl.value = chip.textContent.trim();
+            autoGrow();
+            sendMessage();
+        });
+    });
+
+    /* ── Auto-grow textarea ───────────────────────────────────── */
+    function autoGrow() {
+        inputEl.style.height = 'auto';
+        inputEl.style.height = Math.min(inputEl.scrollHeight, 100) + 'px';
+    }
+    inputEl.addEventListener('input', autoGrow);
+    inputEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+    /* ── Send ─────────────────────────────────────────────────── */
+    sendBtn.addEventListener('click', sendMessage);
+
+    async function sendMessage() {
+        const text = inputEl.value.trim();
+        if (!text || sendBtn.disabled) return;
+
+        inputEl.value = '';
+        autoGrow();
+        sendBtn.disabled = true;
+
+        // Hide suggestion chips after first send
+        suggestions.style.display = 'none';
+
+        appendMsg('user', text);
+        const thinkEl = appendThinking();
+
+        try {
+            const res = await fetch(GEMINI_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-goog-api-key': GEMINI_KEY,
+                },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: buildPrompt(text) }] }]
+                })
+            });
+
+            if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+
+            const data = await res.json();
+            const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text
+                || '⚠️ Koi response nahi mila. Dobara try karo.';
+
+            thinkEl.remove();
+            appendMsg('ai', reply);
+        } catch (err) {
+            thinkEl.remove();
+            appendMsg('ai', `❌ Error: ${err.message}`);
+        } finally {
+            sendBtn.disabled = false;
+            inputEl.focus();
+        }
+    }
+
+    /* ── Prompt builder ───────────────────────────────────────── */
+    function buildPrompt(userMessage) {
+        const topTable = (ctx.topTableItems || []).join('; ') || 'No data';
+        const topQs    = (ctx.topQsItems    || []).join('; ') || 'No data';
+
+        return `You are the Smart AI Manager for "New Pizza Hut & Live Cake", a restaurant. You have live dashboard stats. Be concise, smart, and friendly. Reply in Hinglish (Hindi + English mix) with practical business insights. Keep answers under 120 words unless a detailed breakdown is asked. Use emojis naturally.
+
+LIVE DASHBOARD STATS:
+- Total Revenue (selected period): ${ctx.totalRevenue || 'N/A'}
+- Total Orders: ${ctx.totalOrders || 'N/A'}
+- Table/Parcel Revenue: ${ctx.tableRevenue || 'N/A'} | Orders: ${ctx.tableOrders || 'N/A'}
+- Quick Sale Revenue: ${ctx.qsRevenue || 'N/A'} | Orders: ${ctx.qsOrders || 'N/A'}
+- Total Expenses: ${ctx.totalExpenses || 'N/A'}
+- Top Selling Items (Table/Parcel): ${topTable}
+- Top Selling Items (Quick Sale): ${topQs}
+
+Admin's Question: ${userMessage}`;
+    }
+
+    /* ── Render helpers ───────────────────────────────────────── */
+    function getTime() {
+        return new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function appendMsg(role, text) {
+        const row = document.createElement('div');
+        row.className = `ai-msg ai-msg--${role}`;
+
+        const wrap = document.createElement('div');
+        wrap.className = 'ai-bubble-wrap';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'ai-bubble';
+        bubble.innerHTML = formatText(text);
+
+        const ts = document.createElement('div');
+        ts.className = 'ai-timestamp';
+        ts.textContent = getTime();
+
+        wrap.appendChild(bubble);
+        wrap.appendChild(ts);
+
+        if (role === 'ai') {
+            const avatar = document.createElement('div');
+            avatar.className = 'ai-msg-avatar';
+            avatar.textContent = '🤖';
+            row.appendChild(avatar);
+        }
+
+        row.appendChild(wrap);
+        messagesEl.appendChild(row);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return row;
+    }
+
+    function appendThinking() {
+        const row = document.createElement('div');
+        row.className = 'ai-msg ai-msg--ai';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'ai-msg-avatar';
+        avatar.textContent = '🤖';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'ai-bubble ai-thinking';
+        bubble.innerHTML = '<span></span><span></span><span></span>';
+
+        row.appendChild(avatar);
+        row.appendChild(bubble);
+        messagesEl.appendChild(row);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return row;
+    }
+
+    function formatText(text) {
+        return text
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\n/g, '<br>');
+    }
+
+})();
+</script>
+</body>
+</html>
