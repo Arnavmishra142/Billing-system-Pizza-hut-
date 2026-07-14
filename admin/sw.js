@@ -1,9 +1,18 @@
 // Admin Panel Service Worker — caches admin files for PWA install
-const CACHE = 'admin-pos-v1';
+//
+// v2: switched from cache-first to network-first. Cache-first was serving
+// stale JS (e.g. old ai-manager.js / ai-data-cache.js) forever after any
+// code update, because the cache name never changed and every GET request
+// was served straight from cache before the network response could replace
+// it for *this* load. Network-first always tries fresh code first and only
+// falls back to cache when offline.
+const CACHE = 'admin-pos-v2';
 const PRECACHE = [
     '/admin/index.html',
     '/css/admin.css',
     '/js/admin.js',
+    '/js/ai-manager.js',
+    '/js/ai-data-cache.js',
     '/js/firebase-config.js',
     '/admin/admin-logo.png',
     '/admin/manifest.json',
@@ -40,16 +49,15 @@ self.addEventListener('fetch', (e) => {
     // Only handle GET
     if (e.request.method !== 'GET') return;
 
+    // Network-first: always try to get the latest file. Only fall back to
+    // the cached copy when the network is unavailable (offline).
     e.respondWith(
-        caches.match(e.request).then(cached => {
-            const network = fetch(e.request).then(res => {
-                if (res && res.status === 200) {
-                    const clone = res.clone();
-                    caches.open(CACHE).then(c => c.put(e.request, clone));
-                }
-                return res;
-            }).catch(() => null);
-            return cached || network;
-        })
+        fetch(e.request).then(res => {
+            if (res && res.status === 200) {
+                const clone = res.clone();
+                caches.open(CACHE).then(c => c.put(e.request, clone));
+            }
+            return res;
+        }).catch(() => caches.match(e.request))
     );
 });
