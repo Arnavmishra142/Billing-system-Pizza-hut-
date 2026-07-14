@@ -19,11 +19,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const backToTablesBtn = document.getElementById('backToTablesBtn');
 
         // Generate Grid (Tables / Parcels) with Live Items
+    let currentGridType = 'table';
+
+    const switchGridBtn = document.getElementById('switchGridBtn');
+    switchGridBtn.addEventListener('click', () => {
+        loadGrid(currentGridType === 'table' ? 'parcel' : 'table');
+    });
+
     function loadGrid(type) {
+        currentGridType = type;
         dynamicGrid.innerHTML = ''; 
         let totalCount = 10;
         let prefix = type === 'table' ? 'Table' : 'Parcel';
-        
+
+        // Update switch button to show the opposite destination
+        switchGridBtn.textContent = type === 'table' ? '📦 Parcels' : '🪑 Tables';
+
         gridTitle.innerText = `Select ${prefix}`;
 
         for (let i = 1; i <= totalCount; i++) {
