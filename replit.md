@@ -11,21 +11,21 @@ A browser-based POS and billing system for "New Pizza Hut & Live Cake". Built wi
 
 ## How to run
 
-The workflow `Start application` runs a small Node/Express server (`server.js`) on port 5000:
+This is a plain static site (no backend server). The workflow `Start application` runs:
 
 ```
-node server.js
+node build.js && npx serve . -l 5000
 ```
 
-It serves the static site files and also exposes `POST /api/chat`, which proxies the admin panel's Smart AI Manager chat to Groq. This exists so `GROQ_API_KEY` stays server-side and is never sent to the browser.
+`build.js` reads the `GROQ_API_KEY` secret and writes `admin/groq-key.generated.js` (git-ignored, regenerated on every run/publish) so the browser can call Groq directly. `npx serve` then serves the static files.
 
 ## AI Chat (Smart AI Manager)
 
 - Provider: **Groq** (`GROQ_API_KEY` secret), not Gemini — switched because Gemini's free tier only allows 20 requests/day.
 - Primary model: `llama-3.3-70b-versatile` (1,000 req/day free limit, better quality).
-- Fallback model: `llama-3.1-8b-instant` (14,400 req/day free limit) — `server.js` automatically retries with this model if the primary hits a 429.
+- Fallback model: `llama-3.1-8b-instant` (14,400 req/day free limit) — `admin/chat.ai.html` automatically retries with this model if the primary hits a 429.
 - The AI always reports one combined sales total; it never distinguishes Table vs Quick Sale in its responses (the underlying billing feature itself is unchanged, this only affects AI reporting).
-- `admin/chat.ai.html` calls `/api/chat` with `{ prompt }` and reads back `{ reply, model }` — no API key or model logic lives client-side anymore.
+- **Architecture note (deliberate tradeoff):** there is no server proxy. `admin/chat.ai.html` calls Groq directly from the browser using `window.GROQ_API_KEY`, which `build.js` injects at build/publish time from the `GROQ_API_KEY` secret into the git-ignored `admin/groq-key.generated.js`. This means the key is visible to anyone who views the published page's source — accepted deliberately because (a) this project uses a **Static** deployment, which is free forever with no 30-day expiry (unlike the free Autoscale app, which expires after 30 days and then needs a paid plan), and (b) the owner considers the key low-risk/easily rotated. If this tradeoff ever changes, reintroducing a small server proxy (there's a git history of one) restores key secrecy but requires Autoscale/VM hosting instead of Static.
 
 ## Firebase
 

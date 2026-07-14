@@ -26,7 +26,7 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "node server.js"
+args = "node build.js && npx serve . -l 5000"
 waitForPort = 5000
 
 [[ports]]
@@ -34,5 +34,7 @@ localPort = 5000
 externalPort = 80
 
 [deployment]
-deploymentTarget = "autoscale"
+deploymentTarget = "static"
 run = ["node", "server.js"]
+build = ["node", "build.js"]
+publicDir = "."
