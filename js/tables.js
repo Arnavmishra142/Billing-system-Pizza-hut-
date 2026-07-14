@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         for (let i = 1; i <= totalCount; i++) {
             const card = document.createElement('div');
-            let tableName = `${prefix} ${i}`;
+            let tableName = type === 'parcel' ? `${prefix} ${String.fromCharCode(64 + i)}` : `${prefix} ${i}`;
             
             let isOccupied = false;
             let tableItemsHTML = "";
