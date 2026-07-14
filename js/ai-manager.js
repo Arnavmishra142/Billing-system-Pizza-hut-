@@ -1,8 +1,10 @@
 /**
  * Smart AI Manager — FAB only.
- * Tap = scrape context → sessionStorage → navigate to chat.ai.html
+ * Tap = scrape live context + cached history → sessionStorage → navigate to chat.ai.html
  * Drag = move FAB freely around screen (mouse + touch).
  */
+import { getAiHistoricalContext } from './ai-data-cache.js';
+
 (function () {
     'use strict';
 
@@ -57,7 +59,7 @@
             isDragging = false;
             fab.classList.remove('ai-fab--dragging');
             if (!hasDragged) {
-                openAIChat();   // simple tap → navigate
+                openAIChat();   // simple tap → navigate (async, fire-and-forget)
             }
         }
 
@@ -79,8 +81,8 @@
         document.addEventListener('touchend', () => onDragEnd());
 
         /* ── Navigate to chat page ───────────────────────────────── */
-        function openAIChat() {
-            // Scrape live stats from admin DOM
+        async function openAIChat() {
+            // Scrape live ("today"/current filter) stats from admin DOM
             const get = id => document.getElementById(id)?.innerText?.trim() || 'N/A';
 
             const ctx = {
@@ -94,6 +96,12 @@
                 topTableItems : scrapeTableItems('#tableSalesTableBody'),
                 topQsItems    : scrapeTableItems('#qsSalesTableBody'),
             };
+
+            // Full sales/expense/menu history — cached 24h so this doesn't
+            // re-read the whole Firestore history on every tap (see ai-data-cache.js)
+            try {
+                ctx.history = await getAiHistoricalContext();
+            } catch (_) { ctx.history = null; }
 
             try { sessionStorage.setItem('ai_dashboard_ctx', JSON.stringify(ctx)); } catch (_) {}
             window.location.href = '/admin/chat.ai.html';

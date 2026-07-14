@@ -461,17 +461,43 @@
     function buildPrompt(userMessage) {
         const topTable = (ctx.topTableItems || []).join('; ') || 'No data';
         const topQs    = (ctx.topQsItems    || []).join('; ') || 'No data';
+        const history  = ctx.history || null;
 
-        return `You are the Smart AI Manager for "New Pizza Hut & Live Cake", a restaurant. You have live dashboard stats. Be concise, smart, and friendly. Reply in Hinglish (Hindi + English mix) with practical business insights. Keep answers under 120 words unless a detailed breakdown is asked. Use emojis naturally.
+        let historyBlock = 'HISTORICAL DATA: Not available right now.';
+        if (history) {
+            const days = (history.dailyHistory || []).slice(0, 14)
+                .map(d => `${d.date}: Rev ₹${d.revenue} (Table ₹${d.tableRevenue}, QS ₹${d.qsRevenue}), Orders ${d.orders}, Expenses ₹${d.expenses}`)
+                .join('\n');
 
-LIVE DASHBOARD STATS:
-- Total Revenue (selected period): ${ctx.totalRevenue || 'N/A'}
+            const topAllTime = (history.topItemsAllTime || [])
+                .map(i => `${i.name} (Qty: ${i.qty}, Rev: ₹${i.rev})`)
+                .join('; ') || 'No data';
+
+            const menuList = (history.menu || [])
+                .map(m => `${m.name} — ₹${m.price} (${m.category})`)
+                .join('; ') || 'No menu data';
+
+            const t = history.allTimeTotals || {};
+            historyBlock = `HISTORICAL DATA (cached, refreshed at most once every 24h so it may lag today's live numbers by a few hours):
+- All-time totals across ${t.daysTracked || 0} tracked days: Revenue ₹${t.totalRevenueEver || 0}, Orders ${t.totalOrdersEver || 0}, Expenses ₹${t.totalExpensesEver || 0}
+- Last 14 days (most recent first):
+${days || 'No data yet'}
+- Top selling items all-time: ${topAllTime}
+- Full menu (${(history.menu || []).length} items): ${menuList}`;
+        }
+
+        return `You are the Smart AI Manager for "New Pizza Hut & Live Cake", a restaurant. You have both LIVE (selected period on the dashboard) stats and cached HISTORICAL data covering all past sales, expenses, and the full menu — use both together to spot trends and give grounded advice, not just today's snapshot. Be concise, smart, and friendly. Reply in Hinglish (Hindi + English mix) with practical business insights. Keep answers under 120 words unless a detailed breakdown is asked. Use emojis naturally.
+
+LIVE DASHBOARD STATS (selected period):
+- Total Revenue: ${ctx.totalRevenue || 'N/A'}
 - Total Orders: ${ctx.totalOrders || 'N/A'}
 - Table/Parcel Revenue: ${ctx.tableRevenue || 'N/A'} | Orders: ${ctx.tableOrders || 'N/A'}
 - Quick Sale Revenue: ${ctx.qsRevenue || 'N/A'} | Orders: ${ctx.qsOrders || 'N/A'}
 - Total Expenses: ${ctx.totalExpenses || 'N/A'}
 - Top Selling Items (Table/Parcel): ${topTable}
 - Top Selling Items (Quick Sale): ${topQs}
+
+${historyBlock}
 
 Admin's Question: ${userMessage}`;
     }
