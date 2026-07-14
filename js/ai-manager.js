@@ -85,16 +85,17 @@ import { getAiHistoricalContext } from './ai-data-cache.js';
             // Scrape live ("today"/current filter) stats from admin DOM
             const get = id => document.getElementById(id)?.innerText?.trim() || 'N/A';
 
+            // Note: the dashboard still splits Table vs Quick Sale internally,
+            // but the AI should only ever see one combined business total —
+            // it must not distinguish or mention Table vs Quick Sale.
             const ctx = {
                 totalRevenue  : get('totalRevenueBox'),
                 totalOrders   : get('totalOrdersBox'),
-                tableRevenue  : get('tableRevenueBox'),
-                tableOrders   : get('tableOrdersBox'),
-                qsRevenue     : get('qsRevenueBox'),
-                qsOrders      : get('qsOrdersBox'),
                 totalExpenses : get('totalExpenseBox'),
-                topTableItems : scrapeTableItems('#tableSalesTableBody'),
-                topQsItems    : scrapeTableItems('#qsSalesTableBody'),
+                topItems      : mergeItemLists(
+                    scrapeTableItems('#tableSalesTableBody'),
+                    scrapeTableItems('#qsSalesTableBody')
+                ),
             };
 
             // Full sales/expense/menu history — cached 24h so this doesn't
@@ -107,19 +108,39 @@ import { getAiHistoricalContext } from './ai-data-cache.js';
             window.location.href = '/admin/chat.ai.html';
         }
 
+        // Returns raw { name, qty, rev } rows (unformatted) so callers can
+        // merge multiple panels together before rendering as text.
         function scrapeTableItems(selector) {
             const rows = document.querySelectorAll(selector + ' tr');
             const items = [];
-            rows.forEach((row, i) => {
-                if (i >= 3) return;
+            rows.forEach(row => {
                 const cells = row.querySelectorAll('td');
                 if (cells.length >= 3) {
-                    items.push(
-                        `${cells[0].innerText.trim()} (Qty: ${cells[1].innerText.trim()}, Rev: ${cells[2].innerText.trim()})`
-                    );
+                    const name = cells[0].innerText.trim();
+                    const qty  = parseFloat(cells[1].innerText.replace(/[^\d.]/g, '')) || 0;
+                    const rev  = parseFloat(cells[2].innerText.replace(/[^\d.]/g, '')) || 0;
+                    if (name) items.push({ name, qty, rev });
                 }
             });
             return items;
+        }
+
+        // Combines Table + Quick Sale item breakdowns into one list per item
+        // name, sorted by quantity, so the AI sees a single business-wide
+        // top-sellers list instead of two separate ones.
+        function mergeItemLists(...lists) {
+            const merged = {};
+            lists.forEach(list => {
+                list.forEach(({ name, qty, rev }) => {
+                    if (!merged[name]) merged[name] = { name, qty: 0, rev: 0 };
+                    merged[name].qty += qty;
+                    merged[name].rev += rev;
+                });
+            });
+            return Object.values(merged)
+                .sort((a, b) => b.qty - a.qty)
+                .slice(0, 5)
+                .map(i => `${i.name} (Qty: ${i.qty}, Rev: ₹${i.rev})`);
         }
     }
 

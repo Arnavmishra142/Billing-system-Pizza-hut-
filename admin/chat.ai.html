@@ -317,7 +317,7 @@
     <button class="ai-suggestion-chip">💰 Aaj ka profit?</button>
     <button class="ai-suggestion-chip">📦 Top selling item?</button>
     <button class="ai-suggestion-chip">📉 Expenses kitne hain?</button>
-    <button class="ai-suggestion-chip">🍕 Table vs Quick Sale compare karo</button>
+    <button class="ai-suggestion-chip">🍕 Best selling items?</button>
     <button class="ai-suggestion-chip">📊 Kya improve karna chahiye?</button>
 </div>
 
@@ -372,13 +372,11 @@
         if (raw) ctx = JSON.parse(raw);
     } catch (_) {}
 
-    // Render context pills
+    // Render context pills — one combined total, no Table/Quick Sale split
     const pills = [
         { label: 'Revenue', value: ctx.totalRevenue || '—' },
         { label: 'Orders',  value: ctx.totalOrders  || '—' },
         { label: 'Expenses',value: ctx.totalExpenses|| '—' },
-        { label: 'Table Rev',value: ctx.tableRevenue|| '—' },
-        { label: 'QS Rev',  value: ctx.qsRevenue    || '—' },
     ];
     pills.forEach(p => {
         const pill = document.createElement('span');
@@ -459,14 +457,13 @@
 
     /* ── Prompt builder ───────────────────────────────────────── */
     function buildPrompt(userMessage) {
-        const topTable = (ctx.topTableItems || []).join('; ') || 'No data';
-        const topQs    = (ctx.topQsItems    || []).join('; ') || 'No data';
+        const topItems = (ctx.topItems || []).join('; ') || 'No data';
         const history  = ctx.history || null;
 
         let historyBlock = 'HISTORICAL DATA: Not available right now.';
         if (history) {
             const days = (history.dailyHistory || []).slice(0, 14)
-                .map(d => `${d.date}: Rev ₹${d.revenue} (Table ₹${d.tableRevenue}, QS ₹${d.qsRevenue}), Orders ${d.orders}, Expenses ₹${d.expenses}`)
+                .map(d => `${d.date}: Rev ₹${d.revenue}, Orders ${d.orders}, Expenses ₹${d.expenses}`)
                 .join('\n');
 
             const topAllTime = (history.topItemsAllTime || [])
@@ -486,16 +483,13 @@ ${days || 'No data yet'}
 - Full menu (${(history.menu || []).length} items): ${menuList}`;
         }
 
-        return `You are the Smart AI Manager for "New Pizza Hut & Live Cake", a restaurant. You have both LIVE (selected period on the dashboard) stats and cached HISTORICAL data covering all past sales, expenses, and the full menu — use both together to spot trends and give grounded advice, not just today's snapshot. Be concise, smart, and friendly. Reply in Hinglish (Hindi + English mix) with practical business insights. Keep answers under 120 words unless a detailed breakdown is asked. Use emojis naturally.
+        return `You are the Smart AI Manager for "New Pizza Hut & Live Cake", a restaurant. You have both LIVE (selected period on the dashboard) stats and cached HISTORICAL data covering all past sales, expenses, and the full menu — use both together to spot trends and give grounded advice, not just today's snapshot. Always report sales as ONE combined business total — never split or mention "Table" vs "Quick Sale"/"Cash Sale" as separate categories, the owner only cares about total numbers. Be concise, smart, and friendly. Reply in Hinglish (Hindi + English mix) with practical business insights. Keep answers under 120 words unless a detailed breakdown is asked. Use emojis naturally.
 
 LIVE DASHBOARD STATS (selected period):
 - Total Revenue: ${ctx.totalRevenue || 'N/A'}
 - Total Orders: ${ctx.totalOrders || 'N/A'}
-- Table/Parcel Revenue: ${ctx.tableRevenue || 'N/A'} | Orders: ${ctx.tableOrders || 'N/A'}
-- Quick Sale Revenue: ${ctx.qsRevenue || 'N/A'} | Orders: ${ctx.qsOrders || 'N/A'}
 - Total Expenses: ${ctx.totalExpenses || 'N/A'}
-- Top Selling Items (Table/Parcel): ${topTable}
-- Top Selling Items (Quick Sale): ${topQs}
+- Top Selling Items: ${topItems}
 
 ${historyBlock}
 

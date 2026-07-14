@@ -37,10 +37,10 @@ function writeLS(payload) {
 
 /** Build the compact summary from raw Firestore docs. */
 function summarize(sales, expenses, menuItems) {
-    const byDay = {}; // date -> { revenue, orders, tableRevenue, tableOrders, qsRevenue, qsOrders, expenses }
+    const byDay = {}; // date -> { revenue, orders, expenses }
     const dayBucket = (key) => {
         if (!byDay[key]) {
-            byDay[key] = { date: key, revenue: 0, orders: 0, tableRevenue: 0, tableOrders: 0, qsRevenue: 0, qsOrders: 0, expenses: 0 };
+            byDay[key] = { date: key, revenue: 0, orders: 0, expenses: 0 };
         }
         return byDay[key];
     };
@@ -52,12 +52,11 @@ function summarize(sales, expenses, menuItems) {
         if (!key) return;
         const bucket = dayBucket(key);
         const total  = Number(sale.total) || 0;
-        const isQS   = sale.table === 'Direct Entry';
 
+        // Sales are reported as one combined business total — the AI
+        // should not distinguish Table vs Quick Sale/Cash Sale.
         bucket.revenue += total;
         bucket.orders  += 1;
-        if (isQS) { bucket.qsRevenue += total; bucket.qsOrders += 1; }
-        else      { bucket.tableRevenue += total; bucket.tableOrders += 1; }
 
         (sale.items || []).forEach(item => {
             const n = item.name || 'Unknown';
@@ -80,8 +79,6 @@ function summarize(sales, expenses, menuItems) {
             date: d.date,
             revenue: Math.round(d.revenue),
             orders: d.orders,
-            tableRevenue: Math.round(d.tableRevenue),
-            qsRevenue: Math.round(d.qsRevenue),
             expenses: Math.round(d.expenses),
         }));
 
