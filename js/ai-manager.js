@@ -106,43 +106,12 @@
             const open = chatWin.classList.toggle('ai-chat--open');
             fab.classList.toggle('ai-fab--active', open);
             if (open) {
-                input.focus();
-                positionChatWindow();
                 if (messages.children.length === 0) {
                     appendMsg('ai', '👋 Hello! Main hoon aapka **Smart AI Manager**. Aaj ka revenue, orders ya expenses ke baare mein kuch poochho!');
                 }
-            }
-        }
-
-        function positionChatWindow() {
-            // Position chat window near FAB but always on screen
-            const fabRect = fab.getBoundingClientRect();
-            const winW = window.innerWidth;
-            const winH = window.innerHeight;
-            const chatW = Math.min(340, winW - 24);
-            const chatH = Math.min(480, winH - 120);
-
-            chatWin.style.width = chatW + 'px';
-            chatWin.style.maxHeight = chatH + 'px';
-
-            // Default: anchor bottom-right
-            chatWin.style.right = (winW - fabRect.right) + 'px';
-            chatWin.style.bottom = (winH - fabRect.top + 8) + 'px';
-            chatWin.style.left = 'auto';
-            chatWin.style.top = 'auto';
-
-            // If window would overflow top, flip to show below FAB
-            const chatTop = fabRect.top - chatH - 8;
-            if (chatTop < 8) {
-                chatWin.style.bottom = 'auto';
-                chatWin.style.top = (fabRect.bottom + 8) + 'px';
-            }
-
-            // If window would overflow left side
-            const chatLeft = fabRect.right - chatW;
-            if (chatLeft < 8) {
-                chatWin.style.right = 'auto';
-                chatWin.style.left = '8px';
+                // Delay focus so the window animation completes first
+                // and the keyboard doesn't cover the chat window on mobile
+                setTimeout(() => input.focus(), 350);
             }
         }
 
