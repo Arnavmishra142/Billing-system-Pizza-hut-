@@ -218,6 +218,31 @@
 </div>
 
 <script type="module" src="../js/admin.js?v=20"></script>
+
+<!-- ── SMART AI MANAGER ── -->
+<button id="aiManagerFab" title="Smart AI Manager" aria-label="Open AI Manager">🤖</button>
+
+<div id="aiChatWindow" role="dialog" aria-label="Smart AI Manager Chat">
+    <div class="ai-chat-header">
+        <div class="ai-chat-header-info">
+            <span class="ai-chat-avatar">🤖</span>
+            <div>
+                <div class="ai-chat-title">Smart AI Manager</div>
+                <div class="ai-chat-subtitle">Powered by Gemini</div>
+            </div>
+        </div>
+        <button id="aiChatClose" class="ai-chat-close" aria-label="Close">✕</button>
+    </div>
+    <div id="aiMessages" class="ai-messages"></div>
+    <div class="ai-input-row">
+        <input id="aiInputField" type="text" placeholder="Kuch poochho... e.g. aaj ka profit?" autocomplete="off">
+        <button id="aiSendBtn" class="ai-send-btn" aria-label="Send">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+    </div>
+</div>
+
+<script src="../js/ai-manager.js"></script>
 <script>
 (function () {
     // ── Service Worker ──
