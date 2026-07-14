@@ -105,7 +105,9 @@ import { getAiHistoricalContext } from './ai-data-cache.js';
             } catch (_) { ctx.history = null; }
 
             try { sessionStorage.setItem('ai_dashboard_ctx', JSON.stringify(ctx)); } catch (_) {}
-            window.location.href = '/admin/chat.ai.html';
+            
+            // ✅ FIX: Use relative path for GitHub Pages compatibility
+            window.location.href = './chat.ai.html';
         }
 
         // Returns raw { name, qty, rev } rows (unformatted) so callers can
