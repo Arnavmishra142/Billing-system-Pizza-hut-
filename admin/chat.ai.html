@@ -337,11 +337,6 @@
 (function () {
     'use strict';
 
-    const GEMINI_KEY = 'AQ.Ab8RN6KCu_7z5VrWP5UxnnspZthp52IBthKXi9Sgct28y2nmKg';
-    // Key passed as URL param (more reliable in browsers than X-goog-api-key header)
-    const GEMINI_ENDPOINT =
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
-
     const messagesEl  = document.getElementById('aiMessages');
     const inputEl     = document.getElementById('aiInputField');
     const sendBtn     = document.getElementById('sendBtn');
@@ -428,21 +423,22 @@
         const thinkEl = appendThinking();
 
         try {
-            const res = await fetch(GEMINI_ENDPOINT, {
+            // Proxied through our own server (/api/chat) so the Groq key
+            // never reaches the browser — the server tries the high-quality
+            // model first and auto-falls-back to the high-limit model if
+            // that one's daily quota is hit.
+            const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: buildPrompt(text) }] }]
-                })
+                body: JSON.stringify({ prompt: buildPrompt(text) })
             });
 
-            if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-
             const data = await res.json();
-            const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text
-                || '⚠️ Koi response nahi mila. Dobara try karo.';
+            if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+
+            const reply = data.reply || '⚠️ Koi response nahi mila. Dobara try karo.';
 
             thinkEl.remove();
             appendMsg('ai', reply);
