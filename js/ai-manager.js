@@ -96,7 +96,7 @@
             };
 
             try { sessionStorage.setItem('ai_dashboard_ctx', JSON.stringify(ctx)); } catch (_) {}
-            window.location.href = 'chat.ai.html';
+            window.location.href = '/admin/chat.ai.html';
         }
 
         function scrapeTableItems(selector) {
