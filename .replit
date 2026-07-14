@@ -35,6 +35,5 @@ externalPort = 80
 
 [deployment]
 deploymentTarget = "static"
-run = ["node", "server.js"]
 build = ["node", "build.js"]
 publicDir = "."
