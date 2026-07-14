@@ -44,3 +44,9 @@ No Firebase credentials need to be added to Replit secrets; they are already in 
 ## User preferences
 
 - Keep the existing file structure and stack (no frameworks, no build step)
+
+## Housekeeping notes
+
+- Removed unused files that weren't referenced anywhere: root `script.js` (superseded by the modular `js/*.js` files), `qr.png`, and `attached_assets/` (dev screenshots).
+- Fixed root `manifest.json` — it pointed at a non-existent `admin-logo.png` (that file only exists under `admin/`), causing a 404 on every page load. Now points at `pos-logo.png` with correct app name.
+- `GROQ_API_KEY` secret is set; the AI chat (`admin/chat.ai.html`) already uses Groq (`llama-3.3-70b-versatile` primary, `llama-3.1-8b-instant` fallback) — no Gemini code remains in the app.
