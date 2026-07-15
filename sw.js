@@ -71,6 +71,9 @@ self.addEventListener('fetch', (e) => {
     // 2. Non-GET requests (POST, etc.) — skip caching
     if (e.request.method !== 'GET') return;
 
+    // 3. Generated files that change on every build — always fetch from network
+    if (url.pathname.includes('groq-key.generated.js')) return;
+
     // 3. Static assets — cache-first, update cache in background
     e.respondWith(
         caches.match(e.request).then((cachedResponse) => {
