@@ -1032,27 +1032,38 @@ body {
     flex-shrink: 0;
 }
 
-/* Grid card ke andar (table name ke saath, dark border ke upar) */
-.table-name-header .order-timer {
-    font-size: 0.65rem;
-    padding: 2px 6px;
-    flex-shrink: 0;        /* timer kabhi compress na ho */
-    margin-left: 4px;      /* table name se thoda gap */
+/* ── Timer inside table-card: anchor to top-right corner ── */
+.table-card {
+    position: relative !important; /* anchor for absolute timer */
 }
 
-/* Table name text ko shrink karo, timer ko nahi */
-.table-name-header > span:first-child {
-    min-width: 0;
-    flex: 1 1 auto;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+/* Pull timer out of flex flow — stick it to top-right of card */
+.table-card .order-timer {
+    position: absolute !important;
+    top: 8px !important;
+    right: 8px !important;
+    font-size: 0.62rem !important;
+    padding: 2px 6px !important;
+    z-index: 2 !important;
+    /* remove from flex layout */
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+/* Give the header title room so it doesn't go under the timer */
+.table-name-header {
+    padding-right: 52px !important;
 }
 
 @media (min-width: 768px) {
-    .table-name-header .order-timer {
-        font-size: 1rem !important;
-        padding: 4px 12px !important;
+    .table-card .order-timer {
+        top: 12px !important;
+        right: 12px !important;
+        font-size: 0.85rem !important;
+        padding: 3px 10px !important;
+    }
+    .table-name-header {
+        padding-right: 70px !important;
     }
 }
 
