@@ -227,7 +227,7 @@
 (function () {
     // ── Service Worker ──
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' })
+        navigator.serviceWorker.register('./sw.js')
             .catch(err => console.warn('SW reg failed:', err));
     }
 
