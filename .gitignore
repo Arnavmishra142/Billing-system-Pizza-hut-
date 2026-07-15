@@ -1,1 +1,3 @@
-admin/groq-key.generated.js
+# groq-key.generated.js is intentionally committed so GitHub Pages can serve it.
+# build.js regenerates it from the GROQ_API_KEY secret on every Replit start/deploy.
+# The key is intentionally visible in source — see replit.md for the accepted tradeoff.
