@@ -1034,8 +1034,19 @@ body {
 
 /* Grid card ke andar (table name ke saath, dark border ke upar) */
 .table-name-header .order-timer {
-    font-size: 0.7rem;
-    padding: 2px 7px;
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    flex-shrink: 0;        /* timer kabhi compress na ho */
+    margin-left: 4px;      /* table name se thoda gap */
+}
+
+/* Table name text ko shrink karo, timer ko nahi */
+.table-name-header > span:first-child {
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 @media (min-width: 768px) {
