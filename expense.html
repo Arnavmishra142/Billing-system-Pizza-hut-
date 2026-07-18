@@ -22,6 +22,10 @@
         .expense-amt { font-weight: bold; color: #f43f5e; font-size: 1.1rem; }
         .delete-expense-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; opacity: 0.5; transition: opacity 0.15s; padding: 4px; line-height: 1; }
         .delete-expense-btn:hover { opacity: 1; }
+        .edit-expense-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; opacity: 0.5; transition: opacity 0.15s; padding: 4px; line-height: 1; }
+        .edit-expense-btn:hover { opacity: 1; }
+        .cancel-edit-btn { width: 100%; padding: 10px; background: #6b7280; color: white; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 8px; display: none; }
+        .editing-banner { display: none; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 0.9rem; color: #92400e; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -40,7 +44,9 @@
             <input type="text" id="expNote" list="pastNotes" placeholder="e.g. Milk" autocomplete="off">
             <datalist id="pastNotes"></datalist>
 
+            <div class="editing-banner" id="editingBanner">✏️ Editing expense — original time will be kept</div>
             <button class="save-btn" id="saveExpenseBtn">Save Expense</button>
+            <button class="cancel-edit-btn" id="cancelEditBtn">✕ Cancel Edit</button>
         </div>
 
         <h3 style="margin-bottom: 10px; color: #4b5563;">Today's Expenses</h3>
