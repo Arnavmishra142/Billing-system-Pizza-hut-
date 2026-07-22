@@ -2,7 +2,7 @@
 //  POS Service Worker — Cache-first for static assets
 //  Version: 3 (bump this number whenever you deploy changes)
 // ============================================================
-const CACHE_NAME = 'pos-static-v4';
+const CACHE_NAME = 'pos-static-v5';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
