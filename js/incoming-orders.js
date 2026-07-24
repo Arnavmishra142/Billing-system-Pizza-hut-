@@ -238,15 +238,30 @@ function renderDrawer(orders) {
             try { existing = JSON.parse(localStorage.getItem(cartKey) || '[]'); } catch(_) {}
 
             items.forEach(newItem => {
-                const found = existing.find(i => i.id === newItem.id);
+                const incomingQty = newItem.quantity || 1;
+
+                // Try to match against actual POS menu items by name so the item
+                // gets the right ID — this makes menu badges, delete and qty all work.
+                const posMenuItems = window._posMenuItems || [];
+                const posItem = posMenuItems.find(
+                    m => m.name.trim().toLowerCase() === (newItem.name || '').trim().toLowerCase()
+                );
+
+                // Prefer the POS item's ID; fall back to itemId from customer panel;
+                // last resort a stable string so at least cart ops work.
+                const resolvedId    = posItem ? posItem.id    : (newItem.itemId || newItem.id || `inc_${newItem.name}`);
+                const resolvedPrice = posItem ? posItem.price : (newItem.price || 0);
+                const resolvedName  = posItem ? posItem.name  : (newItem.name  || 'Unknown Item');
+
+                const found = existing.find(i => i.id === resolvedId);
                 if (found) {
-                    found.qty += (newItem.quantity || 1);
+                    found.qty += incomingQty;
                 } else {
                     existing.push({
-                        id: newItem.id,
-                        name: newItem.name,
-                        price: newItem.price,
-                        qty: newItem.quantity || 1,
+                        id:         resolvedId,
+                        name:       resolvedName,
+                        price:      resolvedPrice,
+                        qty:        incomingQty,
                         printedQty: 0
                     });
                 }

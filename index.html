@@ -427,7 +427,6 @@
                         <div style="display: flex; gap: 8px; margin-top: 10px;">
                             <button class="btn-view-details" style="flex: 1;" onclick="window.location.href='details.html?id=${encodedId}'">👁️ Details</button>
                             <button class="btn-reprint" style="flex: 1;" onclick="reprintGhostBill('${bill.id}')">🖨️ Print</button>
-                            <button class="btn-view-details" onclick="window.open('details.html?id=${encodeURIComponent(bill.id)}', '_blank')" style="flex: 1; padding: 8px 10px; background: #1d4ed8; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 0.85rem;">👁️ View</button>
                             <button class="btn-delete-ghost" onclick="deleteGhostBill('${bill.id}')">🗑️</button>
                         </div>
                     </div>

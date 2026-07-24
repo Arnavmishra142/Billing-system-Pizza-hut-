@@ -98,6 +98,7 @@ function loadMenuFromLS() {
 // ── Apply data to UI ──
 function applyMenuData(items, cats) {
     allItems = items;
+    window._posMenuItems = allItems; // expose for incoming-orders.js lookup
     categories = cats;
     loadCategories();
     loadItems(currentCategory);
