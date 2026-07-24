@@ -166,6 +166,21 @@ body {
 }
 .back-btn:hover { background: #dc2626; }
 
+.switch-grid-btn {
+    background: #0ea5e9;
+    color: white;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 0.95rem;
+    transition: background 0.2s;
+    order: 2;
+}
+.switch-grid-btn:hover { background: #0284c7; }
+.switch-grid-btn:active { transform: scale(0.95); }
+
 /* =========================================
    POS TOP BAR: Back to Grid (left) + Customer Tabs (center)
    ========================================= */
@@ -1017,16 +1032,38 @@ body {
     flex-shrink: 0;
 }
 
-/* Grid card ke andar (table name ke saath, dark border ke upar) */
-.table-name-header .order-timer {
-    font-size: 0.7rem;
-    padding: 2px 7px;
+/* ── Timer inside table-card: anchor to top-right corner ── */
+.table-card {
+    position: relative !important; /* anchor for absolute timer */
+}
+
+/* Pull timer out of flex flow — stick it to top-right of card */
+.table-card .order-timer {
+    position: absolute !important;
+    top: 8px !important;
+    right: 8px !important;
+    font-size: 0.62rem !important;
+    padding: 2px 6px !important;
+    z-index: 2 !important;
+    /* remove from flex layout */
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+/* Give the header title room so it doesn't go under the timer */
+.table-name-header {
+    padding-right: 52px !important;
 }
 
 @media (min-width: 768px) {
-    .table-name-header .order-timer {
-        font-size: 1rem !important;
-        padding: 4px 12px !important;
+    .table-card .order-timer {
+        top: 12px !important;
+        right: 12px !important;
+        font-size: 0.85rem !important;
+        padding: 3px 10px !important;
+    }
+    .table-name-header {
+        padding-right: 70px !important;
     }
 }
 
@@ -1225,6 +1262,12 @@ body {
     border-left: 4px solid #f59e0b; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
 }
 .history-card p { margin: 5px 0; font-size: 0.9rem; color: #9199a8; }
+.btn-view-details {
+    margin-top: 0; background: #8b5cf6; color: white; border: none;
+    padding: 8px; border-radius: 5px; cursor: pointer; font-weight: bold;
+    transition: background 0.2s;
+}
+.btn-view-details:hover { background: #7c3aed; }
 .btn-reprint {
     margin-top: 10px; background: #0ea5e9; color: white; border: none;
     padding: 8px; border-radius: 5px; cursor: pointer; width: 100%; font-weight: bold;
@@ -1857,3 +1900,74 @@ body {
     background: #2d323f !important;
     color: #d1d5db !important;
 }
+
+/* =========================================
+   INCOMING ORDERS BUTTON & BADGE
+   ========================================= */
+.incoming-orders-btn { position: relative; overflow: visible !important; }
+.incoming-badge {
+    position: absolute; top: -6px; right: -6px;
+    background: #ef4444; color: white;
+    font-size: 0.75rem; font-weight: 800;
+    width: 22px; height: 22px; border-radius: 50%;
+    align-items: center; justify-content: center;
+    border: 2px solid #0b0c10; z-index: 10;
+    animation: badgePop 0.3s ease;
+}
+@keyframes badgePop {
+    0% { transform: scale(0); }
+    70% { transform: scale(1.3); }
+    100% { transform: scale(1); }
+}
+.incoming-orders-btn.has-orders {
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.4), 0 8px 20px rgba(245, 158, 11, 0.3) !important;
+    animation: orderPulse 1.5s ease-in-out infinite;
+}
+@keyframes orderPulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(245,158,11,0.4), 0 8px 20px rgba(245,158,11,0.3); }
+    50%       { box-shadow: 0 0 0 8px rgba(245,158,11,0.1), 0 8px 20px rgba(245,158,11,0.5); }
+}
+
+/* =========================================
+   INCOMING ORDERS DRAWER
+   ========================================= */
+.incoming-drawer { max-height: 80dvh; }
+
+.incoming-empty {
+    text-align: center; color: #4b5563;
+    font-size: 0.95rem; padding: 40px 20px;
+}
+
+.incoming-card {
+    background: #13161f; border: 1px solid #1f2937;
+    border-radius: 12px; padding: 14px 16px;
+    margin-bottom: 10px; transition: border-color 0.2s;
+}
+.incoming-card:hover { border-color: #f59e0b; }
+
+.inc-header {
+    display: flex; justify-content: space-between;
+    align-items: center; margin-bottom: 8px;
+}
+.inc-table { font-weight: 800; color: #38bdf8; font-size: 1rem; }
+.inc-time  { font-size: 0.78rem; color: #6b7280; }
+
+.inc-items {
+    font-size: 0.82rem; color: #9ca3af;
+    line-height: 1.5; margin-bottom: 10px;
+    display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden;
+}
+
+.inc-footer {
+    display: flex; justify-content: space-between;
+    align-items: center;
+}
+.inc-total { font-weight: 800; color: #10b981; font-size: 1rem; }
+.inc-accept-btn {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: white; border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 0.88rem; font-weight: 700;
+    cursor: pointer; transition: transform 0.15s;
+}
+.inc-accept-btn:active { transform: scale(0.96); }

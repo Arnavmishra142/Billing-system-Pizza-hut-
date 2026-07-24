@@ -776,3 +776,45 @@ input:checked + .slider::before { transform: translateX(18px); }
     .topbar { padding: 0 24px; }
     .topbar-title { font-size: 1.3rem; }
 }
+
+/* ═══════════════════════════════════════════════
+   SMART AI MANAGER — FAB
+═══════════════════════════════════════════════ */
+
+/* Floating Action Button */
+#aiManagerFab {
+    position: fixed;
+    right: 20px;
+    bottom: 92px; /* above bottom nav */
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+    border: none;
+    color: white;
+    font-size: 1.6rem;
+    cursor: pointer;
+    z-index: 9500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 20px rgba(59, 130, 246, 0.55), 0 2px 8px rgba(0,0,0,0.4);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    line-height: 1;
+}
+#aiManagerFab:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 28px rgba(59, 130, 246, 0.7), 0 3px 12px rgba(0,0,0,0.5);
+}
+#aiManagerFab.ai-fab--active {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+}
+#aiManagerFab.ai-fab--dragging {
+    opacity: 0.85;
+    transform: scale(1.05);
+    cursor: grabbing;
+}
+

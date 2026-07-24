@@ -1,404 +1,331 @@
-/**
- * incoming-orders.js
- * ─────────────────────────────────────────────────────────────
- * Listens to pending_table_orders (written by the QR customer panel).
- * Shows a 📦 Incoming Orders button in the home grid.
- * On Accept → merges items into localStorage cart → navigates to table.
- *
- * BUG FIXES vs upstream:
- *   1. Button is ALWAYS touchable (never disabled when no orders).
- *   2. After Accept, fires `cart-updated` event so menu grid badges refresh.
- */
+// incoming-orders.js
+// Listens to Firestore `pending_table_orders` for new customer orders.
+// Shows badge on #btn-orders and a toast notification — NO SOUND.
 
 import { db } from './firebase-config.js';
 import {
-    collection, query, where, onSnapshot,
-    doc, updateDoc,
-} from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js';
+    collection,
+    onSnapshot,
+    query,
+    orderBy,
+    where,
+    getDocs,
+    doc,
+    updateDoc
+} from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-const ORDERS_COL = 'pending_table_orders';
-let pendingOrders = [];
-
-// ── BOOT ─────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-    injectStyles();
-    injectHTML();
-    wireEvents();
-    startOrdersListener();
-});
-
-// ── FIRESTORE LISTENER ────────────────────────────────────────
-function startOrdersListener() {
-    const q = query(collection(db, ORDERS_COL), where('status', '==', 'pending'));
-    onSnapshot(q, (snap) => {
-        pendingOrders = snap.docs.map(d => ({ _docId: d.id, ...d.data() }));
-        updateBadge();
-        if (pendingOrders.length > 0) flashBtn();
-        const drawer = document.getElementById('incomingOrdersDrawer');
-        if (drawer?.classList.contains('open')) renderOrdersList();
-    });
+// ── Fix 3: Count how many times a phone number has ordered ───────────────────
+async function getCustomerOrderCount(phone) {
+    if (!phone) return 1;
+    try {
+        const q    = query(collection(db, 'pending_table_orders'), where('customer.phone', '==', phone));
+        const snap = await getDocs(q);
+        return Math.max(1, snap.size);
+    } catch(e) { return 1; }
 }
 
-// ── BADGE ─────────────────────────────────────────────────────
-function updateBadge() {
-    const badge = document.getElementById('incOrdersBadge');
-    const btn   = document.getElementById('incOrdersBtn');
-    const count = pendingOrders.length;
-    if (badge) {
-        badge.textContent   = count;
-        badge.style.display = count > 0 ? 'flex' : 'none';
+function toOrdinal(n) {
+    const s = ['th','st','nd','rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const btnOrders   = document.getElementById('btn-orders');
+const badge       = document.getElementById('orders-badge');
+const drawer      = document.getElementById('ordersDrawer');
+const overlay     = document.getElementById('ordersOverlay');
+const drawerList  = document.getElementById('ordersDrawerList');
+
+// Track order IDs we've already notified about so we don't re-toast on re-render
+const _notified = new Set();
+
+// ── Inject drawer + badge CSS immediately (not inside showToast) ──────────────
+(function injectDrawerCSS() {
+    if (document.getElementById('orders-drawer-style')) return;
+    const s = document.createElement('style');
+    s.id = 'orders-drawer-style';
+    s.textContent = `
+        @keyframes badgePop { 0%{transform:scale(1)} 50%{transform:scale(1.4)} 100%{transform:scale(1)} }
+        .btn-pulse { animation: badgePop 0.5s ease 3; }
+        #orders-badge {
+            position: absolute; top: -8px; right: -8px;
+            background: #ef4444; color: #fff;
+            border-radius: 999px; min-width: 22px; height: 22px;
+            font-size: 0.72rem; font-weight: 700;
+            display: none; align-items: center; justify-content: center;
+            padding: 0 5px; pointer-events: none;
+            z-index: 10; box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        .orders-drawer {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: #1e1e2e; border-radius: 20px 20px 0 0;
+            z-index: 5000; transform: translateY(100%);
+            transition: transform 0.3s ease;
+            max-height: 80vh; display: flex; flex-direction: column;
+        }
+        .orders-drawer.open { transform: translateY(0); }
+        .orders-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55); z-index: 4999;
+            display: none; opacity: 0; transition: opacity 0.3s ease;
+        }
+        .orders-overlay.open { display: block; opacity: 1; }
+        .order-card-item {
+            background: #2a2a3e; border-radius: 12px;
+            padding: 14px 16px; margin-bottom: 12px;
+            border-left: 4px solid #f59e0b;
+        }
+        .order-card-item .oc-head {
+            display: flex; justify-content: space-between;
+            align-items: center; margin-bottom: 8px;
+        }
+        .order-card-item .oc-table { font-weight: 700; font-size: 1rem; }
+        .order-card-item .oc-time  { font-size: 0.75rem; opacity: 0.6; }
+        .order-card-item .oc-items {
+            font-size: 0.85rem; opacity: 0.85;
+            margin-bottom: 10px; line-height: 1.5;
+        }
+        .order-card-item .oc-actions { display: flex; gap: 8px; }
+        .oc-btn-accept {
+            flex: 1; background: linear-gradient(135deg, #10b981, #34d399);
+            color: #fff; border: none; border-radius: 8px;
+            padding: 9px; font-weight: 600; font-size: 0.9rem; cursor: pointer;
+        }
+        .oc-btn-dismiss {
+            background: rgba(255,255,255,0.08); color: inherit;
+            border: none; border-radius: 8px; padding: 9px 14px;
+            font-size: 0.85rem; cursor: pointer; opacity: 0.7;
+        }
+    `;
+    document.head.appendChild(s);
+})();
+
+// ── Badge counter ─────────────────────────────────────────────────────────────
+function setBadge(count) {
+    if (!badge) return;
+    if (count > 0) {
+        badge.textContent = count > 99 ? '99+' : count;
+        badge.style.display = 'flex';
+        btnOrders && btnOrders.classList.add('btn-pulse');
+    } else {
+        badge.style.display = 'none';
+        btnOrders && btnOrders.classList.remove('btn-pulse');
     }
-    // ✅ FIX: Button is ALWAYS visible + touchable — no disabling/hiding.
-    // We only toggle a CSS class for the pulse animation.
-    if (btn) btn.classList.toggle('has-orders', count > 0);
 }
 
-function flashBtn() {
-    const btn = document.getElementById('incOrdersBtn');
-    if (!btn) return;
-    btn.style.transform = 'scale(1.15)';
-    setTimeout(() => (btn.style.transform = ''), 300);
+// ── Toast notification ────────────────────────────────────────────────────────
+function showToast(tableName, itemCount) {
+    const existing = document.getElementById('order-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'order-toast';
+    toast.innerHTML = `
+        <span style="font-size:1.3rem;">🔔</span>
+        <div>
+            <strong>New Order!</strong>
+            <div style="font-size:0.85rem;opacity:0.9;">${tableName} · ${itemCount} item${itemCount !== 1 ? 's' : ''}</div>
+        </div>
+    `;
+    toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 9999;
+        background: linear-gradient(135deg, #f59e0b, #fbbf24);
+        color: #1a1a1a;
+        border-radius: 14px;
+        padding: 14px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-family: inherit;
+        font-weight: 600;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+        cursor: pointer;
+        animation: toastIn 0.35s ease;
+    `;
+
+    // toast animation only (drawer CSS is injected on load)
+    if (!document.getElementById('toast-anim-style')) {
+        const s = document.createElement('style');
+        s.id = 'toast-anim-style';
+        s.textContent = `
+            @keyframes toastIn  { from { opacity:0; transform:translateY(-16px); } to { opacity:1; transform:translateY(0); } }
+            @keyframes toastOut { from { opacity:1; transform:translateY(0); }     to { opacity:0; transform:translateY(-16px); } }
+        `;
+        document.head.appendChild(s);
+    }
+
+    document.body.appendChild(toast);
+    toast.addEventListener('click', openDrawer);
+
+    // Auto-dismiss after 6s
+    setTimeout(() => {
+        toast.style.animation = 'toastOut 0.35s ease forwards';
+        setTimeout(() => toast.remove(), 350);
+    }, 6000);
 }
 
-// ── DRAWER ───────────────────────────────────────────────────
-async function openDrawer() {
-    await renderOrdersList();
-    document.getElementById('incomingOrdersDrawer')?.classList.add('open');
-    document.getElementById('incOrdersOverlay')?.classList.add('open');
+// ── Drawer open / close ───────────────────────────────────────────────────────
+function openDrawer()  {
+    drawer && drawer.classList.add('open');
+    overlay && overlay.classList.add('open');
 }
 function closeDrawer() {
-    document.getElementById('incomingOrdersDrawer')?.classList.remove('open');
-    document.getElementById('incOrdersOverlay')?.classList.remove('open');
+    drawer && drawer.classList.remove('open');
+    overlay && overlay.classList.remove('open');
 }
 
-// ── RENDER ORDERS ─────────────────────────────────────────────
-async function renderOrdersList() {
-    const list = document.getElementById('incOrdersList');
-    if (!list) return;
+// ── Render orders inside the drawer ──────────────────────────────────────────
+let _pendingOrders = [];
 
-    if (pendingOrders.length === 0) {
-        list.innerHTML = `
-            <div style="text-align:center;padding:48px 20px;color:#6b7280;">
-                <div style="font-size:40px;margin-bottom:12px;">✅</div>
-                <p style="font-size:1rem;font-weight:bold;color:#d1d5db;">No pending orders</p>
-                <p style="font-size:0.85rem;margin-top:6px;">All caught up! New orders appear here instantly.</p>
-            </div>`;
+function renderDrawer(orders) {
+    if (!drawerList) return;
+
+    if (orders.length === 0) {
+        drawerList.innerHTML = `<p style="text-align:center;opacity:0.5;padding:30px 0;">No pending orders right now 🎉</p>`;
         return;
     }
 
-    list.innerHTML = pendingOrders.map(order => buildOrderCard(order)).join('');
-}
+    drawerList.innerHTML = '';
 
-function esc(s) {
-    return String(s || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/'/g, '&#39;');
-}
-function normalizeTableName(id) {
-    return (id && id !== 'Unknown') ? id : 'Unknown Table';
-}
+    // renderDrawer is async because of getCustomerOrderCount
+    const renders = orders.map(async order => {
+        const { id, tableId = 'Unknown Table', items = [], createdAt, customer = {}, totalPrice } = order;
 
-function buildOrderCard(order) {
-    const table   = normalizeTableName(order.tableId);
-    const fmt     = (n) => `₹${Number(n || 0).toFixed(0)}`;
-    const ts      = order.createdAt?.seconds
-        ? new Date(order.createdAt.seconds * 1000) : new Date();
-    const timeStr = ts.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-    const docId   = order._docId;
+        const tableName     = tableId;
+        const customerName  = customer.name  || 'Guest';
+        const customerPhone = customer.phone || '—';
 
-    return `
-    <div class="inc-order-card" id="inc-card-${docId}">
-        <div class="inc-order-top">
-            <div class="inc-order-left">
-                <div class="inc-table-tag">🪑 ${esc(table)}</div>
-                <div class="inc-customer">
-                    <span>👤 <strong>${esc(order.customer?.name || 'Guest')}</strong></span>
-                    <span>📱 ${esc(order.customer?.phone || '—')}</span>
-                </div>
+        const timeLabel = createdAt
+            ? new Date(createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '';
+
+        // Fix 1: use item.quantity
+        const itemsText = items.map(i => `${i.name} ×${i.quantity}`).join(', ') || 'No item details';
+
+        // Fix 3: ordinal order count
+        const count   = await getCustomerOrderCount(customer.phone);
+        const ordinal = toOrdinal(count);
+
+        const card = document.createElement('div');
+        card.className = 'order-card-item';
+        card.innerHTML = `
+            <div class="oc-head">
+                <span class="oc-table">🔔 ${tableName}</span>
+                <span class="oc-time">${timeLabel}</span>
             </div>
-            <div class="inc-order-right">
-                <div class="inc-total">${fmt(order.totalPrice)}</div>
-                <div class="inc-time">${timeStr}</div>
+            <div style="font-size:0.85rem; margin-bottom:6px; opacity:0.9;">
+                👤 <strong>${customerName}</strong> &nbsp;📱 ${customerPhone}
             </div>
-        </div>
-        <ul class="inc-items">
-            ${(order.items || []).map(it => `
-                <li>
-                    <span>${esc(it.name)}</span>
-                    <span>×${it.quantity || 1} &nbsp; ${fmt(it.subtotal)}</span>
-                </li>`).join('')}
-        </ul>
-        <div class="inc-actions">
-            <button class="inc-btn inc-reject"
-                    onclick="window._incReject('${esc(docId)}')">
-                ✕ Reject
-            </button>
-            <button class="inc-btn inc-accept"
-                    id="inc-accept-${docId}"
-                    onclick="window._incAccept('${esc(docId)}', '${esc(table)}')">
-                ✓ Accept → ${esc(table)}
-            </button>
-        </div>
-    </div>`;
-}
+            <div style="font-size:0.75rem; color:#f59e0b; margin-bottom:8px; font-weight:600;">
+                ${ordinal} order from this customer
+            </div>
+            <div class="oc-items">${itemsText}</div>
+            ${totalPrice ? `<div style="font-size:0.9rem; font-weight:700; margin-bottom:10px;">Total: ₹${totalPrice}</div>` : ''}
+            <div class="oc-actions">
+                <button class="oc-btn-accept">✅ Open in POS</button>
+                <button class="oc-btn-dismiss">Dismiss</button>
+            </div>
+        `;
 
-// ── ACCEPT ───────────────────────────────────────────────────
-window._incAccept = async function(docId, tableName) {
-    const order = pendingOrders.find(o => o._docId === docId);
-    if (!order) return;
+        // Accept → load items into POS cart then open the table
+        card.querySelector('.oc-btn-accept').addEventListener('click', async () => {
+            // 1. Merge customer items into localStorage cart for this table
+            const cartKey = `cart_${tableName}_C1`;
+            let existing = [];
+            try { existing = JSON.parse(localStorage.getItem(cartKey) || '[]'); } catch(_) {}
 
-    const btn = document.getElementById(`inc-accept-${docId}`);
-    if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
-
-    // 1. Merge items into localStorage cart  (Table X → C1)
-    const cartKey = `cart_${tableName}_C1`;
-    let cart = [];
-    try { cart = JSON.parse(localStorage.getItem(cartKey)) || []; } catch(e) {}
-
-    for (const ni of (order.items || [])) {
-        const match = cart.find(e => e.name === ni.name && e.price === ni.price);
-        if (match) {
-            match.qty = (match.qty || 1) + (ni.quantity || 1);
-        } else {
-            cart.push({
-                id:         ni.itemId || `qr_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-                name:       ni.name,
-                price:      ni.price,
-                qty:        ni.quantity || 1,
-                printedQty: 0,
+            items.forEach(newItem => {
+                const found = existing.find(i => i.id === newItem.id);
+                if (found) {
+                    found.qty += (newItem.quantity || 1);
+                } else {
+                    existing.push({
+                        id: newItem.id,
+                        name: newItem.name,
+                        price: newItem.price,
+                        qty: newItem.quantity || 1,
+                        printedQty: 0
+                    });
+                }
             });
-        }
-    }
-    localStorage.setItem(cartKey, JSON.stringify(cart));
+            localStorage.setItem(cartKey, JSON.stringify(existing));
+            window.dispatchEvent(new Event('cart-updated'));
 
-    // ✅ FIX: Fire cart-updated so syncItemBadges() in menu.js refreshes
-    // the menu grid badges immediately when POS screen is open.
-    window.dispatchEvent(new Event('cart-updated'));
+            // 2. Mark order as accepted in Firestore
+            try {
+                await updateDoc(doc(db, 'pending_table_orders', id), { status: 'accepted' });
+            } catch(e) { console.warn('Could not update order status:', e); }
 
-    // 2. Mark accepted in Firestore
-    try {
-        await updateDoc(doc(db, ORDERS_COL, docId), {
-            status:     'accepted',
-            acceptedAt: new Date().toISOString(),
+            closeDrawer();
+
+            // 3. Open POS directly to that table (cart already loaded)
+            if (typeof window._posOpenTable === 'function') {
+                window._posOpenTable(tableName);
+            }
         });
-    } catch(e) { console.error('Firestore accept failed:', e); }
 
-    // 3. Close drawer → navigate to that table
-    closeDrawer();
-    if (typeof window._posOpenTable === 'function') {
-        window._posOpenTable(tableName, 'C1');
-    } else {
-        alert(`Order added to ${tableName}! Open that table to see it.`);
-    }
-};
-
-// ── REJECT ───────────────────────────────────────────────────
-window._incReject = async function(docId) {
-    if (!confirm('Reject this order?')) return;
-    try {
-        await updateDoc(doc(db, ORDERS_COL, docId), {
-            status:     'rejected',
-            rejectedAt: new Date().toISOString(),
+        // Dismiss → mark as dismissed
+        card.querySelector('.oc-btn-dismiss').addEventListener('click', async () => {
+            try {
+                await updateDoc(doc(db, 'pending_table_orders', id), { status: 'dismissed' });
+            } catch(e) {}
         });
-    } catch(e) { console.error('Reject failed:', e); }
-};
 
-// ── HTML INJECTION ───────────────────────────────────────────
-function injectHTML() {
-    // ── Button (adopt existing or create new) ──
-    let btn = document.getElementById('incOrdersBtn');
-    if (!btn) {
-        const all = Array.from(document.querySelectorAll('button, .menu-big-btn'));
-        btn = all.find(b =>
-            b.textContent.toLowerCase().includes('incoming') ||
-            b.textContent.includes('📦 Orders'));
-    }
-    if (btn) {
-        btn.id = 'incOrdersBtn';
-        if (!btn.querySelector('#incOrdersBadge')) {
-            const badge = document.createElement('span');
-            badge.id            = 'incOrdersBadge';
-            badge.className     = 'inc-badge';
-            badge.style.display = 'none';
-            badge.textContent   = '0';
-            btn.style.position  = 'relative';
-            btn.prepend(badge);
-        }
-    } else {
-        btn           = document.createElement('button');
-        btn.id        = 'incOrdersBtn';
-        btn.className = 'menu-big-btn';
-        btn.innerHTML = `
-            <span id="incOrdersBadge" class="inc-badge" style="display:none;">0</span>
-            <span class="icon">📦</span>
-            <span class="title">Incoming Orders</span>`;
-        const homeGrid = document.querySelector('.home-grid');
-        if (homeGrid) homeGrid.appendChild(btn);
-    }
+        return card;
+    });
 
-    // ── Drawer + overlay ──
-    if (!document.getElementById('incomingOrdersDrawer')) {
-        document.body.insertAdjacentHTML('beforeend', `
-        <div id="incOrdersOverlay" class="inc-overlay"></div>
-        <div id="incomingOrdersDrawer" class="inc-drawer">
-            <div class="inc-drawer-header">
-                <h3 style="margin:0;color:#f9fafb;font-size:1.1rem;">📦 Incoming Orders</h3>
-                <button id="incOrdersClose">✕</button>
-            </div>
-            <div class="inc-drawer-body" id="incOrdersList"></div>
-        </div>`);
-    }
+    // Append all cards once async work is done
+    Promise.all(renders).then(cards => {
+        drawerList.innerHTML = '';
+        cards.forEach(c => drawerList.appendChild(c));
+    });
 }
 
-// ── WIRE EVENTS ──────────────────────────────────────────────
-function wireEvents() {
-    window._incOpenDrawer  = openDrawer;
-    window._incCloseDrawer = closeDrawer;
+// ── Firestore listener ────────────────────────────────────────────────────────
+function startListening() {
+    const q = query(
+        collection(db, 'pending_table_orders'),
+        orderBy('createdAt', 'desc')
+    );
 
-    // Re-attach after injectHTML (elements may not exist at module load)
-    const attach = () => {
-        const btn     = document.getElementById('incOrdersBtn');
-        const overlay = document.getElementById('incOrdersOverlay');
-        const close   = document.getElementById('incOrdersClose');
-        if (btn && !btn._incWired) {
-            btn.addEventListener('click', openDrawer);
-            btn._incWired = true;
-        }
-        if (overlay) overlay.addEventListener('click', closeDrawer);
-        if (close)   close.addEventListener('click', closeDrawer);
-    };
-    attach();
-    // Also attach after a tick in case injectHTML ran after wireEvents
-    setTimeout(attach, 100);
+    onSnapshot(q, (snapshot) => {
+        const pending = [];
+
+        snapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            // Only show pending orders (not yet accepted/dismissed)
+            if (data.status !== 'pending') return;
+
+            const order = { id: docSnap.id, ...data };
+            pending.push(order);
+
+            // Toast only for truly new orders we haven't seen yet
+            if (!_notified.has(docSnap.id)) {
+                _notified.add(docSnap.id);
+                const itemCount = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
+                showToast(data.tableId || 'Unknown Table', itemCount || 1);
+            }
+        });
+
+        _pendingOrders = pending;
+        setBadge(pending.length);
+        renderDrawer(pending);
+    }, (err) => {
+        console.error('incoming-orders listener error:', err);
+    });
 }
 
-// ── STYLES ───────────────────────────────────────────────────
-function injectStyles() {
-    const style = document.createElement('style');
-    style.textContent = `
-    /* ── Incoming Orders button ── */
-    #incOrdersBtn {
-        position: relative;
-        background: linear-gradient(135deg, #b91c1c, #ef4444) !important;
-        /* ✅ Never pointer-events:none — always touchable */
+// ── Wire up button & overlay ──────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    if (btnOrders) {
+        // Make btn position:relative so the badge positions correctly
+        btnOrders.style.position = 'relative';
+        btnOrders.addEventListener('click', openDrawer);
     }
-    #incOrdersBtn.has-orders {
-        animation: incPulse 2s ease-in-out infinite;
-    }
-    @keyframes incPulse {
-        0%, 100% { box-shadow: 0 0 0 0   rgba(239,68,68,0.55); }
-        50%       { box-shadow: 0 0 0 14px rgba(239,68,68,0);   }
-    }
+    if (overlay) overlay.addEventListener('click', closeDrawer);
 
-    /* ── Badge ── */
-    .inc-badge {
-        position: absolute;
-        top: -8px; right: -8px;
-        background: #fbbf24;
-        color: #000;
-        font-weight: 900;
-        font-size: 0.78rem;
-        min-width: 22px; height: 22px;
-        border-radius: 11px;
-        display: flex; align-items: center; justify-content: center;
-        padding: 0 5px;
-        z-index: 10;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.35);
-    }
-
-    /* ── Overlay ── */
-    .inc-overlay {
-        display: none;
-        position: fixed; inset: 0;
-        background: rgba(0,0,0,0.65);
-        z-index: 8000;
-        backdrop-filter: blur(3px);
-    }
-    .inc-overlay.open { display: block; }
-
-    /* ── Drawer ── */
-    .inc-drawer {
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
-        background: #1f2937;
-        border-radius: 20px 20px 0 0;
-        z-index: 8001;
-        max-height: 85dvh;
-        display: flex;
-        flex-direction: column;
-        transform: translateY(100%);
-        transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
-        box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
-    }
-    .inc-drawer.open { transform: translateY(0); }
-
-    .inc-drawer-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 16px 20px 14px;
-        border-bottom: 1px solid #374151;
-        flex-shrink: 0;
-    }
-    #incOrdersClose {
-        background: #374151; border: none;
-        color: #9ca3af; width: 32px; height: 32px;
-        border-radius: 50%; font-size: 1rem;
-        cursor: pointer; display: flex;
-        align-items: center; justify-content: center;
-    }
-    #incOrdersClose:hover { background: #ef4444; color: #fff; }
-
-    .inc-drawer-body {
-        overflow-y: auto; flex: 1;
-        padding: 14px 16px 32px;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    /* ── Order card ── */
-    .inc-order-card {
-        background: #111827;
-        border: 1px solid #374151;
-        border-radius: 14px;
-        padding: 14px;
-        margin-bottom: 12px;
-    }
-    .inc-order-top {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        margin-bottom: 10px;
-        gap: 10px;
-    }
-    .inc-order-left  { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-    .inc-table-tag   { font-size: 0.78rem; font-weight: 800; color: #60a5fa; text-transform: uppercase; letter-spacing: 0.6px; }
-    .inc-customer    { display: flex; flex-direction: column; gap: 2px; font-size: 0.88rem; color: #d1d5db; }
-    .inc-order-right { text-align: right; flex-shrink: 0; }
-    .inc-total       { font-size: 1.2rem; font-weight: 900; color: #34d399; }
-    .inc-time        { font-size: 0.78rem; color: #6b7280; margin-top: 2px; }
-
-    .inc-items {
-        list-style: none; padding: 8px 0; margin: 0 0 12px;
-        border-top: 1px solid #374151; border-bottom: 1px solid #374151;
-    }
-    .inc-items li {
-        display: flex; justify-content: space-between;
-        font-size: 0.88rem; color: #d1d5db; padding: 4px 0;
-    }
-
-    .inc-actions { display: flex; gap: 10px; }
-    .inc-btn {
-        flex: 1; padding: 12px 8px;
-        border: none; border-radius: 10px;
-        font-weight: 800; font-size: 0.92rem; cursor: pointer;
-        transition: opacity 0.15s, transform 0.1s;
-    }
-    .inc-btn:active  { transform: scale(0.96); opacity: 0.85; }
-    .inc-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-    .inc-reject { background: transparent; color: #ef4444; border: 1.5px solid #ef4444; }
-    .inc-accept { background: #059669; color: #fff; }
-    `;
-    document.head.appendChild(style);
-}
+    startListening();
+});

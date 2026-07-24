@@ -218,11 +218,16 @@
 </div>
 
 <script type="module" src="../js/admin.js?v=20"></script>
+
+<!-- ── SMART AI MANAGER ── -->
+<button id="aiManagerFab" title="Smart AI Manager" aria-label="Open AI Manager">🤖</button>
+
+<script type="module" src="../js/ai-manager.js"></script>
 <script>
 (function () {
     // ── Service Worker ──
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' })
+        navigator.serviceWorker.register('./sw.js')
             .catch(err => console.warn('SW reg failed:', err));
     }
 

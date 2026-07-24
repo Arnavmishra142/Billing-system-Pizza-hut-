@@ -3,356 +3,466 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Order Details</title>
+    <title>Order Details – New Pizza Hut & Live Cake</title>
     <style>
-        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', system-ui, sans-serif;
-            background: #0d1117;
-            color: #e6edf3;
-            min-height: 100dvh;
-            padding-bottom: 100px;
+        /* ── Theme init (dark default, same as main app) ── */
+        :root {
+            --bg: #0b0c10;
+            --surface: #101218;
+            --card: #171921;
+            --border: #262a35;
+            --text: #e3e6eb;
+            --muted: #9199a8;
+            --accent: #f59e0b;
+            --blue: #0ea5e9;
+            --red: #ef4444;
+            --green: #10b981;
+        }
+        .light-mode {
+            --bg: #f1f5f9;
+            --surface: #ffffff;
+            --card: #ffffff;
+            --border: #e2e8f0;
+            --text: #1e293b;
+            --muted: #64748b;
         }
 
-        /* ── TOP BAR ── */
-        .top-bar {
-            position: sticky; top: 0;
-            background: #161b22;
-            border-bottom: 1px solid #30363d;
-            padding: 14px 16px;
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ── Header ── */
+        .page-header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 14px 18px;
             display: flex;
             align-items: center;
             gap: 12px;
-            z-index: 10;
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
         .back-btn {
-            background: #21262d;
-            border: 1px solid #30363d;
-            color: #e6edf3;
-            padding: 9px 16px;
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 7px 14px;
             border-radius: 8px;
-            font-weight: 700;
-            font-size: 0.9rem;
             cursor: pointer;
-            white-space: nowrap;
+            font-size: 0.95rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.15s;
         }
-        .back-btn:active { opacity: 0.7; }
-        .top-title {
-            font-size: 1rem;
-            font-weight: 800;
-            color: #e6edf3;
+        .back-btn:hover { background: var(--border); }
+        .header-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            flex: 1;
+        }
+        .theme-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text);
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* ── Content ── */
+        .page-content {
+            flex: 1;
+            padding: 20px 16px;
+            max-width: 520px;
+            width: 100%;
+            margin: 0 auto;
+        }
+
+        /* ── Bill receipt card ── */
+        .receipt-card {
+            background: var(--card);
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            border-top: 4px solid var(--accent);
             overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        /* ── CONTENT ── */
-        .content { padding: 16px; max-width: 560px; margin: 0 auto; }
-
-        /* ── ORDER HEADER CARD ── */
-        .order-header {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 16px;
-            padding: 20px;
             margin-bottom: 16px;
         }
-        .order-id {
-            font-size: 1.4rem;
-            font-weight: 900;
-            color: #58a6ff;
-            margin-bottom: 6px;
-            word-break: break-all;
+
+        .receipt-header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px dashed var(--border);
         }
-        .order-meta {
+        .shop-name {
+            font-size: 1.3rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--accent);
+        }
+        .shop-sub {
+            font-size: 0.82rem;
+            color: var(--muted);
+            margin-top: 3px;
+        }
+
+        .receipt-meta {
+            padding: 14px 20px;
+            border-bottom: 1px dashed var(--border);
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 6px;
         }
-        .order-meta span {
+        .meta-row {
+            display: flex;
+            justify-content: space-between;
             font-size: 0.88rem;
-            color: #8b949e;
         }
-        .order-meta strong { color: #e6edf3; }
+        .meta-row .label { color: var(--muted); }
+        .meta-row .value { font-weight: 600; color: var(--text); text-align: right; max-width: 65%; }
 
-        /* ── ITEMS TABLE ── */
-        .items-section {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 16px;
-            overflow: hidden;
-            margin-bottom: 16px;
-        }
-        .section-label {
+        /* ── Items table ── */
+        .items-section { padding: 14px 20px; }
+        .items-heading {
             font-size: 0.78rem;
-            font-weight: 800;
-            color: #8b949e;
+            font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.8px;
-            padding: 12px 16px 8px;
-            border-bottom: 1px solid #21262d;
+            color: var(--muted);
+            margin-bottom: 10px;
         }
         .item-row {
-            display: flex;
+            display: grid;
+            grid-template-columns: 1fr 48px 70px;
+            gap: 4px;
+            padding: 9px 0;
+            border-bottom: 1px solid var(--border);
             align-items: center;
-            justify-content: space-between;
-            padding: 12px 16px;
-            border-bottom: 1px solid #21262d;
-            gap: 10px;
         }
         .item-row:last-child { border-bottom: none; }
-        .item-name {
-            font-size: 0.97rem;
-            font-weight: 700;
-            color: #e6edf3;
-            flex: 1;
-            min-width: 0;
-        }
+        .item-name { font-size: 0.93rem; font-weight: 600; }
         .item-qty {
-            font-size: 0.88rem;
+            font-size: 0.85rem;
+            color: var(--muted);
+            text-align: center;
+            background: var(--bg);
+            border-radius: 5px;
+            padding: 3px 0;
+        }
+        .item-amt {
+            font-size: 0.93rem;
             font-weight: 700;
-            color: #58a6ff;
-            flex-shrink: 0;
-        }
-        .item-price {
-            font-size: 0.88rem;
-            color: #8b949e;
-            flex-shrink: 0;
-        }
-        .item-total {
-            font-size: 0.97rem;
-            font-weight: 800;
-            color: #3fb950;
-            flex-shrink: 0;
-            min-width: 64px;
             text-align: right;
+            color: var(--green);
         }
+        .col-headers {
+            display: grid;
+            grid-template-columns: 1fr 48px 70px;
+            gap: 4px;
+            padding-bottom: 6px;
+            border-bottom: 2px solid var(--border);
+            margin-bottom: 4px;
+        }
+        .col-headers span {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--muted);
+        }
+        .col-headers span:nth-child(2) { text-align: center; }
+        .col-headers span:nth-child(3) { text-align: right; }
 
-        /* ── TOTALS ── */
-        .totals-section {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 16px;
-            padding: 16px;
-            margin-bottom: 20px;
-        }
-        .total-row {
+        /* ── Total ── */
+        .total-section {
+            padding: 14px 20px;
+            background: var(--surface);
+            border-top: 1px dashed var(--border);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 6px 0;
         }
-        .total-row.grand {
-            border-top: 1px solid #30363d;
-            margin-top: 8px;
-            padding-top: 12px;
-        }
-        .total-row.grand .total-label { font-size: 1rem; font-weight: 800; color: #e6edf3; }
-        .total-row.grand .total-val   { font-size: 1.4rem; font-weight: 900; color: #3fb950; }
-        .total-label { font-size: 0.9rem; color: #8b949e; }
-        .total-val   { font-size: 0.97rem; font-weight: 700; color: #e6edf3; }
+        .total-label { font-size: 1rem; font-weight: 700; color: var(--muted); }
+        .total-amount { font-size: 1.4rem; font-weight: 900; color: var(--accent); }
 
-        /* ── BOTTOM ACTIONS ── */
-        .actions {
-            position: fixed;
-            bottom: 0; left: 0; right: 0;
-            background: #161b22;
-            border-top: 1px solid #30363d;
-            padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+        /* ── UPI block ── */
+        .upi-section {
+            padding: 12px 20px;
+            text-align: center;
+            border-top: 1px dashed var(--border);
+            background: var(--surface);
+        }
+        .upi-label { font-size: 0.78rem; color: var(--muted); margin-bottom: 2px; }
+        .upi-id { font-size: 1rem; font-weight: 700; color: var(--blue); letter-spacing: 0.5px; }
+        .upi-hint { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+
+        /* ── Action buttons ── */
+        .action-row {
             display: flex;
             gap: 10px;
+            margin-bottom: 30px;
         }
-        .btn {
+        .btn-print {
             flex: 1;
-            padding: 14px;
+            background: var(--blue);
+            color: #fff;
             border: none;
-            border-radius: 12px;
-            font-weight: 800;
+            padding: 14px;
+            border-radius: 10px;
             font-size: 1rem;
+            font-weight: 700;
             cursor: pointer;
-            transition: all 0.15s;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
+            transition: opacity 0.15s;
         }
-        .btn:active { transform: scale(0.96); }
-        .btn-print { background: #1f6feb; color: #fff; }
-        .btn-print:hover { background: #388bfd; }
+        .btn-print:active { opacity: 0.8; }
+        .btn-back-home {
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 14px 20px;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .btn-back-home:hover { background: var(--border); }
 
-        /* ── NOT FOUND ── */
-        .not-found {
+        /* ── Error state ── */
+        .error-box {
             text-align: center;
-            padding: 80px 24px;
-            color: #8b949e;
+            padding: 50px 20px;
         }
-        .not-found .icon { font-size: 3rem; margin-bottom: 16px; }
-        .not-found h2 { font-size: 1.2rem; color: #e6edf3; margin-bottom: 8px; }
-        .not-found p { font-size: 0.9rem; }
+        .error-box .icon { font-size: 3rem; margin-bottom: 12px; }
+        .error-box h2 { font-size: 1.2rem; margin-bottom: 8px; }
+        .error-box p { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; }
+        .btn-go-home {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+
+        /* ── Thank you footer ── */
+        .thankyou {
+            text-align: center;
+            padding: 8px;
+            font-size: 0.8rem;
+            color: var(--muted);
+            font-style: italic;
+        }
     </style>
+    <script>
+        // Apply saved theme immediately (same logic as main app)
+        (function() {
+            try {
+                if (localStorage.getItem('posTheme') === 'light') {
+                    document.documentElement.classList.add('light-mode');
+                }
+            } catch(e) {}
+        })();
+    </script>
 </head>
 <body>
 
-<div class="top-bar">
-    <button class="back-btn" onclick="history.back()">⬅ Back</button>
-    <span class="top-title" id="topTitle">Order Details</span>
-</div>
+<header class="page-header">
+    <button class="back-btn" onclick="history.back()">← Back</button>
+    <span class="header-title">Order Details</span>
+    <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle theme">☀️</button>
+</header>
 
-<div class="content" id="mainContent">
-    <div class="not-found">
-        <div class="icon">⏳</div>
-        <h2>Loading…</h2>
-    </div>
-</div>
-
-<div class="actions" id="actionsBar" style="display:none;">
-    <button class="btn btn-print" id="reprintBtn">🖨️ Reprint Bill</button>
-</div>
+<main class="page-content" id="pageContent">
+    <!-- Rendered by JS below -->
+</main>
 
 <script>
-(function () {
-    const params  = new URLSearchParams(window.location.search);
-    const billId  = params.get('id');
-    const content = document.getElementById('mainContent');
-    const actions = document.getElementById('actionsBar');
-    const topTitle = document.getElementById('topTitle');
+    // ── Theme toggle ──
+    function toggleTheme() {
+        const isLight = document.documentElement.classList.toggle('light-mode');
+        document.getElementById('themeBtn').textContent = isLight ? '🌙' : '☀️';
+        try { localStorage.setItem('posTheme', isLight ? 'light' : 'dark'); } catch(e) {}
+    }
+    // Set correct icon on load
+    document.getElementById('themeBtn').textContent =
+        document.documentElement.classList.contains('light-mode') ? '🌙' : '☀️';
 
-    // ── Load from localStorage ──────────────────────────────
-    function getHistory() {
-        try {
-            const raw = localStorage.getItem('pos_24h_history');
-            return raw ? JSON.parse(raw) : [];
-        } catch(e) { return []; }
+    // ── Read bill from localStorage ──
+    function getGhostHistory() {
+        try { return JSON.parse(localStorage.getItem('pos_24h_history') || '[]'); } catch(e) { return []; }
     }
 
-    const history = getHistory();
-    const bill    = history.find(b => b.id === billId);
-
-    if (!bill) {
-        content.innerHTML = `
-            <div class="not-found">
-                <div class="icon">🔍</div>
-                <h2>Bill Not Found</h2>
-                <p>This bill may have expired (24h limit) or the ID is invalid.</p>
-            </div>`;
-        return;
+    function getBillId() {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('id');
     }
 
-    topTitle.textContent = `Order: ${bill.id}`;
+    // ── Print bill (same rawbt logic as reprintGhostBill in index.html) ──
+    function printBill(bill) {
+        if (!Array.isArray(bill.items) || bill.items.length === 0) {
+            alert("Is bill ke items save nahi hue the, print nahi ho sakta.");
+            return;
+        }
+        const centerText = (text) => {
+            if (text.length >= 32) return text.substring(0, 32);
+            const spaces = Math.floor((32 - text.length) / 2);
+            return " ".repeat(spaces) + text;
+        };
+        const rightText = (text) => {
+            if (text.length >= 32) return text.substring(0, 32);
+            const spaces = 32 - text.length;
+            return " ".repeat(spaces) + text;
+        };
 
-    // ── Summary numbers ──────────────────────────────────────
-    const items    = Array.isArray(bill.items) ? bill.items : [];
-    const totalQty = items.reduce((s, i) => s + (i.qty || 0), 0);
-    const total    = Number(bill.total) || 0;
+        let billText = "\n";
+        billText += centerText("NEW PIZZA HUT") + "\n";
+        billText += centerText("Live Cake | Salempur") + "\n";
+        billText += "--------------------------------\n";
+        billText += `Order: ${bill.id}\n`;
+        billText += `Date: ${bill.timeStr}\n`;
+        billText += "--------------------------------\n";
+        billText += "Item                Qty      Amt\n";
+        billText += "--------------------------------\n";
 
-    // ── Render ───────────────────────────────────────────────
-    content.innerHTML = `
-        <div class="order-header">
-            <div class="order-id">${esc(bill.id)}</div>
-            <div class="order-meta">
-                <span>🕒 <strong>${esc(bill.timeStr || '—')}</strong></span>
-                <span>🧾 ${items.length} item type${items.length !== 1 ? 's' : ''} · ${totalQty} total qty</span>
-            </div>
-        </div>
+        bill.items.forEach(item => {
+            let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
+            let q = String(item.qty).padStart(2, " ") + "x";
+            let a = String(item.price * item.qty).padStart(6, " ");
+            billText += `${n}    ${q}   ${a}\n`;
+        });
 
-        <div class="items-section">
-            <div class="section-label">Items Ordered</div>
-            ${items.length === 0
-                ? `<div style="padding:20px;text-align:center;color:#8b949e;font-size:0.9rem;">No item details saved for this bill.</div>`
-                : items.map(item => {
-                    const lineTotal = (Number(item.price) || 0) * (item.qty || 0);
-                    return `
-                    <div class="item-row">
-                        <span class="item-name">${esc(item.name)}</span>
-                        <span class="item-qty">×${item.qty || 0}</span>
-                        <span class="item-price">₹${Number(item.price || 0).toFixed(0)}</span>
-                        <span class="item-total">₹${lineTotal.toFixed(0)}</span>
-                    </div>`;
-                }).join('')}
-        </div>
+        billText += "--------------------------------\n";
+        billText += rightText(`TOTAL: Rs ${bill.total}`) + "\n";
+        billText += "--------------------------------\n";
+        billText += centerText("Thank You! Visit Again") + "\n\n";
+        billText += centerText("--- UPI PAYMENT ---") + "\n";
+        billText += centerText("6393349498@fam") + "\n";
+        billText += centerText("(Pay via PhonePe/GPay)") + "\n";
+        billText += "\n\n\n\n";
 
-        <div class="totals-section">
-            <div class="total-row">
-                <span class="total-label">Items</span>
-                <span class="total-val">${items.length}</span>
-            </div>
-            <div class="total-row">
-                <span class="total-label">Total Qty</span>
-                <span class="total-val">${totalQty}</span>
-            </div>
-            <div class="total-row grand">
-                <span class="total-label">Grand Total</span>
-                <span class="total-val">₹${total.toFixed(0)}</span>
-            </div>
-        </div>
-    `;
+        window.location.href = "rawbt:" + encodeURIComponent(billText);
+    }
 
-    actions.style.display = 'flex';
+    // ── Render ──
+    function render() {
+        const content = document.getElementById('pageContent');
+        const billId = getBillId();
 
-    // ── Reprint via RawBT ────────────────────────────────────
-    document.getElementById('reprintBtn').addEventListener('click', () => {
-        if (!items.length) {
-            alert('No item details saved for this bill — cannot reprint.');
+        if (!billId) {
+            content.innerHTML = `
+                <div class="error-box">
+                    <div class="icon">🔍</div>
+                    <h2>Bill ID nahi mila</h2>
+                    <p>URL mein valid bill ID honi chahiye.</p>
+                    <button class="btn-go-home" onclick="window.location.href='index.html'">🏠 Home Par Jao</button>
+                </div>`;
             return;
         }
 
-        const center = (text) => {
-            if (text.length >= 32) return text.substring(0, 32);
-            const sp = Math.floor((32 - text.length) / 2);
-            return ' '.repeat(sp) + text;
-        };
-        const right = (text) => {
-            if (text.length >= 32) return text.substring(0, 32);
-            return ' '.repeat(32 - text.length) + text;
-        };
+        const history = getGhostHistory();
+        const bill = history.find(b => b.id === billId);
 
-        const BOLD_ON  = '\x1B\x45\x01';
-        const BOLD_OFF = '\x1B\x45\x00';
+        if (!bill) {
+            content.innerHTML = `
+                <div class="error-box">
+                    <div class="icon">⏰</div>
+                    <h2>Bill Nahi Mila</h2>
+                    <p>Yeh bill expire ho gaya ya delete ho gaya. Recent bills sirf 24 ghante tak rehte hain.</p>
+                    <button class="btn-go-home" onclick="window.location.href='index.html'">🏠 Home Par Jao</button>
+                </div>`;
+            return;
+        }
 
-        let t = BOLD_ON;
-        t += center('NEW PIZZA HUT AND LIVE CAKE') + '\n';
-        t += center('in front of SBI bank ke tik') + '\n';
-        t += center('samne salempur Deoria, UP')   + '\n';
-        t += center('FSSAI: 30230324113093042')     + '\n';
-        t += center('Phone: 9628548655')            + '\n\n';
-        t += `Order: ${bill.id}\n`;
-        t += `Date : ${bill.timeStr || '—'}\n`;
-        t += '--------------------------------\n';
-        t += 'Item                Qty      Amt\n';
-        t += '--------------------------------\n';
+        const hasItems = Array.isArray(bill.items) && bill.items.length > 0;
 
-        items.forEach(item => {
-            const n = item.name.length > 16
-                ? item.name.substring(0, 14) + '..'
-                : item.name.padEnd(16, ' ');
-            const q = String(item.qty || 0).padStart(2, ' ') + 'x';
-            const a = String(Math.round((item.price || 0) * (item.qty || 0))).padStart(6, ' ');
-            t += `${n}    ${q}   ${a}\n`;
-        });
+        const itemsHTML = hasItems ? `
+            <div class="items-section">
+                <div class="items-heading">Items Ordered</div>
+                <div class="col-headers">
+                    <span>Item</span>
+                    <span>Qty</span>
+                    <span>Amount</span>
+                </div>
+                ${bill.items.map(item => `
+                    <div class="item-row">
+                        <span class="item-name">${item.name}</span>
+                        <span class="item-qty">${item.qty}x</span>
+                        <span class="item-amt">₹${item.price * item.qty}</span>
+                    </div>
+                `).join('')}
+            </div>
+        ` : `
+            <div class="items-section" style="text-align:center; padding: 20px; color: var(--muted); font-size: 0.9rem;">
+                ⚠️ Items ka data save nahi tha
+            </div>
+        `;
 
-        t += '--------------------------------\n';
-        t += right(`TOTAL: Rs ${Math.round(total)}`) + '\n';
-        t += '--------------------------------\n';
-        t += center('Thank You! Visit Again!') + '\n\n';
-        t += center('--- UPI PAYMENT ---')      + '\n';
-        t += center('6393349498@fam')            + '\n';
-        t += center('(Pay via PhonePe/GPay)')    + '\n';
-        t += '\n\n\n\n' + BOLD_OFF;
+        content.innerHTML = `
+            <div class="receipt-card">
+                <div class="receipt-header">
+                    <div class="shop-name">🍕 New Pizza Hut</div>
+                    <div class="shop-sub">Live Cake | Salempur</div>
+                </div>
 
-        window.location.href = 'rawbt:' + encodeURIComponent(t);
-    });
+                <div class="receipt-meta">
+                    <div class="meta-row">
+                        <span class="label">Order No.</span>
+                        <span class="value">${bill.id}</span>
+                    </div>
+                    <div class="meta-row">
+                        <span class="label">Time</span>
+                        <span class="value">${bill.timeStr}</span>
+                    </div>
+                </div>
 
-    function esc(s) {
-        return String(s || '')
-            .replace(/&/g,'&amp;')
-            .replace(/</g,'&lt;')
-            .replace(/>/g,'&gt;');
+                ${itemsHTML}
+
+                <div class="total-section">
+                    <span class="total-label">TOTAL</span>
+                    <span class="total-amount">₹${bill.total}</span>
+                </div>
+
+                <div class="upi-section">
+                    <div class="upi-label">— UPI Payment —</div>
+                    <div class="upi-id">6393349498@fam</div>
+                    <div class="upi-hint">Pay via PhonePe / GPay</div>
+                </div>
+
+                <div class="thankyou">Thank You! Visit Again 🙏</div>
+            </div>
+
+            <div class="action-row">
+                ${hasItems ? `<button class="btn-print" onclick="printBill(currentBill)">🖨️ Print Bill</button>` : ''}
+                <button class="btn-back-home" onclick="history.back()">← Back</button>
+            </div>
+        `;
+
+        // Make bill accessible to printBill()
+        window.currentBill = bill;
     }
-})();
 
-function esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+    render();
 </script>
 
 </body>

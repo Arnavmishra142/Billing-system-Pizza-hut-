@@ -30,12 +30,43 @@ function processSnapshot(querySnapshot) {
         }
     });
 
+    // Pre-compute minimum price per pizza group (= Regular price)
+    // so we can sort pizza items by Regular price, not alphabetically.
+    const pizzaGroupMin = {};
+    items.forEach(item => {
+        if ((item.category || '').toLowerCase() === 'pizza') {
+            const base = MENU_SORT_BASE(item.name);
+            const price = Number(item.price) || 0;
+            if (!(base in pizzaGroupMin) || price < pizzaGroupMin[base]) {
+                pizzaGroupMin[base] = price;
+            }
+        }
+    });
+
     items.sort((a, b) => {
+        const isPizzaA = (a.category || '').toLowerCase() === 'pizza';
+        const isPizzaB = (b.category || '').toLowerCase() === 'pizza';
         const baseA = MENU_SORT_BASE(a.name);
         const baseB = MENU_SORT_BASE(b.name);
-        if (baseA < baseB) return -1;
-        if (baseA > baseB) return 1;
-        return (Number(a.price) || 0) - (Number(b.price) || 0);
+
+        // Both pizza → sort by group Regular price, then within group by price
+        if (isPizzaA && isPizzaB) {
+            const minA = pizzaGroupMin[baseA] || 0;
+            const minB = pizzaGroupMin[baseB] || 0;
+            if (minA !== minB) return minA - minB;
+            if (baseA !== baseB) return baseA.localeCompare(baseB);
+            return (Number(a.price) || 0) - (Number(b.price) || 0);
+        }
+
+        // Both non-pizza → alphabetical
+        if (!isPizzaA && !isPizzaB) {
+            if (baseA < baseB) return -1;
+            if (baseA > baseB) return 1;
+            return (Number(a.price) || 0) - (Number(b.price) || 0);
+        }
+
+        // Mixed → keep category alphabetical order
+        return (a.category || '').toLowerCase().localeCompare((b.category || '').toLowerCase());
     });
 
     const cats = Array.from(catSet).sort((a, b) => {

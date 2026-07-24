@@ -1,7 +1,7 @@
 import { db, storage } from './firebase-config.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
-    getDocsFromCache, getDocsFromServer
+    getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
 
@@ -247,31 +247,39 @@ let selectedImageFile = null;
 let currentEditId     = null;
 let allMenuItems      = [];
 
-window.loadMenuData = async function() {
+let _menuUnsub = null;
+
+window.loadMenuData = function() {
     const grid = document.getElementById('menuCardGrid');
     grid.innerHTML = '<div class="loading-state">Loading menu... ☁️</div>';
 
-    try {
-        // Cache-first
-        let snap;
-        try { snap = await getDocsFromCache(collection(db, "menu_items")); } catch(e) {}
-        if (!snap || snap.empty) snap = await getDocsFromServer(collection(db, "menu_items"));
+    // Cancel previous listener before starting fresh
+    if (_menuUnsub) { _menuUnsub(); _menuUnsub = null; }
 
-        allMenuItems = [];
-        snap.forEach(d => allMenuItems.push({ ...d.data(), id: d.id }));
-
-        allMenuItems.sort((a, b) => {
-            const ca = (a.category || '').toUpperCase(), cb = (b.category || '').toUpperCase();
-            if (ca < cb) return -1; if (ca > cb) return 1;
-            const na = (a.name || '').toUpperCase(), nb = (b.name || '').toUpperCase();
-            return na < nb ? -1 : na > nb ? 1 : 0;
-        });
-
-        renderMenuCards();
-    } catch (e) {
-        console.error(e);
-        grid.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load menu. Check internet.</div>';
-    }
+    // Wake network then attach live listener — fires from cache instantly,
+    // then again from server automatically (handles PWA reconnection)
+    enableNetwork(db).catch(() => {}).finally(() => {
+        _menuUnsub = onSnapshot(
+            collection(db, "menu_items"),
+            (snap) => {
+                allMenuItems = [];
+                snap.forEach(d => allMenuItems.push({ ...d.data(), id: d.id }));
+                allMenuItems.sort((a, b) => {
+                    const ca = (a.category || '').toUpperCase(), cb = (b.category || '').toUpperCase();
+                    if (ca < cb) return -1; if (ca > cb) return 1;
+                    const na = (a.name || '').toUpperCase(), nb = (b.name || '').toUpperCase();
+                    return na < nb ? -1 : na > nb ? 1 : 0;
+                });
+                renderMenuCards();
+            },
+            (err) => {
+                console.error("Menu listener error:", err);
+                if (grid.innerHTML.includes('Loading')) {
+                    grid.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load menu. Check internet.</div>';
+                }
+            }
+        );
+    });
 };
 
 function renderMenuCards() {
@@ -439,7 +447,10 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
 // ==========================================
 // EXPENSES
 // ==========================================
-window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
+// Holds the active expense listener so we can cancel it before starting a new one
+let _expenseUnsub = null;
+
+window.loadAdminExpenses = function(filterType, filterValue, btnContext) {
     if (btnContext) {
         document.querySelectorAll('#expenseSection .filter-pill').forEach(b => b.classList.remove('active'));
         btnContext.classList.add('active');
@@ -447,56 +458,61 @@ window.loadAdminExpenses = async function(filterType, filterValue, btnContext) {
 
     const listEl = document.getElementById('expenseCardList');
     listEl.innerHTML = '<div class="loading-state">Loading... ☁️</div>';
+    document.getElementById('totalExpenseBox').textContent = '₹0';
 
-    try {
-        let snap;
-        try { snap = await getDocsFromCache(collection(db, "daily_expenses")); } catch(e) {}
-        if (!snap || snap.empty) snap = await getDocsFromServer(collection(db, "daily_expenses"));
+    // Cancel any previous listener before starting a fresh one
+    if (_expenseUnsub) { _expenseUnsub(); _expenseUnsub = null; }
 
-        const now = new Date();
-        let filtered = [];
-
-        snap.forEach(d => {
-            const exp     = { ...d.data(), id: d.id };
-            const expDate = new Date(exp.timestamp);
-            const diff    = Math.ceil(Math.abs(now - expDate) / 864e5);
-            if (filterType === 'days') {
-                if (filterValue === 1 && expDate.toDateString() === now.toDateString()) filtered.push(exp);
-                else if (filterValue !== 1 && diff <= filterValue) filtered.push(exp);
-            } else if (filterType === 'date') {
-                if (expDate.toDateString() === new Date(filterValue).toDateString()) filtered.push(exp);
+    // Wake Firestore network in case PWA suspended it, then attach live listener.
+    // onSnapshot fires immediately from IndexedDB cache, then again whenever
+    // the server sends fresh data — no manual refresh needed.
+    enableNetwork(db).catch(() => {}).finally(() => {
+        _expenseUnsub = onSnapshot(
+            collection(db, "daily_expenses"),
+            (snap) => {
+                const now = new Date();
+                let filtered = [];
+                snap.forEach(d => {
+                    const exp     = { ...d.data(), id: d.id };
+                    const expDate = new Date(exp.timestamp);
+                    const diff    = Math.ceil(Math.abs(now - expDate) / 864e5);
+                    if (filterType === 'days') {
+                        if (filterValue === 1 && expDate.toDateString() === now.toDateString()) filtered.push(exp);
+                        else if (filterValue !== 1 && diff <= filterValue) filtered.push(exp);
+                    } else if (filterType === 'date') {
+                        if (expDate.toDateString() === new Date(filterValue).toDateString()) filtered.push(exp);
+                    }
+                });
+                filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
+                document.getElementById('totalExpenseBox').textContent = `₹${total.toFixed(0)}`;
+                if (!filtered.length) {
+                    listEl.innerHTML = '<div class="empty-state">No expenses found. 🎉</div>';
+                    return;
+                }
+                listEl.innerHTML = filtered.map(exp => {
+                    const timeStr = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
+                    return `
+                    <div class="expense-card">
+                        <div class="exp-left">
+                            <div class="exp-note">${exp.note}</div>
+                            <div class="exp-time">${timeStr}</div>
+                        </div>
+                        <div class="exp-right">
+                            <div class="exp-amount">₹${exp.amount}</div>
+                            <button class="exp-del-btn" onclick="deleteExpense('${exp.id}')">🗑</button>
+                        </div>
+                    </div>`;
+                }).join('');
+            },
+            (err) => {
+                console.error("Expense listener error:", err);
+                if (listEl.innerHTML.includes('Loading')) {
+                    listEl.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load. Check internet.</div>';
+                }
             }
-        });
-
-        filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-        const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
-        document.getElementById('totalExpenseBox').textContent = `₹${total.toFixed(0)}`;
-
-        if (!filtered.length) {
-            listEl.innerHTML = '<div class="empty-state">No expenses found. 🎉</div>';
-            return;
-        }
-
-        listEl.innerHTML = filtered.map(exp => {
-            const timeStr = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
-            return `
-            <div class="expense-card">
-                <div class="exp-left">
-                    <div class="exp-note">${exp.note}</div>
-                    <div class="exp-time">${timeStr}</div>
-                </div>
-                <div class="exp-right">
-                    <div class="exp-amount">₹${exp.amount}</div>
-                    <button class="exp-del-btn" onclick="deleteExpense('${exp.id}')">🗑</button>
-                </div>
-            </div>`;
-        }).join('');
-
-    } catch (e) {
-        console.error(e);
-        listEl.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load. Check internet.</div>';
-    }
+        );
+    });
 };
 
 document.getElementById('expenseDateSearch').addEventListener('change', (e) => {
@@ -506,13 +522,14 @@ document.getElementById('expenseDateSearch').addEventListener('change', (e) => {
     }
 });
 
-document.getElementById('refreshExpenseBtn').addEventListener('click', async (e) => {
+document.getElementById('refreshExpenseBtn').addEventListener('click', (e) => {
     e.target.textContent = '⏳'; e.target.disabled = true;
-    const active    = document.querySelector('#expenseSection .filter-pill.active');
-    const dateVal   = document.getElementById('expenseDateSearch').value;
-    if (dateVal) await loadAdminExpenses('date', dateVal, null);
-    else await loadAdminExpenses('days', parseInt(active?.dataset.val || '1'), active);
-    e.target.textContent = '↻'; e.target.disabled = false;
+    const active  = document.querySelector('#expenseSection .filter-pill.active');
+    const dateVal = document.getElementById('expenseDateSearch').value;
+    if (dateVal) loadAdminExpenses('date', dateVal, null);
+    else loadAdminExpenses('days', parseInt(active?.dataset.val || '1'), active);
+    // Reset button after listener is set up (onSnapshot is not awaitable)
+    setTimeout(() => { e.target.textContent = '↻'; e.target.disabled = false; }, 1500);
 });
 
 window.deleteExpense = async function(id) {

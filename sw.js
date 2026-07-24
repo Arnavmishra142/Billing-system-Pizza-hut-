@@ -2,12 +2,13 @@
 //  POS Service Worker — Cache-first for static assets
 //  Version: 3 (bump this number whenever you deploy changes)
 // ============================================================
-const CACHE_NAME = 'pos-static-v3';
+const CACHE_NAME = 'pos-static-v5';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
     '/',
     '/index.html',
+    '/customer.html',
     '/css/style.css',
     '/js/firebase-config.js',
     '/js/menu.js',
@@ -70,6 +71,9 @@ self.addEventListener('fetch', (e) => {
 
     // 2. Non-GET requests (POST, etc.) — skip caching
     if (e.request.method !== 'GET') return;
+
+    // 3. Generated files that change on every build — always fetch from network
+    if (url.pathname.includes('groq-key.generated.js')) return;
 
     // 3. Static assets — cache-first, update cache in background
     e.respondWith(

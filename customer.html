@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Order Menu — New Pizza Hut & Live Cake</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+
+        body { background: #0b0c10; color: #e3e6eb; min-height: 100dvh; padding-bottom: 90px; }
+
+        /* ── HEADER ── */
+        .cust-header {
+            background: linear-gradient(135deg, #1a1d2e, #12151f);
+            padding: 16px 20px 12px;
+            border-bottom: 1px solid #1f2937;
+            position: sticky; top: 0; z-index: 100;
+        }
+        .cust-header h1 { font-size: 1.1rem; font-weight: 800; color: #f97316; letter-spacing: 0.5px; }
+        .cust-header .table-badge {
+            display: inline-block; margin-top: 4px;
+            background: #1f2937; color: #94a3b8;
+            font-size: 0.8rem; padding: 3px 10px; border-radius: 20px;
+        }
+        .cust-header .table-badge span { color: #38bdf8; font-weight: 700; }
+
+        /* ── CATEGORY TABS ── */
+        .cat-tabs {
+            display: flex; gap: 8px; padding: 12px 16px;
+            overflow-x: auto; background: #111318;
+            border-bottom: 1px solid #1f2937;
+            scrollbar-width: none; position: sticky; top: 68px; z-index: 99;
+        }
+        .cat-tabs::-webkit-scrollbar { display: none; }
+        .cat-tab {
+            flex-shrink: 0; padding: 6px 16px; border-radius: 20px;
+            border: 1.5px solid #374151; background: transparent;
+            color: #9ca3af; font-size: 0.85rem; font-weight: 600;
+            cursor: pointer; transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .cat-tab.active {
+            background: #f97316; border-color: #f97316;
+            color: white;
+        }
+
+        /* ── MENU ITEMS ── */
+        .menu-section { padding: 12px 16px; }
+        .section-title {
+            font-size: 0.75rem; font-weight: 700; color: #4b5563;
+            text-transform: uppercase; letter-spacing: 1px;
+            margin-bottom: 10px; padding-left: 2px;
+        }
+        .items-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+        .item-card {
+            display: flex; align-items: center; justify-content: space-between;
+            background: #13161f; border: 1px solid #1f2937;
+            border-radius: 12px; padding: 12px 14px;
+            transition: border-color 0.2s;
+        }
+        .item-card.in-cart { border-color: #f97316; }
+        .item-info { flex: 1; }
+        .item-name { font-size: 0.95rem; font-weight: 600; color: #e2e8f0; }
+        .item-price { font-size: 0.85rem; color: #10b981; font-weight: 700; margin-top: 2px; }
+
+        /* qty control */
+        .qty-ctrl { display: flex; align-items: center; gap: 8px; }
+        .qty-btn {
+            width: 32px; height: 32px; border-radius: 50%;
+            border: none; font-size: 1.2rem; font-weight: 700;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: all 0.15s;
+        }
+        .qty-minus { background: #1f2937; color: #e2e8f0; }
+        .qty-minus:active { background: #374151; }
+        .qty-plus  { background: #f97316; color: white; }
+        .qty-plus:active  { background: #ea580c; }
+        .qty-num { font-size: 1rem; font-weight: 700; min-width: 20px; text-align: center; color: #f1f5f9; }
+
+        /* ── BOTTOM CART BAR ── */
+        .cart-bar {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: #f97316; padding: 14px 20px;
+            display: flex; align-items: center; justify-content: space-between;
+            z-index: 200; transform: translateY(100%);
+            transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+            border-radius: 16px 16px 0 0;
+        }
+        .cart-bar.visible { transform: translateY(0); }
+        .cart-bar-info { color: white; }
+        .cart-bar-items { font-size: 0.8rem; opacity: 0.9; }
+        .cart-bar-total { font-size: 1.2rem; font-weight: 800; }
+        .cart-bar-btn {
+            background: white; color: #f97316;
+            border: none; border-radius: 10px;
+            padding: 10px 20px; font-size: 1rem; font-weight: 800;
+            cursor: pointer;
+        }
+        .cart-bar-btn:active { transform: scale(0.96); }
+
+        /* ── SUCCESS SCREEN ── */
+        #successScreen {
+            display: none; position: fixed; inset: 0;
+            background: #0b0c10; z-index: 1000;
+            flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; padding: 30px;
+        }
+        #successScreen.show { display: flex; }
+        .success-icon { font-size: 4rem; margin-bottom: 20px; animation: bounce 0.6s ease; }
+        @keyframes bounce { 0%{transform:scale(0)} 60%{transform:scale(1.2)} 100%{transform:scale(1)} }
+        .success-title { font-size: 1.6rem; font-weight: 800; color: #10b981; margin-bottom: 10px; }
+        .success-sub { color: #6b7280; font-size: 0.95rem; line-height: 1.6; }
+        .success-table { 
+            margin-top: 20px; background: #13161f;
+            border: 1px solid #1f2937; border-radius: 12px;
+            padding: 12px 20px; color: #38bdf8; font-weight: 700;
+        }
+        .order-again-btn {
+            margin-top: 30px; background: #f97316; color: white;
+            border: none; border-radius: 12px; padding: 14px 30px;
+            font-size: 1rem; font-weight: 700; cursor: pointer;
+        }
+
+        /* ── LOADING ── */
+        .loading { text-align: center; padding: 60px 20px; color: #4b5563; }
+        .loading-spinner {
+            width: 36px; height: 36px; border: 3px solid #1f2937;
+            border-top-color: #f97316; border-radius: 50%;
+            animation: spin 0.8s linear infinite; margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── EMPTY STATE ── */
+        .empty-menu { text-align: center; padding: 60px 20px; color: #4b5563; font-size: 0.95rem; }
+    </style>
+</head>
+<body>
+
+<div class="cust-header">
+    <h1>🍕 New Pizza Hut & Live Cake</h1>
+    <div class="table-badge">You are at: <span id="tableLabel">Loading…</span></div>
+</div>
+
+<div class="cat-tabs" id="catTabs"></div>
+
+<div id="menuContainer">
+    <div class="loading">
+        <div class="loading-spinner"></div>
+        Loading menu…
+    </div>
+</div>
+
+<!-- Cart Bottom Bar -->
+<div class="cart-bar" id="cartBar">
+    <div class="cart-bar-info">
+        <div class="cart-bar-items" id="cartBarItems">0 items</div>
+        <div class="cart-bar-total" id="cartBarTotal">₹0</div>
+    </div>
+    <button class="cart-bar-btn" id="placeOrderBtn">Place Order →</button>
+</div>
+
+<!-- Success Screen -->
+<div id="successScreen">
+    <div class="success-icon">✅</div>
+    <div class="success-title">Order Placed!</div>
+    <div class="success-sub">Your order has been sent to the kitchen.<br>Staff will prepare it shortly.</div>
+    <div class="success-table" id="successTableLabel"></div>
+    <button class="order-again-btn" onclick="location.reload()">Order More Items</button>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+import {
+    getFirestore,
+    collection, getDocs, addDoc, query, orderBy, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+// ── Firebase init ──────────────────────────────────────────
+const app = initializeApp({
+    apiKey: "AIzaSyBLzGd0DlItKShk0eJoQR4CjRx1sP3-o-w",
+    authDomain: "billing-system-f8531.firebaseapp.com",
+    projectId: "billing-system-f8531",
+    storageBucket: "billing-system-f8531.firebasestorage.app",
+    messagingSenderId: "921228841270",
+    appId: "1:921228841270:web:9013d59b3ef96dda40e397"
+});
+const db = getFirestore(app);
+
+// ── Table from URL ─────────────────────────────────────────
+const params   = new URLSearchParams(location.search);
+const rawTable = params.get('table');
+const tableName = rawTable ? decodeURIComponent(rawTable) : 'Unknown Table';
+document.getElementById('tableLabel').textContent = tableName;
+document.title = `Order — ${tableName}`;
+
+// ── State ──────────────────────────────────────────────────
+let cart = {};      // { itemId: qty }
+let menuMap = {};   // { itemId: {name, price, category} }
+let allCategories = [];
+
+// ── Fetch Menu ─────────────────────────────────────────────
+async function loadMenu() {
+    try {
+        const snap = await getDocs(query(collection(db, 'menu_items'), orderBy('category')));
+        const byCat = {};
+        snap.forEach(d => {
+            const item = { id: d.id, ...d.data() };
+            menuMap[d.id] = item;
+            if (!byCat[item.category]) byCat[item.category] = [];
+            byCat[item.category].push(item);
+        });
+        allCategories = Object.keys(byCat).sort();
+        renderCatTabs(allCategories);
+        renderMenu(byCat);
+    } catch(e) {
+        document.getElementById('menuContainer').innerHTML =
+            `<div class="empty-menu">⚠️ Menu load failed.<br>Please check your connection.</div>`;
+    }
+}
+
+function renderCatTabs(cats) {
+    const tabs = document.getElementById('catTabs');
+    tabs.innerHTML = '';
+    cats.forEach((cat, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'cat-tab' + (i === 0 ? ' active' : '');
+        btn.textContent = cat;
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            const section = document.getElementById('sec-' + CSS.escape(cat));
+            if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        tabs.appendChild(btn);
+    });
+}
+
+function renderMenu(byCat) {
+    const container = document.getElementById('menuContainer');
+    container.innerHTML = '';
+    Object.entries(byCat).sort(([a],[b]) => a.localeCompare(b)).forEach(([cat, items]) => {
+        const section = document.createElement('div');
+        section.className = 'menu-section';
+        section.id = 'sec-' + cat;
+        section.innerHTML = `<div class="section-title">${cat}</div><div class="items-list" id="list-${cat}"></div>`;
+        container.appendChild(section);
+        const list = section.querySelector('.items-list');
+        items.forEach(item => list.appendChild(buildItemCard(item)));
+    });
+}
+
+function buildItemCard(item) {
+    const card = document.createElement('div');
+    card.className = 'item-card';
+    card.id = 'card-' + item.id;
+    card.innerHTML = `
+        <div class="item-info">
+            <div class="item-name">${item.name}</div>
+            <div class="item-price">₹${item.price}</div>
+        </div>
+        <div class="qty-ctrl">
+            <button class="qty-btn qty-minus" data-id="${item.id}">−</button>
+            <span class="qty-num" id="qty-${item.id}">0</span>
+            <button class="qty-btn qty-plus" data-id="${item.id}">+</button>
+        </div>
+    `;
+    card.querySelector('.qty-plus').addEventListener('click', () => changeQty(item.id, 1));
+    card.querySelector('.qty-minus').addEventListener('click', () => changeQty(item.id, -1));
+    return card;
+}
+
+function changeQty(id, delta) {
+    const current = cart[id] || 0;
+    const newQty = Math.max(0, current + delta);
+    if (newQty === 0) delete cart[id]; else cart[id] = newQty;
+    document.getElementById('qty-' + id).textContent = newQty;
+    const card = document.getElementById('card-' + id);
+    if (card) card.classList.toggle('in-cart', newQty > 0);
+    updateCartBar();
+}
+
+function updateCartBar() {
+    const bar = document.getElementById('cartBar');
+    const totalItems = Object.values(cart).reduce((s,q) => s+q, 0);
+    const totalPrice = Object.entries(cart).reduce((s,[id,qty]) => s + (menuMap[id]?.price||0)*qty, 0);
+    if (totalItems === 0) {
+        bar.classList.remove('visible');
+    } else {
+        bar.classList.add('visible');
+        document.getElementById('cartBarItems').textContent = `${totalItems} item${totalItems>1?'s':''}`;
+        document.getElementById('cartBarTotal').textContent = `₹${totalPrice}`;
+    }
+}
+
+// ── Place Order ────────────────────────────────────────────
+document.getElementById('placeOrderBtn').addEventListener('click', async () => {
+    const totalItems = Object.values(cart).reduce((s,q) => s+q, 0);
+    if (totalItems === 0) return;
+
+    const btn = document.getElementById('placeOrderBtn');
+    btn.textContent = 'Sending…';
+    btn.disabled = true;
+
+    const items = Object.entries(cart).map(([id, qty]) => ({
+        id,
+        name: menuMap[id].name,
+        price: menuMap[id].price,
+        quantity: qty
+    }));
+
+    try {
+        const total = items.reduce((s, i) => s + i.price * i.quantity, 0);
+        await addDoc(collection(db, 'pending_table_orders'), {
+            tableId: tableName,
+            items,
+            totalPrice: total,
+            status: 'pending',
+            timestamp: new Date().toISOString(),
+            createdAt: serverTimestamp()
+        });
+
+        // Show success screen
+        cart = {};
+        document.getElementById('successTableLabel').textContent = `📍 ${tableName}`;
+        const successScreen = document.getElementById('successScreen');
+        successScreen.classList.add('show');
+    } catch(e) {
+        btn.textContent = 'Place Order →';
+        btn.disabled = false;
+        alert('Order failed. Please try again.');
+    }
+});
+
+loadMenu();
+</script>
+</body>
+</html>

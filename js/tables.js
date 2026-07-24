@@ -19,16 +19,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const backToTablesBtn = document.getElementById('backToTablesBtn');
 
         // Generate Grid (Tables / Parcels) with Live Items
+    let currentGridType = 'table';
+
+    const switchGridBtn = document.getElementById('switchGridBtn');
+    switchGridBtn.addEventListener('click', () => {
+        loadGrid(currentGridType === 'table' ? 'parcel' : 'table');
+    });
+
     function loadGrid(type) {
+        currentGridType = type;
         dynamicGrid.innerHTML = ''; 
         let totalCount = 10;
         let prefix = type === 'table' ? 'Table' : 'Parcel';
-        
+
+        // Update switch button to show the opposite destination
+        switchGridBtn.textContent = type === 'table' ? '📦 Parcels' : '🪑 Tables';
+
         gridTitle.innerText = `Select ${prefix}`;
 
         for (let i = 1; i <= totalCount; i++) {
             const card = document.createElement('div');
-            let tableName = `${prefix} ${i}`;
+            let tableName = type === 'parcel' ? `${prefix} ${String.fromCharCode(64 + i)}` : `${prefix} ${i}`;
             
             let isOccupied = false;
             let tableItemsHTML = "";
@@ -140,6 +151,10 @@ document.addEventListener('DOMContentLoaded', () => {
         window.dispatchEvent(new Event('load-table-cart'));
     }
     // Expose for incoming-orders.js so Accept can navigate directly to a table
+    window._posOpenTable = openPOS;
+    window._posLoadGrid  = loadGrid;
+
+    // Expose for incoming-orders.js
     window._posOpenTable = openPOS;
     window._posLoadGrid  = loadGrid;
 
@@ -322,6 +337,10 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(refreshTimers, 30000); // Har 30 sec mein sab timers live update honge
 
     renderRunningOrders();
+
+    // Expose POS navigation for incoming-orders.js
+    window._posOpenTable = (name) => openPOS(name, 'C1');
+    window._posLoadGrid  = (type) => loadGrid(type);
 
     // Running Orders sirf tab rebuild karo jab home screen actually dikh raha ho.
     // Pehle ye HAR cart change (item add, qty+/-, KOT ke baad) pe chalta tha,
