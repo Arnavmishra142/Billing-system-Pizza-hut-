@@ -114,7 +114,7 @@
             </div>
             <div style="display: flex; gap: 10px; align-items: center;">
                 <button id="historyBtn" onclick="openHistoryDrawer()" style="background: #f59e0b; color: white; border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                    🕒 Recent Bills
+                    🕒 Recent Billls
                 </button>
 
                 <!-- INSTALL BUTTON -->
@@ -326,6 +326,7 @@
     <script type="module" src="js/tables.js"></script>
     <script type="module" src="js/menu.js"></script>
     <script type="module" src="js/cart.js"></script>
+    <script type="module" src="js/incoming-orders.js"></script>
     
      <script>
         let posPrompt;
@@ -420,6 +421,7 @@
                         <p><strong>Amount:</strong> ₹${bill.total}</p>
                         <div style="display: flex; gap: 8px; margin-top: 10px;">
                             <button class="btn-reprint" style="flex: 1;" onclick="reprintGhostBill('${bill.id}')">🖨️ Print</button>
+                            <button class="btn-view-details" onclick="window.open('details.html?id=${encodeURIComponent(bill.id)}', '_blank')" style="flex: 1; padding: 8px 10px; background: #1d4ed8; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 0.85rem;">👁️ View</button>
                             <button class="btn-delete-ghost" onclick="deleteGhostBill('${bill.id}')">🗑️</button>
                         </div>
                     </div>
@@ -625,7 +627,7 @@
     <div id="historyOverlay" class="drawer-overlay" onclick="closeHistoryDrawer()"></div>
     <div id="historyDrawer" class="history-drawer">
         <div class="drawer-header">
-            <h3 class="drawer-title-text" style="margin: 0;">📜 Recent Bills (24h)</h3>
+            <h3 class="drawer-title-text" style="margin: 0;">📜 Recent Billls (24h)</h3>
             <button onclick="closeHistoryDrawer()" class="close-btn">❌</button>
         </div>
         <div class="drawer-content" id="historyList">

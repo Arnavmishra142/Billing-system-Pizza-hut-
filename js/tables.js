@@ -139,6 +139,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         window.dispatchEvent(new Event('load-table-cart'));
     }
+    // Expose for incoming-orders.js so Accept can navigate directly to a table
+    window._posOpenTable = openPOS;
+    window._posLoadGrid  = loadGrid;
 
     backToTablesBtn.addEventListener('click', () => {
         screenPos.classList.remove('active');

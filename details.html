@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Order Details</title>
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            min-height: 100dvh;
+            padding-bottom: 100px;
+        }
+
+        /* ── TOP BAR ── */
+        .top-bar {
+            position: sticky; top: 0;
+            background: #161b22;
+            border-bottom: 1px solid #30363d;
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            z-index: 10;
+        }
+        .back-btn {
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #e6edf3;
+            padding: 9px 16px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .back-btn:active { opacity: 0.7; }
+        .top-title {
+            font-size: 1rem;
+            font-weight: 800;
+            color: #e6edf3;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* ── CONTENT ── */
+        .content { padding: 16px; max-width: 560px; margin: 0 auto; }
+
+        /* ── ORDER HEADER CARD ── */
+        .order-header {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .order-id {
+            font-size: 1.4rem;
+            font-weight: 900;
+            color: #58a6ff;
+            margin-bottom: 6px;
+            word-break: break-all;
+        }
+        .order-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .order-meta span {
+            font-size: 0.88rem;
+            color: #8b949e;
+        }
+        .order-meta strong { color: #e6edf3; }
+
+        /* ── ITEMS TABLE ── */
+        .items-section {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 16px;
+        }
+        .section-label {
+            font-size: 0.78rem;
+            font-weight: 800;
+            color: #8b949e;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            padding: 12px 16px 8px;
+            border-bottom: 1px solid #21262d;
+        }
+        .item-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid #21262d;
+            gap: 10px;
+        }
+        .item-row:last-child { border-bottom: none; }
+        .item-name {
+            font-size: 0.97rem;
+            font-weight: 700;
+            color: #e6edf3;
+            flex: 1;
+            min-width: 0;
+        }
+        .item-qty {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: #58a6ff;
+            flex-shrink: 0;
+        }
+        .item-price {
+            font-size: 0.88rem;
+            color: #8b949e;
+            flex-shrink: 0;
+        }
+        .item-total {
+            font-size: 0.97rem;
+            font-weight: 800;
+            color: #3fb950;
+            flex-shrink: 0;
+            min-width: 64px;
+            text-align: right;
+        }
+
+        /* ── TOTALS ── */
+        .totals-section {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+        }
+        .total-row.grand {
+            border-top: 1px solid #30363d;
+            margin-top: 8px;
+            padding-top: 12px;
+        }
+        .total-row.grand .total-label { font-size: 1rem; font-weight: 800; color: #e6edf3; }
+        .total-row.grand .total-val   { font-size: 1.4rem; font-weight: 900; color: #3fb950; }
+        .total-label { font-size: 0.9rem; color: #8b949e; }
+        .total-val   { font-size: 0.97rem; font-weight: 700; color: #e6edf3; }
+
+        /* ── BOTTOM ACTIONS ── */
+        .actions {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            background: #161b22;
+            border-top: 1px solid #30363d;
+            padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-weight: 800;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+        .btn:active { transform: scale(0.96); }
+        .btn-print { background: #1f6feb; color: #fff; }
+        .btn-print:hover { background: #388bfd; }
+
+        /* ── NOT FOUND ── */
+        .not-found {
+            text-align: center;
+            padding: 80px 24px;
+            color: #8b949e;
+        }
+        .not-found .icon { font-size: 3rem; margin-bottom: 16px; }
+        .not-found h2 { font-size: 1.2rem; color: #e6edf3; margin-bottom: 8px; }
+        .not-found p { font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+
+<div class="top-bar">
+    <button class="back-btn" onclick="history.back()">⬅ Back</button>
+    <span class="top-title" id="topTitle">Order Details</span>
+</div>
+
+<div class="content" id="mainContent">
+    <div class="not-found">
+        <div class="icon">⏳</div>
+        <h2>Loading…</h2>
+    </div>
+</div>
+
+<div class="actions" id="actionsBar" style="display:none;">
+    <button class="btn btn-print" id="reprintBtn">🖨️ Reprint Bill</button>
+</div>
+
+<script>
+(function () {
+    const params  = new URLSearchParams(window.location.search);
+    const billId  = params.get('id');
+    const content = document.getElementById('mainContent');
+    const actions = document.getElementById('actionsBar');
+    const topTitle = document.getElementById('topTitle');
+
+    // ── Load from localStorage ──────────────────────────────
+    function getHistory() {
+        try {
+            const raw = localStorage.getItem('pos_24h_history');
+            return raw ? JSON.parse(raw) : [];
+        } catch(e) { return []; }
+    }
+
+    const history = getHistory();
+    const bill    = history.find(b => b.id === billId);
+
+    if (!bill) {
+        content.innerHTML = `
+            <div class="not-found">
+                <div class="icon">🔍</div>
+                <h2>Bill Not Found</h2>
+                <p>This bill may have expired (24h limit) or the ID is invalid.</p>
+            </div>`;
+        return;
+    }
+
+    topTitle.textContent = `Order: ${bill.id}`;
+
+    // ── Summary numbers ──────────────────────────────────────
+    const items    = Array.isArray(bill.items) ? bill.items : [];
+    const totalQty = items.reduce((s, i) => s + (i.qty || 0), 0);
+    const total    = Number(bill.total) || 0;
+
+    // ── Render ───────────────────────────────────────────────
+    content.innerHTML = `
+        <div class="order-header">
+            <div class="order-id">${esc(bill.id)}</div>
+            <div class="order-meta">
+                <span>🕒 <strong>${esc(bill.timeStr || '—')}</strong></span>
+                <span>🧾 ${items.length} item type${items.length !== 1 ? 's' : ''} · ${totalQty} total qty</span>
+            </div>
+        </div>
+
+        <div class="items-section">
+            <div class="section-label">Items Ordered</div>
+            ${items.length === 0
+                ? `<div style="padding:20px;text-align:center;color:#8b949e;font-size:0.9rem;">No item details saved for this bill.</div>`
+                : items.map(item => {
+                    const lineTotal = (Number(item.price) || 0) * (item.qty || 0);
+                    return `
+                    <div class="item-row">
+                        <span class="item-name">${esc(item.name)}</span>
+                        <span class="item-qty">×${item.qty || 0}</span>
+                        <span class="item-price">₹${Number(item.price || 0).toFixed(0)}</span>
+                        <span class="item-total">₹${lineTotal.toFixed(0)}</span>
+                    </div>`;
+                }).join('')}
+        </div>
+
+        <div class="totals-section">
+            <div class="total-row">
+                <span class="total-label">Items</span>
+                <span class="total-val">${items.length}</span>
+            </div>
+            <div class="total-row">
+                <span class="total-label">Total Qty</span>
+                <span class="total-val">${totalQty}</span>
+            </div>
+            <div class="total-row grand">
+                <span class="total-label">Grand Total</span>
+                <span class="total-val">₹${total.toFixed(0)}</span>
+            </div>
+        </div>
+    `;
+
+    actions.style.display = 'flex';
+
+    // ── Reprint via RawBT ────────────────────────────────────
+    document.getElementById('reprintBtn').addEventListener('click', () => {
+        if (!items.length) {
+            alert('No item details saved for this bill — cannot reprint.');
+            return;
+        }
+
+        const center = (text) => {
+            if (text.length >= 32) return text.substring(0, 32);
+            const sp = Math.floor((32 - text.length) / 2);
+            return ' '.repeat(sp) + text;
+        };
+        const right = (text) => {
+            if (text.length >= 32) return text.substring(0, 32);
+            return ' '.repeat(32 - text.length) + text;
+        };
+
+        const BOLD_ON  = '\x1B\x45\x01';
+        const BOLD_OFF = '\x1B\x45\x00';
+
+        let t = BOLD_ON;
+        t += center('NEW PIZZA HUT AND LIVE CAKE') + '\n';
+        t += center('in front of SBI bank ke tik') + '\n';
+        t += center('samne salempur Deoria, UP')   + '\n';
+        t += center('FSSAI: 30230324113093042')     + '\n';
+        t += center('Phone: 9628548655')            + '\n\n';
+        t += `Order: ${bill.id}\n`;
+        t += `Date : ${bill.timeStr || '—'}\n`;
+        t += '--------------------------------\n';
+        t += 'Item                Qty      Amt\n';
+        t += '--------------------------------\n';
+
+        items.forEach(item => {
+            const n = item.name.length > 16
+                ? item.name.substring(0, 14) + '..'
+                : item.name.padEnd(16, ' ');
+            const q = String(item.qty || 0).padStart(2, ' ') + 'x';
+            const a = String(Math.round((item.price || 0) * (item.qty || 0))).padStart(6, ' ');
+            t += `${n}    ${q}   ${a}\n`;
+        });
+
+        t += '--------------------------------\n';
+        t += right(`TOTAL: Rs ${Math.round(total)}`) + '\n';
+        t += '--------------------------------\n';
+        t += center('Thank You! Visit Again!') + '\n\n';
+        t += center('--- UPI PAYMENT ---')      + '\n';
+        t += center('6393349498@fam')            + '\n';
+        t += center('(Pay via PhonePe/GPay)')    + '\n';
+        t += '\n\n\n\n' + BOLD_OFF;
+
+        window.location.href = 'rawbt:' + encodeURIComponent(t);
+    });
+
+    function esc(s) {
+        return String(s || '')
+            .replace(/&/g,'&amp;')
+            .replace(/</g,'&lt;')
+            .replace(/>/g,'&gt;');
+    }
+})();
+
+function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+
+</body>
+</html>
