@@ -305,13 +305,15 @@ document.getElementById('placeOrderBtn').addEventListener('click', async () => {
         id,
         name: menuMap[id].name,
         price: menuMap[id].price,
-        qty
+        quantity: qty
     }));
 
     try {
-        await addDoc(collection(db, 'customer_orders'), {
-            table: tableName,
+        const total = items.reduce((s, i) => s + i.price * i.quantity, 0);
+        await addDoc(collection(db, 'pending_table_orders'), {
+            tableId: tableName,
             items,
+            totalPrice: total,
             status: 'pending',
             timestamp: new Date().toISOString(),
             createdAt: serverTimestamp()

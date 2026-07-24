@@ -1,7 +1,4 @@
 import { db } from './firebase-config.js';
-import {
-    collection, query, where, onSnapshot, doc, updateDoc
-} from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 document.addEventListener('DOMContentLoaded', () => {
     
@@ -153,6 +150,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         window.dispatchEvent(new Event('load-table-cart'));
     }
+
+    // Expose for incoming-orders.js
+    window._posOpenTable = openPOS;
+    window._posLoadGrid  = loadGrid;
 
     backToTablesBtn.addEventListener('click', () => {
         screenPos.classList.remove('active');
@@ -334,111 +335,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderRunningOrders();
 
-    // ── INCOMING CUSTOMER ORDERS (real-time Firestore listener) ─────────────
-    let incomingOrders = [];
-
-    const incomingBtn   = document.getElementById('incomingOrdersBtn');
-    const incomingDrawer  = document.getElementById('incomingDrawer');
-    const incomingOverlay = document.getElementById('incomingOverlay');
-    const incomingList    = document.getElementById('incomingList');
-    const incomingBadge   = document.getElementById('incomingBadge');
-
-    function openIncomingDrawer() {
-        renderIncomingList();
-        incomingDrawer.classList.add('open');
-        incomingOverlay.classList.add('open');
-    }
-    function closeIncomingDrawer() {
-        incomingDrawer.classList.remove('open');
-        incomingOverlay.classList.remove('open');
-    }
-
-    if (incomingBtn)     incomingBtn.addEventListener('click', openIncomingDrawer);
-    if (incomingOverlay) incomingOverlay.addEventListener('click', closeIncomingDrawer);
-    document.getElementById('closeIncomingBtn')?.addEventListener('click', closeIncomingDrawer);
-
-    function renderIncomingList() {
-        if (!incomingList) return;
-        if (incomingOrders.length === 0) {
-            incomingList.innerHTML = `<p class="incoming-empty">No pending customer orders 👍</p>`;
-            return;
-        }
-        incomingList.innerHTML = '';
-        incomingOrders.forEach(order => {
-            const card = document.createElement('div');
-            card.className = 'incoming-card';
-            const itemsText = order.items.map(i => `${i.name} ×${i.qty}`).join(', ');
-            const total = order.items.reduce((s, i) => s + i.price * i.qty, 0);
-            const timeStr = order.timestamp ? new Date(order.timestamp).toLocaleTimeString('en-IN', {hour:'2-digit', minute:'2-digit'}) : '';
-            card.innerHTML = `
-                <div class="inc-header">
-                    <span class="inc-table">📍 ${order.table}</span>
-                    <span class="inc-time">${timeStr}</span>
-                </div>
-                <div class="inc-items">${itemsText}</div>
-                <div class="inc-footer">
-                    <span class="inc-total">₹${total}</span>
-                    <button class="inc-accept-btn" data-id="${order.id}" data-table="${order.table}">
-                        Open in POS →
-                    </button>
-                </div>
-            `;
-            card.querySelector('.inc-accept-btn').addEventListener('click', (e) => {
-                acceptCustomerOrder(order);
-                closeIncomingDrawer();
-            });
-            incomingList.appendChild(card);
-        });
-    }
-
-    async function acceptCustomerOrder(order) {
-        const tableName = order.table;
-        const cartKey   = `cart_${tableName}_C1`;
-
-        // Merge items into localStorage cart
-        let existing = [];
-        try { existing = JSON.parse(localStorage.getItem(cartKey) || '[]'); } catch(_) {}
-
-        order.items.forEach(newItem => {
-            const found = existing.find(i => i.id === newItem.id);
-            if (found) {
-                found.qty += newItem.qty;
-            } else {
-                existing.push({ id: newItem.id, name: newItem.name, price: newItem.price, qty: newItem.qty, printedQty: 0 });
-            }
-        });
-        localStorage.setItem(cartKey, JSON.stringify(existing));
-        window.dispatchEvent(new Event('cart-updated'));
-
-        // Mark order as accepted in Firestore
-        try {
-            await updateDoc(doc(db, 'customer_orders', order.id), { status: 'accepted' });
-        } catch(e) { console.warn('Could not mark order accepted:', e); }
-
-        // Open POS to that table
-        openPOS(tableName, 'C1');
-    }
-
-    // Real-time listener for pending customer orders
-    try {
-        const q = query(collection(db, 'customer_orders'), where('status', '==', 'pending'));
-        onSnapshot(q, (snapshot) => {
-            incomingOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
-                .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
-            // Update badge
-            if (incomingBadge) {
-                incomingBadge.textContent = incomingOrders.length;
-                incomingBadge.style.display = incomingOrders.length > 0 ? 'flex' : 'none';
-            }
-            if (incomingBtn) {
-                incomingBtn.classList.toggle('has-orders', incomingOrders.length > 0);
-            }
-            // If drawer is open, refresh it live
-            if (incomingDrawer && incomingDrawer.classList.contains('open')) {
-                renderIncomingList();
-            }
-        });
-    } catch(e) { console.warn('Incoming orders listener failed:', e); }
+    // Expose POS navigation for incoming-orders.js
+    window._posOpenTable = (name) => openPOS(name, 'C1');
+    window._posLoadGrid  = (type) => loadGrid(type);
 
     // Running Orders sirf tab rebuild karo jab home screen actually dikh raha ho.
     // Pehle ye HAR cart change (item add, qty+/-, KOT ke baad) pe chalta tha,

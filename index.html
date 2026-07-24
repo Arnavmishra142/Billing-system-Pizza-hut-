@@ -141,20 +141,17 @@
                 <span class="title">Takeaway Parcel</span>
             </button>
 
-            <button class="menu-big-btn" id="btn-direct-sale" style="background: linear-gradient(135deg, #10b981, #34d399); grid-column: span 2;">
-                <span class="icon">⚡</span>
-                <span class="title">Quick Sale Entry</span>
-            </button>
-            
             <button class="menu-big-btn" onclick="window.location.href='expense.html'" style="background: linear-gradient(135deg, #f43f5e, #e11d48);">
-                <span class="icon">💸</span><span class="title">Add Expense</span>
+                <span class="icon">💸</span>
+                <span class="title">Add Expense</span>
             </button>
 
-            <button class="menu-big-btn incoming-orders-btn" id="incomingOrdersBtn" style="background: linear-gradient(135deg, #d97706, #f59e0b); grid-column: span 2; position: relative;">
+            <button class="menu-big-btn" id="btn-orders" style="background: linear-gradient(135deg, #f59e0b, #fbbf24); position:relative;">
+                <span id="orders-badge"></span>
                 <span class="icon">🔔</span>
                 <span class="title">Incoming Orders</span>
-                <span class="incoming-badge" id="incomingBadge" style="display:none;">0</span>
             </button>
+
         </div>
 
         <div style="margin-top: 40px; padding: 0 20px;">
@@ -630,16 +627,15 @@
         });
     </script>
 
-    <!-- 🔔 INCOMING CUSTOMER ORDERS DRAWER -->
-    <div id="incomingOverlay" class="drawer-overlay"></div>
-    <div id="incomingDrawer" class="history-drawer incoming-drawer">
-        <div class="drawer-header">
-            <h3 class="drawer-title-text" style="margin:0;">🔔 Incoming Orders</h3>
-            <button id="closeIncomingBtn" class="close-btn">❌</button>
+    <!-- 🔔 INCOMING ORDERS DRAWER -->
+    <div id="ordersOverlay" class="orders-overlay"></div>
+    <div id="ordersDrawer" class="orders-drawer">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 20px 10px;">
+            <h3 style="margin:0; font-size:1.1rem;">🔔 Incoming Orders</h3>
+            <button onclick="document.getElementById('ordersDrawer').classList.remove('open'); document.getElementById('ordersOverlay').classList.remove('open');"
+                style="background:rgba(255,255,255,0.1); border:none; border-radius:8px; padding:6px 12px; color:inherit; font-size:1rem; cursor:pointer;">✕</button>
         </div>
-        <div class="drawer-content" id="incomingList">
-            <p class="incoming-empty">No pending customer orders 👍</p>
-        </div>
+        <div id="ordersDrawerList" style="overflow-y:auto; padding:0 16px 24px; flex:1;"></div>
     </div>
 
     <!-- 🕒 24-HOUR HISTORY DRAWER -->
@@ -654,5 +650,6 @@
             <!-- Bills dynamically yahan aayenge -->
         </div>
     </div>
+    <script type="module" src="js/incoming-orders.js"></script>
 </body>
 </html>
