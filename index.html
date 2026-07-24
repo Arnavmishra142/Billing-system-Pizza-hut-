@@ -146,7 +146,8 @@
                 <span class="title">Add Expense</span>
             </button>
 
-            <button class="menu-big-btn" id="btn-orders" style="background: linear-gradient(135deg, #f59e0b, #fbbf24);">
+            <button class="menu-big-btn" id="btn-orders" style="background: linear-gradient(135deg, #f59e0b, #fbbf24); position:relative;">
+                <span id="orders-badge"></span>
                 <span class="icon">🔔</span>
                 <span class="title">Incoming Orders</span>
             </button>
@@ -625,6 +626,17 @@
         });
     </script>
 
+    <!-- 🔔 INCOMING ORDERS DRAWER -->
+    <div id="ordersOverlay" class="orders-overlay"></div>
+    <div id="ordersDrawer" class="orders-drawer">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 20px 10px;">
+            <h3 style="margin:0; font-size:1.1rem;">🔔 Incoming Orders</h3>
+            <button onclick="document.getElementById('ordersDrawer').classList.remove('open'); document.getElementById('ordersOverlay').classList.remove('open');"
+                style="background:rgba(255,255,255,0.1); border:none; border-radius:8px; padding:6px 12px; color:inherit; font-size:1rem; cursor:pointer;">✕</button>
+        </div>
+        <div id="ordersDrawerList" style="overflow-y:auto; padding:0 16px 24px; flex:1;"></div>
+    </div>
+
     <!-- 🕒 24-HOUR HISTORY DRAWER -->
     <div id="historyOverlay" class="drawer-overlay" onclick="closeHistoryDrawer()"></div>
     <div id="historyDrawer" class="history-drawer">
@@ -637,5 +649,6 @@
             <!-- Bills dynamically yahan aayenge -->
         </div>
     </div>
+    <script type="module" src="js/incoming-orders.js"></script>
 </body>
 </html>

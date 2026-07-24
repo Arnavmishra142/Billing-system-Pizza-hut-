@@ -151,6 +151,10 @@ document.addEventListener('DOMContentLoaded', () => {
         window.dispatchEvent(new Event('load-table-cart'));
     }
 
+    // Expose for incoming-orders.js
+    window._posOpenTable = openPOS;
+    window._posLoadGrid  = loadGrid;
+
     backToTablesBtn.addEventListener('click', () => {
         screenPos.classList.remove('active');
         screenPos.classList.add('hidden');
