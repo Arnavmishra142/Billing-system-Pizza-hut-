@@ -8,10 +8,26 @@ import {
     onSnapshot,
     query,
     orderBy,
+    where,
+    getDocs,
     doc,
-    updateDoc,
-    Timestamp
+    updateDoc
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+// ── Fix 3: Count how many times a phone number has ordered ───────────────────
+async function getCustomerOrderCount(phone) {
+    if (!phone) return 1;
+    try {
+        const q    = query(collection(db, 'pending_table_orders'), where('customer.phone', '==', phone));
+        const snap = await getDocs(q);
+        return Math.max(1, snap.size);
+    } catch(e) { return 1; }
+}
+
+function toOrdinal(n) {
+    const s = ['th','st','nd','rd'], v = n % 100;
+    return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const btnOrders   = document.getElementById('btn-orders');
@@ -208,14 +224,24 @@ function renderDrawer(orders) {
 
     drawerList.innerHTML = '';
 
-    orders.forEach(order => {
-        const { id, tableName = 'Unknown Table', items = [], createdAt } = order;
+    // renderDrawer is async because of getCustomerOrderCount
+    const renders = orders.map(async order => {
+        const { id, tableId = 'Unknown Table', items = [], createdAt, customer = {}, totalPrice } = order;
+
+        const tableName     = tableId;
+        const customerName  = customer.name  || 'Guest';
+        const customerPhone = customer.phone || '—';
 
         const timeLabel = createdAt
             ? new Date(createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             : '';
 
-        const itemsText = items.map(i => `${i.name} ×${i.qty}`).join(', ') || 'No item details';
+        // Fix 1: use item.quantity
+        const itemsText = items.map(i => `${i.name} ×${i.quantity}`).join(', ') || 'No item details';
+
+        // Fix 3: ordinal order count
+        const count   = await getCustomerOrderCount(customer.phone);
+        const ordinal = toOrdinal(count);
 
         const card = document.createElement('div');
         card.className = 'order-card-item';
@@ -224,7 +250,14 @@ function renderDrawer(orders) {
                 <span class="oc-table">🔔 ${tableName}</span>
                 <span class="oc-time">${timeLabel}</span>
             </div>
+            <div style="font-size:0.85rem; margin-bottom:6px; opacity:0.9;">
+                👤 <strong>${customerName}</strong> &nbsp;📱 ${customerPhone}
+            </div>
+            <div style="font-size:0.75rem; color:#f59e0b; margin-bottom:8px; font-weight:600;">
+                ${ordinal} order from this customer
+            </div>
             <div class="oc-items">${itemsText}</div>
+            ${totalPrice ? `<div style="font-size:0.9rem; font-weight:700; margin-bottom:10px;">Total: ₹${totalPrice}</div>` : ''}
             <div class="oc-actions">
                 <button class="oc-btn-accept">✅ Open in POS</button>
                 <button class="oc-btn-dismiss">Dismiss</button>
@@ -233,16 +266,13 @@ function renderDrawer(orders) {
 
         // Accept → open the table in POS
         card.querySelector('.oc-btn-accept').addEventListener('click', async () => {
-            // Mark as accepted in Firestore
             try {
                 await updateDoc(doc(db, 'pending_table_orders', id), { status: 'accepted' });
             } catch(e) { console.warn('Could not update order status:', e); }
 
             closeDrawer();
 
-            // Open POS for the table if function is exposed
             if (typeof window._posOpenTable === 'function') {
-                // Navigate to table grid first, then open POS
                 if (typeof window._posLoadGrid === 'function') {
                     const isParcel = tableName.toLowerCase().includes('parcel');
                     window._posLoadGrid(isParcel ? 'parcel' : 'table');
@@ -251,14 +281,20 @@ function renderDrawer(orders) {
             }
         });
 
-        // Dismiss → just mark as accepted (hides from list)
+        // Dismiss → mark as dismissed
         card.querySelector('.oc-btn-dismiss').addEventListener('click', async () => {
             try {
                 await updateDoc(doc(db, 'pending_table_orders', id), { status: 'dismissed' });
             } catch(e) {}
         });
 
-        drawerList.appendChild(card);
+        return card;
+    });
+
+    // Append all cards once async work is done
+    Promise.all(renders).then(cards => {
+        drawerList.innerHTML = '';
+        cards.forEach(c => drawerList.appendChild(c));
     });
 }
 
@@ -283,8 +319,8 @@ function startListening() {
             // Toast only for truly new orders we haven't seen yet
             if (!_notified.has(docSnap.id)) {
                 _notified.add(docSnap.id);
-                const itemCount = (data.items || []).reduce((s, i) => s + (i.qty || 1), 0);
-                showToast(data.tableName || 'Unknown Table', itemCount || 1);
+                const itemCount = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
+                showToast(data.tableId || 'Unknown Table', itemCount || 1);
             }
         });
 
