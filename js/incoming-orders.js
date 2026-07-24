@@ -39,6 +39,67 @@ const drawerList  = document.getElementById('ordersDrawerList');
 // Track order IDs we've already notified about so we don't re-toast on re-render
 const _notified = new Set();
 
+// ── Inject drawer + badge CSS immediately (not inside showToast) ──────────────
+(function injectDrawerCSS() {
+    if (document.getElementById('orders-drawer-style')) return;
+    const s = document.createElement('style');
+    s.id = 'orders-drawer-style';
+    s.textContent = `
+        @keyframes badgePop { 0%{transform:scale(1)} 50%{transform:scale(1.4)} 100%{transform:scale(1)} }
+        .btn-pulse { animation: badgePop 0.5s ease 3; }
+        #orders-badge {
+            position: absolute; top: -8px; right: -8px;
+            background: #ef4444; color: #fff;
+            border-radius: 999px; min-width: 22px; height: 22px;
+            font-size: 0.72rem; font-weight: 700;
+            display: none; align-items: center; justify-content: center;
+            padding: 0 5px; pointer-events: none;
+            z-index: 10; box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        }
+        .orders-drawer {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: #1e1e2e; border-radius: 20px 20px 0 0;
+            z-index: 5000; transform: translateY(100%);
+            transition: transform 0.3s ease;
+            max-height: 80vh; display: flex; flex-direction: column;
+        }
+        .orders-drawer.open { transform: translateY(0); }
+        .orders-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55); z-index: 4999;
+            display: none; opacity: 0; transition: opacity 0.3s ease;
+        }
+        .orders-overlay.open { display: block; opacity: 1; }
+        .order-card-item {
+            background: #2a2a3e; border-radius: 12px;
+            padding: 14px 16px; margin-bottom: 12px;
+            border-left: 4px solid #f59e0b;
+        }
+        .order-card-item .oc-head {
+            display: flex; justify-content: space-between;
+            align-items: center; margin-bottom: 8px;
+        }
+        .order-card-item .oc-table { font-weight: 700; font-size: 1rem; }
+        .order-card-item .oc-time  { font-size: 0.75rem; opacity: 0.6; }
+        .order-card-item .oc-items {
+            font-size: 0.85rem; opacity: 0.85;
+            margin-bottom: 10px; line-height: 1.5;
+        }
+        .order-card-item .oc-actions { display: flex; gap: 8px; }
+        .oc-btn-accept {
+            flex: 1; background: linear-gradient(135deg, #10b981, #34d399);
+            color: #fff; border: none; border-radius: 8px;
+            padding: 9px; font-weight: 600; font-size: 0.9rem; cursor: pointer;
+        }
+        .oc-btn-dismiss {
+            background: rgba(255,255,255,0.08); color: inherit;
+            border: none; border-radius: 8px; padding: 9px 14px;
+            font-size: 0.85rem; cursor: pointer; opacity: 0.7;
+        }
+    `;
+    document.head.appendChild(s);
+})();
+
 // ── Badge counter ─────────────────────────────────────────────────────────────
 function setBadge(count) {
     if (!badge) return;
@@ -85,108 +146,13 @@ function showToast(tableName, itemCount) {
         animation: toastIn 0.35s ease;
     `;
 
-    // Add animation keyframes once
-    if (!document.getElementById('toast-style')) {
+    // toast animation only (drawer CSS is injected on load)
+    if (!document.getElementById('toast-anim-style')) {
         const s = document.createElement('style');
-        s.id = 'toast-style';
+        s.id = 'toast-anim-style';
         s.textContent = `
             @keyframes toastIn  { from { opacity:0; transform:translateY(-16px); } to { opacity:1; transform:translateY(0); } }
             @keyframes toastOut { from { opacity:1; transform:translateY(0); }     to { opacity:0; transform:translateY(-16px); } }
-            @keyframes badgePop { 0%{transform:scale(1)} 50%{transform:scale(1.4)} 100%{transform:scale(1)} }
-            .btn-pulse { animation: badgePop 0.5s ease 3; }
-            #orders-badge {
-                position: absolute;
-                top: -8px;
-                right: -8px;
-                background: #ef4444;
-                color: #fff;
-                border-radius: 999px;
-                min-width: 22px;
-                height: 22px;
-                font-size: 0.72rem;
-                font-weight: 700;
-                display: none;
-                align-items: center;
-                justify-content: center;
-                padding: 0 5px;
-                pointer-events: none;
-                z-index: 10;
-                box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-            }
-            .orders-drawer {
-                position: fixed;
-                bottom: 0; left: 0; right: 0;
-                background: var(--card-bg, #1e1e2e);
-                border-radius: 20px 20px 0 0;
-                z-index: 5000;
-                transform: translateY(100%);
-                transition: transform 0.3s ease;
-                max-height: 80vh;
-                display: flex;
-                flex-direction: column;
-            }
-            .orders-drawer.open { transform: translateY(0); }
-            .orders-overlay {
-                position: fixed; inset: 0;
-                background: rgba(0,0,0,0.55);
-                z-index: 4999;
-                display: none;
-                opacity: 0;
-                transition: opacity 0.3s ease;
-            }
-            .orders-overlay.open { display: block; opacity: 1; }
-            .order-card-item {
-                background: var(--input-bg, #2a2a3e);
-                border-radius: 12px;
-                padding: 14px 16px;
-                margin-bottom: 12px;
-                border-left: 4px solid #f59e0b;
-            }
-            .order-card-item .oc-head {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 8px;
-            }
-            .order-card-item .oc-table {
-                font-weight: 700;
-                font-size: 1rem;
-            }
-            .order-card-item .oc-time {
-                font-size: 0.75rem;
-                opacity: 0.6;
-            }
-            .order-card-item .oc-items {
-                font-size: 0.85rem;
-                opacity: 0.85;
-                margin-bottom: 10px;
-                line-height: 1.5;
-            }
-            .order-card-item .oc-actions {
-                display: flex;
-                gap: 8px;
-            }
-            .oc-btn-accept {
-                flex: 1;
-                background: linear-gradient(135deg, #10b981, #34d399);
-                color: #fff;
-                border: none;
-                border-radius: 8px;
-                padding: 9px;
-                font-weight: 600;
-                font-size: 0.9rem;
-                cursor: pointer;
-            }
-            .oc-btn-dismiss {
-                background: rgba(255,255,255,0.08);
-                color: inherit;
-                border: none;
-                border-radius: 8px;
-                padding: 9px 14px;
-                font-size: 0.85rem;
-                cursor: pointer;
-                opacity: 0.7;
-            }
         `;
         document.head.appendChild(s);
     }
