@@ -264,20 +264,40 @@ function renderDrawer(orders) {
             </div>
         `;
 
-        // Accept → open the table in POS
+        // Accept → load items into POS cart then open the table
         card.querySelector('.oc-btn-accept').addEventListener('click', async () => {
+            // 1. Merge customer items into localStorage cart for this table
+            const cartKey = `cart_${tableName}_C1`;
+            let existing = [];
+            try { existing = JSON.parse(localStorage.getItem(cartKey) || '[]'); } catch(_) {}
+
+            items.forEach(newItem => {
+                const found = existing.find(i => i.id === newItem.id);
+                if (found) {
+                    found.qty += (newItem.quantity || 1);
+                } else {
+                    existing.push({
+                        id: newItem.id,
+                        name: newItem.name,
+                        price: newItem.price,
+                        qty: newItem.quantity || 1,
+                        printedQty: 0
+                    });
+                }
+            });
+            localStorage.setItem(cartKey, JSON.stringify(existing));
+            window.dispatchEvent(new Event('cart-updated'));
+
+            // 2. Mark order as accepted in Firestore
             try {
                 await updateDoc(doc(db, 'pending_table_orders', id), { status: 'accepted' });
             } catch(e) { console.warn('Could not update order status:', e); }
 
             closeDrawer();
 
+            // 3. Open POS directly to that table (cart already loaded)
             if (typeof window._posOpenTable === 'function') {
-                if (typeof window._posLoadGrid === 'function') {
-                    const isParcel = tableName.toLowerCase().includes('parcel');
-                    window._posLoadGrid(isParcel ? 'parcel' : 'table');
-                }
-                setTimeout(() => window._posOpenTable(tableName), 100);
+                window._posOpenTable(tableName);
             }
         });
 
