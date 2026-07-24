@@ -2,12 +2,13 @@
 //  POS Service Worker — Cache-first for static assets
 //  Version: 3 (bump this number whenever you deploy changes)
 // ============================================================
-const CACHE_NAME = 'pos-static-v3';
+const CACHE_NAME = 'pos-static-v5';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
     '/',
     '/index.html',
+    '/customer.html',
     '/css/style.css',
     '/js/firebase-config.js',
     '/js/menu.js',

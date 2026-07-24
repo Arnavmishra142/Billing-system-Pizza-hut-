@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
     <title>POS System - New Pizza Hut & Live Cake</title>
-    <link rel="stylesheet" href="css/style.css?v=200">
+    <link rel="stylesheet" href="css/style.css?v=300">
     <link rel="manifest" href="manifest.json">
 
     <!-- =========================================
@@ -148,6 +148,12 @@
             
             <button class="menu-big-btn" onclick="window.location.href='expense.html'" style="background: linear-gradient(135deg, #f43f5e, #e11d48);">
                 <span class="icon">💸</span><span class="title">Add Expense</span>
+            </button>
+
+            <button class="menu-big-btn incoming-orders-btn" id="incomingOrdersBtn" style="background: linear-gradient(135deg, #d97706, #f59e0b); grid-column: span 2; position: relative;">
+                <span class="icon">🔔</span>
+                <span class="title">Incoming Orders</span>
+                <span class="incoming-badge" id="incomingBadge" style="display:none;">0</span>
             </button>
         </div>
 
@@ -623,6 +629,18 @@
             });
         });
     </script>
+
+    <!-- 🔔 INCOMING CUSTOMER ORDERS DRAWER -->
+    <div id="incomingOverlay" class="drawer-overlay"></div>
+    <div id="incomingDrawer" class="history-drawer incoming-drawer">
+        <div class="drawer-header">
+            <h3 class="drawer-title-text" style="margin:0;">🔔 Incoming Orders</h3>
+            <button id="closeIncomingBtn" class="close-btn">❌</button>
+        </div>
+        <div class="drawer-content" id="incomingList">
+            <p class="incoming-empty">No pending customer orders 👍</p>
+        </div>
+    </div>
 
     <!-- 🕒 24-HOUR HISTORY DRAWER -->
     <div id="historyOverlay" class="drawer-overlay" onclick="closeHistoryDrawer()"></div>
