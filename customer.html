@@ -132,6 +132,21 @@
 
         /* ── EMPTY STATE ── */
         .empty-menu { text-align: center; padding: 60px 20px; color: #4b5563; font-size: 0.95rem; }
+
+        /* ── OUT OF STOCK ── */
+        .item-card.oos {
+            opacity: 0.55;
+            pointer-events: none;
+        }
+        .item-card.oos .qty-ctrl { display: none; }
+        .oos-label {
+            font-size: 0.72rem; font-weight: 700;
+            color: #ef4444;
+            background: rgba(239,68,68,0.12);
+            border: 1px solid rgba(239,68,68,0.25);
+            border-radius: 5px; padding: 2px 8px;
+            margin-top: 4px; display: inline-block;
+        }
     </style>
 </head>
 <body>
@@ -172,7 +187,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
 import {
     getFirestore,
-    collection, getDocs, addDoc, query, orderBy, serverTimestamp
+    collection, onSnapshot, addDoc, query, orderBy, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 // ── Firebase init ──────────────────────────────────────────
@@ -187,43 +202,55 @@ const app = initializeApp({
 const db = getFirestore(app);
 
 // ── Table from URL ─────────────────────────────────────────
-const params   = new URLSearchParams(location.search);
-const rawTable = params.get('table');
+const params    = new URLSearchParams(location.search);
+const rawTable  = params.get('table');
 const tableName = rawTable ? decodeURIComponent(rawTable) : 'Unknown Table';
 document.getElementById('tableLabel').textContent = tableName;
 document.title = `Order — ${tableName}`;
 
 // ── State ──────────────────────────────────────────────────
-let cart = {};      // { itemId: qty }
-let menuMap = {};   // { itemId: {name, price, category} }
+let cart    = {};   // { itemId: qty }
+let menuMap = {};   // { itemId: {name, price, category, inStock} }
 let allCategories = [];
 
-// ── Fetch Menu ─────────────────────────────────────────────
-async function loadMenu() {
-    try {
-        const snap = await getDocs(query(collection(db, 'menu_items'), orderBy('category')));
+// ── Real-time menu listener ─────────────────────────────────
+// Uses onSnapshot so that when admin toggles an item off in the
+// Menu Management panel, the customer panel updates instantly.
+function loadMenu() {
+    const q = query(collection(db, 'menu_items'), orderBy('category'));
+
+    onSnapshot(q, (snap) => {
         const byCat = {};
+        menuMap = {};
+
         snap.forEach(d => {
             const item = { id: d.id, ...d.data() };
             menuMap[d.id] = item;
-            if (!byCat[item.category]) byCat[item.category] = [];
-            byCat[item.category].push(item);
+            const cat = item.category || 'Other';
+            if (!byCat[cat]) byCat[cat] = [];
+            byCat[cat].push(item);
         });
+
         allCategories = Object.keys(byCat).sort();
         renderCatTabs(allCategories);
         renderMenu(byCat);
-    } catch(e) {
+        // Restore cart qty counts after re-render
+        restoreCartCounts();
+    }, () => {
         document.getElementById('menuContainer').innerHTML =
             `<div class="empty-menu">⚠️ Menu load failed.<br>Please check your connection.</div>`;
-    }
+    });
 }
 
 function renderCatTabs(cats) {
     const tabs = document.getElementById('catTabs');
+    // Preserve the active tab
+    const activeCat = tabs.querySelector('.cat-tab.active')?.textContent || '';
     tabs.innerHTML = '';
     cats.forEach((cat, i) => {
         const btn = document.createElement('button');
-        btn.className = 'cat-tab' + (i === 0 ? ' active' : '');
+        const isActive = activeCat ? cat === activeCat : i === 0;
+        btn.className = 'cat-tab' + (isActive ? ' active' : '');
         btn.textContent = cat;
         btn.addEventListener('click', () => {
             document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
@@ -237,6 +264,8 @@ function renderCatTabs(cats) {
 
 function renderMenu(byCat) {
     const container = document.getElementById('menuContainer');
+    // Preserve scroll position so re-renders don't jump
+    const scrollY = window.scrollY;
     container.innerHTML = '';
     Object.entries(byCat).sort(([a],[b]) => a.localeCompare(b)).forEach(([cat, items]) => {
         const section = document.createElement('div');
@@ -247,26 +276,47 @@ function renderMenu(byCat) {
         const list = section.querySelector('.items-list');
         items.forEach(item => list.appendChild(buildItemCard(item)));
     });
+    window.scrollTo({ top: scrollY, behavior: 'instant' });
 }
 
 function buildItemCard(item) {
+    const isAvailable = item.inStock !== false; // undefined/true = available
     const card = document.createElement('div');
-    card.className = 'item-card';
+    card.className = 'item-card' + (isAvailable ? '' : ' oos');
     card.id = 'card-' + item.id;
     card.innerHTML = `
         <div class="item-info">
-            <div class="item-name">${item.name}</div>
+            <div class="item-name">${esc(item.name)}</div>
             <div class="item-price">₹${item.price}</div>
+            ${!isAvailable ? '<div class="oos-label">Out of Stock</div>' : ''}
         </div>
+        ${isAvailable ? `
         <div class="qty-ctrl">
             <button class="qty-btn qty-minus" data-id="${item.id}">−</button>
             <span class="qty-num" id="qty-${item.id}">0</span>
             <button class="qty-btn qty-plus" data-id="${item.id}">+</button>
-        </div>
+        </div>` : ''}
     `;
-    card.querySelector('.qty-plus').addEventListener('click', () => changeQty(item.id, 1));
-    card.querySelector('.qty-minus').addEventListener('click', () => changeQty(item.id, -1));
+    if (isAvailable) {
+        card.querySelector('.qty-plus').addEventListener('click', () => changeQty(item.id, 1));
+        card.querySelector('.qty-minus').addEventListener('click', () => changeQty(item.id, -1));
+    }
     return card;
+}
+
+/** Restore cart quantity labels after a menu re-render. */
+function restoreCartCounts() {
+    Object.entries(cart).forEach(([id, qty]) => {
+        const el = document.getElementById('qty-' + id);
+        if (el) el.textContent = qty;
+        const card = document.getElementById('card-' + id);
+        if (card) card.classList.toggle('in-cart', qty > 0);
+    });
+    updateCartBar();
+}
+
+function esc(s = '') {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function changeQty(id, delta) {

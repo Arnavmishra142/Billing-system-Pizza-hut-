@@ -35,6 +35,39 @@ Firebase credentials are in `js/firebase-config.js`. The project uses:
 
 No Firebase credentials need to be added to Replit secrets; they are already in the config file.
 
+## Menu Management (Admin)
+
+Inside the **Incoming Orders** drawer there is now a **📋 Menu** tab alongside the existing 🔔 Orders tab.
+
+- **Real-time list** — all `menu_items` documents, grouped by category, with name and price
+- **Search bar** — filter items by name instantly
+- **Category pills** — filter by category
+- **ON/OFF toggle** per item — writes `inStock: true/false` to Firestore
+- **Optimistic UI** — toggle flips immediately; rolls back if the write fails
+- **Live stats** — each category header shows item count and how many are currently off
+
+`js/menu-management.js` owns this feature; it is lazy-loaded on first tab open.
+
+### Availability field: `inStock`
+
+The canonical field is `inStock` (boolean) on each `menu_items` document:
+- `true` or absent → available (shown normally to customers)
+- `false` → out of stock (shown greyed-out with "Out of Stock" label, not orderable)
+
+`customer.html` now uses `onSnapshot` (real-time) so changes appear on the customer screen within seconds of toggling in the admin panel.
+
+### GitHub customer-panel repo change needed
+
+The separate repo at `teamdovolve-hue/Order-` has its own `js/menu.js` that filters items using the `available` field:
+```js
+.filter((item) => item.available !== false)
+```
+Change `available` → `inStock` in that line so it respects the same field this admin toggle writes to:
+```js
+.filter((item) => item.inStock !== false)
+```
+Only that one line in `js/menu.js` needs to change.
+
 ## Stack
 
 - HTML / CSS / Vanilla JS (ES modules via CDN)

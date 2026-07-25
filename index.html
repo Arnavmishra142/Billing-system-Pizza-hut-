@@ -628,16 +628,96 @@
         });
     </script>
 
-    <!-- 🔔 INCOMING ORDERS DRAWER -->
+    <!-- 🔔 INCOMING ORDERS + 📋 MENU DRAWER -->
     <div id="ordersOverlay" class="orders-overlay"></div>
     <div id="ordersDrawer" class="orders-drawer">
-        <div style="display:flex; align-items:center; justify-content:space-between; padding:18px 20px 10px;">
-            <h3 style="margin:0; font-size:1.1rem;">🔔 Incoming Orders</h3>
-            <button onclick="document.getElementById('ordersDrawer').classList.remove('open'); document.getElementById('ordersOverlay').classList.remove('open');"
+
+        <!-- Header -->
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:16px 20px 0;">
+            <h3 id="ordersDrawerTitle" style="margin:0; font-size:1.05rem;">🔔 Incoming Orders</h3>
+            <button id="ordersDrawerCloseBtn"
                 style="background:rgba(255,255,255,0.1); border:none; border-radius:8px; padding:6px 12px; color:inherit; font-size:1rem; cursor:pointer;">✕</button>
         </div>
-        <div id="ordersDrawerList" style="overflow-y:auto; padding:0 16px 24px; flex:1;"></div>
+
+        <!-- Tab bar -->
+        <div style="display:flex; gap:0; padding:12px 16px 0; border-bottom:1px solid rgba(255,255,255,0.08); flex-shrink:0;">
+            <button id="tabBtnOrders" onclick="switchDrawerTab('orders')" style="
+                flex:1; padding:9px 0; border:none; background:transparent; color:#f59e0b;
+                font-size:0.88rem; font-weight:700; cursor:pointer; border-bottom:2px solid #f59e0b;
+                transition:all 0.2s;">🔔 Orders</button>
+            <button id="tabBtnMenu" onclick="switchDrawerTab('menu')" style="
+                flex:1; padding:9px 0; border:none; background:transparent; color:rgba(255,255,255,0.4);
+                font-size:0.88rem; font-weight:700; cursor:pointer; border-bottom:2px solid transparent;
+                transition:all 0.2s;">📋 Menu</button>
+        </div>
+
+        <!-- Orders tab content -->
+        <div id="ordersTabContent" style="display:flex; flex-direction:column; flex:1; overflow:hidden;">
+            <div id="ordersDrawerList" style="overflow-y:auto; padding:0 16px 24px; flex:1;"></div>
+        </div>
+
+        <!-- Menu tab content -->
+        <div id="menuTabContent" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
+            <div class="mm-search-wrap">
+                <span class="mm-search-icon">🔍</span>
+                <input id="menuMgmtSearch" type="search" placeholder="Search menu items…" autocomplete="off">
+            </div>
+            <div id="menuMgmtCats" class="mm-cats"></div>
+            <div id="menuMgmtItems" style="flex:1; overflow-y:auto; padding:4px 16px 24px;"></div>
+        </div>
     </div>
+
+    <script>
+    // ── Drawer tab switcher ───────────────────────────────────────────────────
+    let _menuMgmtModule = null;
+
+    function switchDrawerTab(tab) {
+        const ordersTab  = document.getElementById('ordersTabContent');
+        const menuTab    = document.getElementById('menuTabContent');
+        const btnOrders  = document.getElementById('tabBtnOrders');
+        const btnMenu    = document.getElementById('tabBtnMenu');
+        const title      = document.getElementById('ordersDrawerTitle');
+
+        if (tab === 'orders') {
+            ordersTab.style.display = 'flex';
+            menuTab.style.display   = 'none';
+            btnOrders.style.color          = '#f59e0b';
+            btnOrders.style.borderBottom   = '2px solid #f59e0b';
+            btnMenu.style.color            = 'rgba(255,255,255,0.4)';
+            btnMenu.style.borderBottom     = '2px solid transparent';
+            title.textContent = '🔔 Incoming Orders';
+        } else {
+            ordersTab.style.display = 'none';
+            menuTab.style.display   = 'flex';
+            btnOrders.style.color          = 'rgba(255,255,255,0.4)';
+            btnOrders.style.borderBottom   = '2px solid transparent';
+            btnMenu.style.color            = '#6366f1';
+            btnMenu.style.borderBottom     = '2px solid #6366f1';
+            title.textContent = '📋 Menu Management';
+            // Lazy-load the menu management module on first open
+            if (!_menuMgmtModule) {
+                import('./js/menu-management.js').then(mod => {
+                    _menuMgmtModule = mod;
+                    mod.initMenuManagement();
+                });
+            } else {
+                _menuMgmtModule.initMenuManagement();
+            }
+        }
+    }
+
+    // Close button wires up after DOM ready
+    document.addEventListener('DOMContentLoaded', function() {
+        const closeBtn = document.getElementById('ordersDrawerCloseBtn');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', function() {
+                document.getElementById('ordersDrawer').classList.remove('open');
+                document.getElementById('ordersOverlay').classList.remove('open');
+            });
+        }
+        // Note: ordersOverlay click-to-close is handled by incoming-orders.js
+    });
+    </script>
 
     <!-- 🕒 24-HOUR HISTORY DRAWER -->
     <div id="historyOverlay" class="drawer-overlay" onclick="closeHistoryDrawer()"></div>
