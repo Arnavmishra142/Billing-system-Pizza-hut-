@@ -187,7 +187,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
 import {
     getFirestore,
-    collection, onSnapshot, addDoc, query, orderBy, serverTimestamp
+    collection, doc, onSnapshot, addDoc, query, orderBy, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 // ── Firebase init ──────────────────────────────────────────
@@ -209,20 +209,33 @@ document.getElementById('tableLabel').textContent = tableName;
 document.title = `Order — ${tableName}`;
 
 // ── State ──────────────────────────────────────────────────
-let cart    = {};   // { itemId: qty }
-let menuMap = {};   // { itemId: {name, price, category, inStock} }
+let cart         = {};   // { itemId: qty }
+let menuMap      = {};   // { itemId: {name, price, category, inStock} }
 let allCategories = [];
+let pizzaSizes   = { regular: true, medium: true, large: true }; // from settings/pizza_sizes
+let _lastByCat   = {};   // last rendered byCat — used to re-render on size change
 
-// ── Real-time menu listener ─────────────────────────────────
-// Uses onSnapshot so that when admin toggles an item off in the
-// Menu Management panel, the customer panel updates instantly.
+// ── Pizza helpers ───────────────────────────────────────────
+function isPizzaVariant(item) {
+    return (item.category || '').toLowerCase() === 'pizza' &&
+        /\(\s*(regular|medium|large)\s*\)/i.test(item.name || '');
+}
+function getPizzaSize(item) {
+    if (/\(\s*regular\s*\)/i.test(item.name || '')) return 'regular';
+    if (/\(\s*medium\s*\)/i.test(item.name || ''))  return 'medium';
+    if (/\(\s*large\s*\)/i.test(item.name || ''))   return 'large';
+    return null;
+}
+
+// ── Real-time listeners ─────────────────────────────────────
+// 1. Menu items — re-renders whenever any item changes
+// 2. Pizza sizes — re-renders whenever admin toggles a size in/out
 function loadMenu() {
+    // ── Menu items listener ──
     const q = query(collection(db, 'menu_items'), orderBy('category'));
-
     onSnapshot(q, (snap) => {
         const byCat = {};
         menuMap = {};
-
         snap.forEach(d => {
             const item = { id: d.id, ...d.data() };
             menuMap[d.id] = item;
@@ -230,15 +243,26 @@ function loadMenu() {
             if (!byCat[cat]) byCat[cat] = [];
             byCat[cat].push(item);
         });
-
-        allCategories = Object.keys(byCat).sort();
+        _lastByCat      = byCat;
+        allCategories   = Object.keys(byCat).sort();
         renderCatTabs(allCategories);
         renderMenu(byCat);
-        // Restore cart qty counts after re-render
         restoreCartCounts();
     }, () => {
         document.getElementById('menuContainer').innerHTML =
             `<div class="empty-menu">⚠️ Menu load failed.<br>Please check your connection.</div>`;
+    });
+
+    // ── Pizza sizes listener ──
+    // When admin toggles Regular/Medium/Large, re-render to show/hide OOS badge
+    onSnapshot(doc(db, 'settings', 'pizza_sizes'), (snap) => {
+        pizzaSizes = snap.exists()
+            ? { regular: true, medium: true, large: true, ...snap.data() }
+            : { regular: true, medium: true, large: true };
+        if (Object.keys(_lastByCat).length > 0) {
+            renderMenu(_lastByCat);
+            restoreCartCounts();
+        }
     });
 }
 
@@ -280,7 +304,15 @@ function renderMenu(byCat) {
 }
 
 function buildItemCard(item) {
-    const isAvailable = item.inStock !== false; // undefined/true = available
+    // Pizza variants: availability is controlled by size, not individual inStock
+    let isAvailable;
+    if (isPizzaVariant(item)) {
+        const size = getPizzaSize(item);
+        isAvailable = size ? pizzaSizes[size] !== false : item.inStock !== false;
+    } else {
+        isAvailable = item.inStock !== false; // undefined/true = available
+    }
+
     const card = document.createElement('div');
     card.className = 'item-card' + (isAvailable ? '' : ' oos');
     card.id = 'card-' + item.id;

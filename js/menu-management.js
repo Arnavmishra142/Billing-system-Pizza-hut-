@@ -1,22 +1,40 @@
 // menu-management.js
 // Real-time menu management panel for the admin drawer.
-// Uses onSnapshot so changes appear instantly on the customer panel.
+// Pizza availability is managed by size (Regular / Medium / Large) via
+// settings/pizza_sizes. All other items are toggled individually via inStock.
 
 import { db } from './firebase-config.js';
 import {
     collection,
     onSnapshot,
     doc,
-    updateDoc
+    updateDoc,
+    setDoc
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let _allItems    = [];
-let _search      = '';
-let _activeCat   = 'All';
-let _unsubscribe = null;
-let _initted     = false;
-let _toggling    = new Set(); // IDs currently being saved (prevent double-tap)
+let _allItems          = [];
+let _pizzaSizes        = { regular: true, medium: true, large: true };
+let _search            = '';
+let _activeCat         = 'All';
+let _unsubItems        = null;
+let _unsubPizzaSizes   = null;
+let _initted           = false;
+let _toggling          = new Set(); // item IDs currently saving
+let _pizzaSizeSaving   = new Set(); // size keys currently saving ('regular'|'medium'|'large')
+
+// ── Pizza helpers ─────────────────────────────────────────────────────────────
+function _isPizzaVariant(item) {
+    return (item.category || '').toLowerCase() === 'pizza' &&
+        /\(\s*(regular|medium|large)\s*\)/i.test(item.name || '');
+}
+
+function _getPizzaSize(item) {
+    if (/\(\s*regular\s*\)/i.test(item.name || '')) return 'regular';
+    if (/\(\s*medium\s*\)/i.test(item.name || ''))  return 'medium';
+    if (/\(\s*large\s*\)/i.test(item.name || ''))   return 'large';
+    return null;
+}
 
 // ── CSS ───────────────────────────────────────────────────────────────────────
 (function injectCSS() {
@@ -112,6 +130,39 @@ let _toggling    = new Set(); // IDs currently being saved (prevent double-tap)
             letter-spacing: 0;
         }
 
+        /* ── Pizza size card ── */
+        .mm-pizza-size-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 13px 14px;
+            border-radius: 10px;
+            margin-bottom: 6px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(245,158,11,0.06);
+            transition: opacity 0.2s;
+        }
+        .mm-pizza-size-card.mm-off {
+            opacity: 0.5;
+            background: rgba(255,255,255,0.03);
+        }
+        .mm-pizza-size-icon {
+            font-size: 1.6rem;
+            flex-shrink: 0;
+            width: 36px;
+            text-align: center;
+        }
+        .mm-pizza-size-label {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #f1f5f9;
+        }
+        .mm-pizza-size-desc {
+            font-size: 0.78rem;
+            color: rgba(255,255,255,0.4);
+            margin-top: 2px;
+        }
+
         /* ── Item row ── */
         .mm-item {
             display: flex;
@@ -184,22 +235,14 @@ let _toggling    = new Set(); // IDs currently being saved (prevent double-tap)
         }
         .mm-toggle.saving .mm-slider { opacity: 0.6; cursor: not-allowed; }
 
-        /* ── Empty state ── */
-        .mm-empty {
+        /* ── Empty / loading state ── */
+        .mm-empty, .mm-loading {
             text-align: center;
             padding: 40px 20px;
             color: rgba(255,255,255,0.3);
             font-size: 0.9rem;
         }
         .mm-empty-icon { font-size: 2.5rem; margin-bottom: 10px; }
-
-        /* ── Loading state ── */
-        .mm-loading {
-            text-align: center;
-            padding: 40px 20px;
-            color: rgba(255,255,255,0.35);
-            font-size: 0.9rem;
-        }
 
         /* ── Light mode overrides ── */
         .light-mode #menuMgmtSearch {
@@ -217,8 +260,13 @@ let _toggling    = new Set(); // IDs currently being saved (prevent double-tap)
             background: rgba(0,0,0,0.03);
             border-color: rgba(0,0,0,0.07);
         }
-        .light-mode .mm-item-name { color: #1e293b; }
-        .light-mode .mm-item-meta { color: rgba(0,0,0,0.45); }
+        .light-mode .mm-pizza-size-card {
+            background: rgba(245,158,11,0.08);
+            border-color: rgba(0,0,0,0.08);
+        }
+        .light-mode .mm-pizza-size-card.mm-off { background: rgba(0,0,0,0.03); }
+        .light-mode .mm-item-name, .light-mode .mm-pizza-size-label { color: #1e293b; }
+        .light-mode .mm-item-meta, .light-mode .mm-pizza-size-desc { color: rgba(0,0,0,0.45); }
         .light-mode .mm-cat-header { color: rgba(0,0,0,0.4); border-color: rgba(0,0,0,0.08); }
         .light-mode .mm-slider { background: rgba(0,0,0,0.15); }
         .light-mode .mm-slider::before { background: rgba(0,0,0,0.4); }
@@ -229,39 +277,35 @@ let _toggling    = new Set(); // IDs currently being saved (prevent double-tap)
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/**
- * Call once when the Menu tab is first opened.
- * On subsequent opens it just re-renders from the cached _allItems.
- */
 export function initMenuManagement() {
     if (!_initted) {
         _initted = true;
         _setupSearch();
         _showLoading();
-        _startListener();
+        _startItemsListener();
+        _startPizzaSizesListener();
     } else {
         _render();
     }
 }
 
-/** Stop the Firestore listener (e.g. on drawer close). */
 export function destroyMenuManagement() {
-    if (_unsubscribe) {
-        _unsubscribe();
-        _unsubscribe = null;
-    }
-    _initted     = false;
-    _allItems    = [];
-    _search      = '';
-    _activeCat   = 'All';
+    if (_unsubItems)      { _unsubItems();      _unsubItems      = null; }
+    if (_unsubPizzaSizes) { _unsubPizzaSizes(); _unsubPizzaSizes = null; }
+    _initted          = false;
+    _allItems         = [];
+    _pizzaSizes       = { regular: true, medium: true, large: true };
+    _search           = '';
+    _activeCat        = 'All';
     _toggling.clear();
+    _pizzaSizeSaving.clear();
 }
 
-// ── Firestore listener ────────────────────────────────────────────────────────
-function _startListener() {
-    if (_unsubscribe) { _unsubscribe(); }
+// ── Firestore listeners ───────────────────────────────────────────────────────
 
-    _unsubscribe = onSnapshot(
+function _startItemsListener() {
+    if (_unsubItems) { _unsubItems(); }
+    _unsubItems = onSnapshot(
         collection(db, 'menu_items'),
         (snap) => {
             _allItems = snap.docs
@@ -275,95 +319,178 @@ function _startListener() {
             _render();
         },
         (err) => {
-            console.error('[menu-mgmt] listener error:', err);
-            const container = document.getElementById('menuMgmtItems');
-            if (container) {
-                container.innerHTML = `<div class="mm-empty">
-                    <div class="mm-empty-icon">⚠️</div>
-                    <div>Failed to load menu.<br>Check your connection and try again.</div>
-                </div>`;
-            }
+            console.error('[menu-mgmt] items listener error:', err);
+            const el = document.getElementById('menuMgmtItems');
+            if (el) el.innerHTML = `<div class="mm-empty">
+                <div class="mm-empty-icon">⚠️</div>
+                <div>Failed to load menu. Check connection.</div>
+            </div>`;
         }
     );
 }
 
-// ── Toggle ────────────────────────────────────────────────────────────────────
+function _startPizzaSizesListener() {
+    if (_unsubPizzaSizes) { _unsubPizzaSizes(); }
+    _unsubPizzaSizes = onSnapshot(
+        doc(db, 'settings', 'pizza_sizes'),
+        (snap) => {
+            _pizzaSizes = snap.exists()
+                ? { regular: true, medium: true, large: true, ...snap.data() }
+                : { regular: true, medium: true, large: true };
+            _render();
+        },
+        (err) => console.error('[menu-mgmt] pizza sizes listener error:', err)
+    );
+}
+
+// ── Toggles ───────────────────────────────────────────────────────────────────
+
 async function _toggle(id) {
     if (_toggling.has(id)) return;
-
     const item = _allItems.find(i => i.id === id);
     if (!item) return;
 
-    const wasOn = item.inStock !== false; // treat undefined as true
-    const newVal = !wasOn;
-
-    // Optimistic update
-    item.inStock = newVal;
+    const wasOn = item.inStock !== false;
+    item.inStock = !wasOn;
     _toggling.add(id);
     _render();
 
     try {
-        await updateDoc(doc(db, 'menu_items', id), { inStock: newVal });
+        await updateDoc(doc(db, 'menu_items', id), { inStock: !wasOn });
     } catch (e) {
-        console.error('[menu-mgmt] toggle failed:', e);
-        // Revert on error
+        console.error('[menu-mgmt] item toggle failed:', e);
         item.inStock = wasOn;
         _render();
         _showToastError(`Could not update "${item.name}". Try again.`);
     } finally {
         _toggling.delete(id);
-        // No need to re-render here; onSnapshot will confirm and re-render
+    }
+}
+
+async function _togglePizzaSize(size) {
+    if (_pizzaSizeSaving.has(size)) return;
+
+    const wasOn = _pizzaSizes[size] !== false;
+    _pizzaSizes[size] = !wasOn;
+    _pizzaSizeSaving.add(size);
+    _render();
+
+    try {
+        // setDoc with merge so the doc is created if it doesn't exist yet
+        await setDoc(doc(db, 'settings', 'pizza_sizes'), { [size]: !wasOn }, { merge: true });
+    } catch (e) {
+        console.error('[menu-mgmt] pizza size toggle failed:', e);
+        _pizzaSizes[size] = wasOn;
+        _render();
+        _showToastError(`Could not update ${size} size. Try again.`);
+    } finally {
+        _pizzaSizeSaving.delete(size);
     }
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
+
 function _render() {
     const catContainer  = document.getElementById('menuMgmtCats');
     const itemContainer = document.getElementById('menuMgmtItems');
     if (!itemContainer) return;
 
-    const filtered = _getFiltered();
     _renderCategoryPills(catContainer);
-    _renderItems(itemContainer, filtered);
+
+    const scrollTop    = itemContainer.scrollTop;
+    const showPizza    = (_activeCat === 'All' || _activeCat === 'Pizza');
+    const showOthers   = (_activeCat !== 'Pizza');
+    const filteredNonPizza = showOthers ? _getFilteredNonPizza() : [];
+
+    let html = '';
+
+    if (showPizza) {
+        html += _buildPizzaSizesHtml();
+    }
+
+    if (showOthers && filteredNonPizza.length > 0) {
+        html += _buildItemsHtml(filteredNonPizza);
+    }
+
+    if (!html) {
+        html = `<div class="mm-empty">
+            <div class="mm-empty-icon">${_search ? '🔍' : '🍽️'}</div>
+            <div>${_search ? `No items match "${_search}"` : 'No items in this category.'}</div>
+        </div>`;
+    }
+
+    itemContainer.innerHTML = html;
+
+    // Wire pizza size toggle events
+    itemContainer.querySelectorAll('input[data-size]').forEach(cb => {
+        cb.addEventListener('change', () => _togglePizzaSize(cb.dataset.size));
+    });
+    // Wire item toggle events
+    itemContainer.querySelectorAll('input[data-id]').forEach(cb => {
+        cb.addEventListener('change', () => _toggle(cb.dataset.id));
+    });
+
+    itemContainer.scrollTop = scrollTop;
 }
 
-function _getFiltered() {
+function _getFilteredNonPizza() {
     return _allItems.filter(item => {
+        if (_isPizzaVariant(item)) return false; // pizza variants shown via sizes section
         const matchSearch = !_search || (item.name || '').toLowerCase().includes(_search);
         const matchCat    = _activeCat === 'All' || item.category === _activeCat;
         return matchSearch && matchCat;
     });
 }
 
-function _renderCategoryPills(el) {
-    if (!el) return;
-    const cats = ['All', ...[...new Set(_allItems.map(i => i.category || 'Other'))].sort()];
-    el.innerHTML = cats.map(cat => `
-        <button class="mm-cat-pill ${cat === _activeCat ? 'active' : ''}" data-cat="${cat}">
-            ${cat}
-        </button>
-    `).join('');
-    el.querySelectorAll('.mm-cat-pill').forEach(btn => {
-        btn.addEventListener('click', () => {
-            _activeCat = btn.dataset.cat;
-            _render();
-        });
-    });
+// ── Pizza sizes section builder ───────────────────────────────────────────────
+
+function _buildPizzaSizesHtml() {
+    const SIZE_META = [
+        { key: 'regular', icon: '🍕', label: 'Regular',  desc: 'All Regular-size pizzas' },
+        { key: 'medium',  icon: '🍕', label: 'Medium',   desc: 'All Medium-size pizzas'  },
+        { key: 'large',   icon: '🍕', label: 'Large',    desc: 'All Large-size pizzas'   },
+    ];
+
+    const offCount = SIZE_META.filter(s => _pizzaSizes[s.key] === false).length;
+    const stats    = offCount > 0
+        ? `3 sizes · <span style="color:#ef4444;">${offCount} off</span>`
+        : '3 sizes';
+
+    const rows = SIZE_META.map(({ key, icon, label, desc }) => {
+        const isOn     = _pizzaSizes[key] !== false;
+        const isSaving = _pizzaSizeSaving.has(key);
+        return `
+            <div class="mm-pizza-size-card ${isOn ? '' : 'mm-off'}">
+                <div class="mm-pizza-size-icon">${icon}</div>
+                <div class="mm-item-info">
+                    <div class="mm-pizza-size-label">
+                        ${label}
+                        ${!isOn ? '<span class="mm-oos-badge">OFF</span>' : ''}
+                    </div>
+                    <div class="mm-pizza-size-desc">${desc}</div>
+                </div>
+                <label class="mm-toggle ${isSaving ? 'saving' : ''}"
+                       title="${isOn ? 'Turn off — marks all ' + label + ' pizzas out of stock' : 'Turn on — makes all ' + label + ' pizzas available'}">
+                    <input type="checkbox" ${isOn ? 'checked' : ''} data-size="${key}" ${isSaving ? 'disabled' : ''}>
+                    <span class="mm-slider"></span>
+                </label>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="mm-cat-header">
+            <span>🍕 Pizza Sizes</span>
+            <span class="mm-cat-stats">${stats}</span>
+        </div>
+        ${rows}
+    `;
 }
 
-function _renderItems(el, items) {
-    if (!el) return;
+// ── Non-pizza items section builder ──────────────────────────────────────────
 
-    if (items.length === 0) {
-        el.innerHTML = `<div class="mm-empty">
-            <div class="mm-empty-icon">${_search ? '🔍' : '🍽️'}</div>
-            <div>${_search ? `No items match "${_search}"` : 'No items in this category.'}</div>
-        </div>`;
-        return;
-    }
-
-    // Preserve scroll position
-    const scrollTop = el.scrollTop;
+function _buildItemsHtml(items) {
+    const _esc = (s = '') => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
     // Group by category
     const groups = {};
@@ -373,27 +500,26 @@ function _renderItems(el, items) {
         groups[cat].push(item);
     });
 
-    el.innerHTML = Object.entries(groups).map(([cat, catItems]) => {
-        const offCount = catItems.filter(i => i.inStock === false).length;
+    return Object.entries(groups).map(([cat, catItems]) => {
+        const offCount  = catItems.filter(i => i.inStock === false).length;
         const statsText = offCount > 0
             ? `${catItems.length} items · <span style="color:#ef4444;">${offCount} off</span>`
             : `${catItems.length} items`;
 
         const rows = catItems.map(item => {
-            const isOn      = item.inStock !== false;
-            const isSaving  = _toggling.has(item.id);
-            const esc       = (s = '') => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
+            const isOn     = item.inStock !== false;
+            const isSaving = _toggling.has(item.id);
             return `
                 <div class="mm-item ${isOn ? '' : 'mm-off'}">
                     <div class="mm-item-info">
                         <div class="mm-item-name">
-                            ${esc(item.name)}
+                            ${_esc(item.name)}
                             ${!isOn ? '<span class="mm-oos-badge">OFF</span>' : ''}
                         </div>
                         <div class="mm-item-meta mm-item-price">₹${item.price || 0}</div>
                     </div>
-                    <label class="mm-toggle ${isSaving ? 'saving' : ''}" title="${isOn ? 'Turn off (mark out of stock)' : 'Turn on (mark available)'}">
+                    <label class="mm-toggle ${isSaving ? 'saving' : ''}"
+                           title="${isOn ? 'Turn off (out of stock)' : 'Turn on (available)'}">
                         <input type="checkbox" ${isOn ? 'checked' : ''} data-id="${item.id}" ${isSaving ? 'disabled' : ''}>
                         <span class="mm-slider"></span>
                     </label>
@@ -409,17 +535,29 @@ function _renderItems(el, items) {
             ${rows}
         `;
     }).join('');
+}
 
-    // Wire toggle events
-    el.querySelectorAll('.mm-toggle input[type="checkbox"]').forEach(cb => {
-        cb.addEventListener('change', () => _toggle(cb.dataset.id));
+// ── Category pills ────────────────────────────────────────────────────────────
+
+function _renderCategoryPills(el) {
+    if (!el) return;
+    // Include 'Pizza' as a category pill (shows the 3-size section)
+    const cats = ['All', ...[...new Set(_allItems.map(i => i.category || 'Other'))].sort()];
+    el.innerHTML = cats.map(cat => `
+        <button class="mm-cat-pill ${cat === _activeCat ? 'active' : ''}" data-cat="${cat}">
+            ${cat}
+        </button>
+    `).join('');
+    el.querySelectorAll('.mm-cat-pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+            _activeCat = btn.dataset.cat;
+            _render();
+        });
     });
-
-    // Restore scroll
-    el.scrollTop = scrollTop;
 }
 
 // ── Search setup ──────────────────────────────────────────────────────────────
+
 function _setupSearch() {
     const input = document.getElementById('menuMgmtSearch');
     if (!input) return;
@@ -430,6 +568,7 @@ function _setupSearch() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
 function _showLoading() {
     const el = document.getElementById('menuMgmtItems');
     if (el) el.innerHTML = `<div class="mm-loading">Loading menu items…</div>`;
