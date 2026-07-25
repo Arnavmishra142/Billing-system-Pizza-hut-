@@ -11,7 +11,8 @@ import {
     where,
     getDocs,
     doc,
-    updateDoc
+    updateDoc,
+    enableNetwork
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 // ── Fix 3: Count how many times a phone number has ordered ───────────────────
@@ -300,13 +301,21 @@ function renderDrawer(orders) {
 }
 
 // ── Firestore listener ────────────────────────────────────────────────────────
+let _unsubscribe = null;
+
 function startListening() {
+    // Cancel any existing listener before creating a new one
+    if (_unsubscribe) {
+        _unsubscribe();
+        _unsubscribe = null;
+    }
+
     const q = query(
         collection(db, 'pending_table_orders'),
         orderBy('createdAt', 'desc')
     );
 
-    onSnapshot(q, (snapshot) => {
+    _unsubscribe = onSnapshot(q, (snapshot) => {
         const pending = [];
 
         snapshot.forEach(docSnap => {
@@ -330,6 +339,9 @@ function startListening() {
         renderDrawer(pending);
     }, (err) => {
         console.error('incoming-orders listener error:', err);
+        // Retry after 5 s so a transient network hiccup doesn't kill the feed
+        _unsubscribe = null;
+        setTimeout(startListening, 5000);
     });
 }
 
@@ -343,4 +355,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (overlay) overlay.addEventListener('click', closeDrawer);
 
     startListening();
+
+    // Re-establish the listener whenever the tab comes back into focus.
+    // Browsers throttle/suspend WebSocket & long-poll connections in backgrounded
+    // tabs, which silently kills the Firestore onSnapshot feed. Calling
+    // enableNetwork + restarting the listener brings it back immediately.
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            enableNetwork(db)
+                .then(startListening)
+                .catch(() => startListening()); // start even if enableNetwork fails
+        }
+    });
 });
