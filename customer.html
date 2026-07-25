@@ -136,9 +136,10 @@
         /* ── OUT OF STOCK ── */
         .item-card.oos {
             opacity: 0.55;
-            pointer-events: none;
         }
+        /* Hide qty controls but keep the card scrollable/visible */
         .item-card.oos .qty-ctrl { display: none; }
+        .item-card.oos .qty-btn  { pointer-events: none; }
         .oos-label {
             font-size: 0.72rem; font-weight: 700;
             color: #ef4444;

@@ -1,8 +1,8 @@
 // ============================================================
 //  POS Service Worker — Cache-first for static assets
-//  Version: 3 (bump this number whenever you deploy changes)
+//  Version: 6 (bump this number whenever you deploy changes)
 // ============================================================
-const CACHE_NAME = 'pos-static-v5';
+const CACHE_NAME = 'pos-static-v6';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
@@ -72,10 +72,19 @@ self.addEventListener('fetch', (e) => {
     // 2. Non-GET requests (POST, etc.) — skip caching
     if (e.request.method !== 'GET') return;
 
-    // 3. Generated files that change on every build — always fetch from network
-    if (url.pathname.includes('groq-key.generated.js')) return;
+    // 3. Files that must always be fresh — go straight to network
+    if (
+        url.pathname.includes('groq-key.generated.js') ||
+        url.pathname.endsWith('.html') ||
+        url.pathname === '/'
+    ) {
+        e.respondWith(
+            fetch(e.request).catch(() => caches.match(e.request))
+        );
+        return;
+    }
 
-    // 3. Static assets — cache-first, update cache in background
+    // 4. Static assets (JS, CSS, etc.) — cache-first, update cache in background
     e.respondWith(
         caches.match(e.request).then((cachedResponse) => {
             // Kick off a background network fetch to keep cache fresh
