@@ -1,5 +1,5 @@
 import { db } from './firebase-config.js';
-import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { doc, setDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 document.addEventListener('DOMContentLoaded', () => {
     const cartItemsContainer = document.getElementById('cartItems');
@@ -374,6 +374,15 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem(kotTimeKey, Date.now().toString());
         }
 
+        // ── Sync KOT status to customer panel in real-time ─────────────────────
+        const _orderDocId = localStorage.getItem(`activeOrderDocId_${getCurrentTable()}`);
+        if (_orderDocId) {
+            updateDoc(doc(db, 'pending_table_orders', _orderDocId), {
+                status: 'kot',
+                kotAt: serverTimestamp()
+            }).catch(err => console.warn('[KOT] Customer panel sync failed:', err));
+        }
+
         const BOLD_ON = '\x1B\x45\x01';
         const BOLD_OFF = '\x1B\x45\x00';
         const now = new Date();
@@ -444,6 +453,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // ── Instant actions — no Firestore wait ──
             triggerRawBTPrint(billText);           // print fires immediately
+            // ── Mark order as completed in customer panel ───────────────────────────
+            const _coTable = getCurrentTable();
+            const _coDocId = localStorage.getItem(`activeOrderDocId_${_coTable}`);
+            if (_coDocId) {
+                updateDoc(doc(db, 'pending_table_orders', _coDocId), { status: 'completed' })
+                    .catch(err => console.warn('[Checkout] Customer panel sync failed:', err));
+                localStorage.removeItem(`activeOrderDocId_${_coTable}`);
+            }
             saveLocalCart([]);
             currentCart = [];
             renderCart();
@@ -480,6 +497,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const cartSnapshot = currentCart.slice();
 
             // ── Instant UI — go back immediately, no network wait ──
+            // ── Mark order as completed in customer panel ───────────────────────────
+            const _seTable    = getCurrentTable();
+            const _seDocId    = localStorage.getItem(`activeOrderDocId_${_seTable}`);
+            if (_seDocId) {
+                updateDoc(doc(db, 'pending_table_orders', _seDocId), { status: 'completed' })
+                    .catch(err => console.warn('[SaveExit] Customer panel sync failed:', err));
+                localStorage.removeItem(`activeOrderDocId_${_seTable}`);
+            }
             saveLocalCart([]);
             currentCart = [];
             renderCart();

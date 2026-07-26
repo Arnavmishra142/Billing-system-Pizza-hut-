@@ -273,6 +273,7 @@ function renderDrawer(orders) {
             // 2. Mark order as accepted in Firestore
             try {
                 await updateDoc(doc(db, 'pending_table_orders', id), { status: 'accepted' });
+                localStorage.setItem(`activeOrderDocId_${tableName}`, id);
             } catch(e) { console.warn('Could not update order status:', e); }
 
             closeDrawer();
