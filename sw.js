@@ -1,6 +1,6 @@
 // ============================================================
 //  POS Service Worker — Cache-first for static assets
-//  Version: 6 (bump this number whenever you deploy changes)
+//  Version: 7 (bump this number whenever you deploy changes)
 // ============================================================
 const CACHE_NAME = 'pos-static-v7';
 

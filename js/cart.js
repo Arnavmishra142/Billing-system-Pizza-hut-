@@ -1,5 +1,5 @@
 import { db } from './firebase-config.js';
-import { doc, setDoc, updateDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, collection } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 document.addEventListener('DOMContentLoaded', () => {
     const cartItemsContainer = document.getElementById('cartItems');
@@ -375,13 +375,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // ── Sync KOT status to customer panel in real-time ─────────────────────
-        const _orderDocId = localStorage.getItem(`activeOrderDocId_${getCurrentTable()}`);
-        if (_orderDocId) {
-            updateDoc(doc(db, 'pending_table_orders', _orderDocId), {
-                status: 'kot',
-                kotAt: serverTimestamp()
-            }).catch(err => console.warn('[KOT] Customer panel sync failed:', err));
-        }
+        (async () => {
+            try {
+                const _snap = await getDocs(query(
+                    collection(db, 'pending_table_orders'),
+                    where('tableId', '==', getCurrentTable())
+                ));
+                _snap.docs.forEach(_d => {
+                    const _st = (_d.data().status || 'pending').toLowerCase();
+                    if (['pending', 'accepted', 'kot'].includes(_st)) {
+                        updateDoc(_d.ref, { status: 'kot', kotAt: serverTimestamp() })
+                            .catch(e => console.warn('[KOT] sync failed:', e));
+                    }
+                });
+            } catch(e) { console.warn('[KOT] query failed:', e); }
+        })();
 
         const BOLD_ON = '\x1B\x45\x01';
         const BOLD_OFF = '\x1B\x45\x00';
@@ -454,13 +462,21 @@ document.addEventListener('DOMContentLoaded', () => {
             // ── Instant actions — no Firestore wait ──
             triggerRawBTPrint(billText);           // print fires immediately
             // ── Mark order as completed in customer panel ───────────────────────────
-            const _coTable = getCurrentTable();
-            const _coDocId = localStorage.getItem(`activeOrderDocId_${_coTable}`);
-            if (_coDocId) {
-                updateDoc(doc(db, 'pending_table_orders', _coDocId), { status: 'completed' })
-                    .catch(err => console.warn('[Checkout] Customer panel sync failed:', err));
-                localStorage.removeItem(`activeOrderDocId_${_coTable}`);
-            }
+            (async () => {
+                try {
+                    const _snap = await getDocs(query(
+                        collection(db, 'pending_table_orders'),
+                        where('tableId', '==', getCurrentTable())
+                    ));
+                    _snap.docs.forEach(_d => {
+                        const _st = (_d.data().status || 'pending').toLowerCase();
+                        if (['pending', 'accepted', 'kot'].includes(_st)) {
+                            updateDoc(_d.ref, { status: 'completed' })
+                                .catch(e => console.warn('[Checkout] sync failed:', e));
+                        }
+                    });
+                } catch(e) { console.warn('[Checkout] query failed:', e); }
+            })();
             saveLocalCart([]);
             currentCart = [];
             renderCart();
@@ -498,13 +514,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // ── Instant UI — go back immediately, no network wait ──
             // ── Mark order as completed in customer panel ───────────────────────────
-            const _seTable    = getCurrentTable();
-            const _seDocId    = localStorage.getItem(`activeOrderDocId_${_seTable}`);
-            if (_seDocId) {
-                updateDoc(doc(db, 'pending_table_orders', _seDocId), { status: 'completed' })
-                    .catch(err => console.warn('[SaveExit] Customer panel sync failed:', err));
-                localStorage.removeItem(`activeOrderDocId_${_seTable}`);
-            }
+            (async () => {
+                try {
+                    const _snap = await getDocs(query(
+                        collection(db, 'pending_table_orders'),
+                        where('tableId', '==', getCurrentTable())
+                    ));
+                    _snap.docs.forEach(_d => {
+                        const _st = (_d.data().status || 'pending').toLowerCase();
+                        if (['pending', 'accepted', 'kot'].includes(_st)) {
+                            updateDoc(_d.ref, { status: 'completed' })
+                                .catch(e => console.warn('[SaveExit] sync failed:', e));
+                        }
+                    });
+                } catch(e) { console.warn('[SaveExit] query failed:', e); }
+            })();
             saveLocalCart([]);
             currentCart = [];
             renderCart();
