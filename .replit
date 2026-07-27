@@ -37,3 +37,8 @@ externalPort = 80
 deploymentTarget = "static"
 build = ["node", "build.js"]
 publicDir = "."
+
+[userenv]
+
+[userenv.shared]
+FIREBASE_TOKEN = "1//0gQuiqJmwsXh6CgYIARAAGBASNwF-L9Ir-3RJf8bju9FxcQGNU8WHcey27eXMRxWPTO073Jj-DGC7zmy6Pi-cehe2iEpL8GYua7U"
