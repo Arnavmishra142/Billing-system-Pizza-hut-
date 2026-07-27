@@ -2,36 +2,32 @@ import { db, functions } from './firebase-config.js';
 import { doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, collection } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 
-// ── Authoritative table-lock release ─────────────────────────────────────────
+// ── Customer table-lock release (best-effort, non-blocking) ──────────────────
 //
-// Calls the releaseTableLock Cloud Function (requires the operator to be signed
-// in with Firebase Auth via the PIN flow in admin.js).  The function runs with
-// Admin SDK privileges — it atomically marks all session-tracked orders as
-// "completed" and clears the customer_table_sessions record.
+// Calls the releaseTableLock Cloud Function to clean up any active customer
+// session for this table (used by the Customer Order Panel integration).
 //
-// IMPORTANT: There is no fallback to direct Firestore writes.
+// This is fire-and-forget: billing operations (save to Firestore, clear cart,
+// navigate back) always proceed regardless of whether the Cloud Function
+// succeeds.  The function only exists to serve the customer-facing panel; the
+// billing panel's core flow must never be blocked by it.
 //
-// If the Cloud Function fails, this function throws so the caller (Bill & Settle
-// or Save & Exit) can show an error and keep the table lock active.  The operator
-// must not be allowed to silently navigate away while a lock is still held.
-//
-// Return values:
-//   Resolves normally — lock was released (or no active session existed).
-//   Throws            — lock release failed; caller must show error and NOT proceed.
-//
+// If the operator is not signed in via Firebase Auth, or the function is not
+// yet deployed, the call silently fails and we continue normally.
 // ─────────────────────────────────────────────────────────────────────────────
-async function releaseTableLock(tableName, releaseReason) {
-    const fn = httpsCallable(functions, 'releaseTableLock');
+function releaseTableLockInBackground(tableName, releaseReason) {
     try {
-        const result = await fn({ tableId: tableName, releaseReason });
-        console.log(`[LockRelease] Cloud Function succeeded for "${tableName}", reason: ${releaseReason}`, result.data);
-        // released:false with reason no_active_session is not an error —
-        // the table simply had no customer lock, which is valid.
+        const fn = httpsCallable(functions, 'releaseTableLock');
+        fn({ tableId: tableName, releaseReason })
+            .then(result => {
+                console.log(`[LockRelease] OK for "${tableName}", reason: ${releaseReason}`, result.data);
+            })
+            .catch(err => {
+                // Non-fatal — customer panel lock cleanup failed, but billing is done.
+                console.warn(`[LockRelease] Cloud Function failed (non-fatal) for "${tableName}":`, err.code, err.message);
+            });
     } catch (err) {
-        console.error(`[LockRelease] Cloud Function FAILED for "${tableName}":`, err.code, err.message);
-        // Re-throw so the caller knows release did not succeed.
-        // The caller is responsible for keeping the UI in an error state.
-        throw err;
+        console.warn('[LockRelease] Could not invoke Cloud Function (non-fatal):', err.message);
     }
 }
 
@@ -490,21 +486,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ── Bill & Settle ──────────────────────────────────────────────────────────
-    // Flow:
-    //  1. Print the bill immediately (no network wait).
-    //  2. AWAIT releaseTableLock — the operator waits for confirmed release.
-    //  3. Only after successful release: clear cart, save history, navigate back.
-    //  4. If release fails: show error, keep cart intact, re-enable button.
-    //     The operator must not be allowed to navigate away with a dangling lock.
     if (checkoutBtn) {
-        checkoutBtn.addEventListener('click', async () => {
+        checkoutBtn.addEventListener('click', () => {
             if (currentCart.length === 0) return;
 
             const tableName    = getCurrentTable();
             const customerName = getCurrentCustomer();
             const total        = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
-            // ── Build bill text immediately (no network wait) ──────────────────
+            // ── Snapshot cart before clearing ─────────────────────────────────
+            const cartSnapshot = currentCart.slice();
+
+            // ── Build and print bill immediately (no network wait) ────────────
             const BOLD_ON = '\x1B\x45\x01';
             const BOLD_OFF = '\x1B\x45\x00';
             let shortOrderId = String(Date.now()).slice(-5);
@@ -530,39 +523,15 @@ document.addEventListener('DOMContentLoaded', () => {
             billText += centerText(`TOTAL: Rs ${total}`) + "\n\n";
             billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
 
-            // ── Snapshot cart before any async work ───────────────────────────
-            const cartSnapshot = currentCart.slice();
-
-            // ── Print immediately — no network dependency ─────────────────────
             triggerRawBTPrint(billText);
 
-            // ── Disable button and await lock release ─────────────────────────
-            const originalText = checkoutBtn.textContent;
-            checkoutBtn.disabled = true;
-            checkoutBtn.textContent = 'Releasing…';
-
-            try {
-                await releaseTableLock(tableName, 'bill_settle');
-            } catch (err) {
-                // Release failed — keep table lock active.
-                // DO NOT clear the cart or navigate away.
-                console.error('[Checkout] releaseTableLock failed — table lock kept active:', err);
-                checkoutBtn.disabled = false;
-                checkoutBtn.textContent = originalText;
-                _showReleaseError('Table release failed. Check your connection and try again.');
-                return;
-            }
-
-            // ── Release confirmed — now settle ────────────────────────────────
-            checkoutBtn.disabled = false;
-            checkoutBtn.textContent = originalText;
-
+            // ── Clear cart and navigate back immediately ───────────────────────
             saveLocalCart([]);
             currentCart = [];
             renderCart();
             setTimeout(() => { if (backToTablesBtn) backToTablesBtn.click(); }, 300);
 
-            // ── Save to Firestore in background (fire & forget) ───────────────
+            // ── Save sale to Firestore (fire & forget) ────────────────────────
             const billId = `SALE_${Date.now()}`;
             setDoc(doc(db, "sales_history", billId), {
                 table: tableName,
@@ -576,49 +545,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
                 window.saveToGhostHistory(orderId, total, cartSnapshot);
             }
+
+            // ── Release customer table lock in background (non-blocking) ──────
+            releaseTableLockInBackground(tableName, 'bill_settle');
         });
     }
 
     // ── Save & Exit ────────────────────────────────────────────────────────────
-    // Flow:
-    //  1. AWAIT releaseTableLock — always attempted, regardless of cart length.
-    //     A table can have an active customer session even if the billing panel's
-    //     local cart is empty (e.g. operator opened the table but didn't add items,
-    //     or items were removed after the customer locked the table).
-    //  2. Only after successful release: clear cart, save history, navigate back.
-    //  3. If release fails: show error, re-enable button. Do not navigate away.
     if (saveExitBtn) {
-        saveExitBtn.addEventListener('click', async () => {
+        saveExitBtn.addEventListener('click', () => {
             const tableName    = getCurrentTable();
             const customerName = getCurrentCustomer();
-
-            // Snapshot current cart before any async work.
-            // currentCart may be empty — we still attempt release because a
-            // customer session may exist independently of the local cart state.
             const cartSnapshot = currentCart.slice();
             const total        = cartSnapshot.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
-            // ── Disable button and await lock release ─────────────────────────
-            const originalText = saveExitBtn.textContent;
-            saveExitBtn.disabled = true;
-            saveExitBtn.textContent = 'Releasing…';
-
-            try {
-                await releaseTableLock(tableName, 'save_exit');
-            } catch (err) {
-                // Release failed — keep table lock active.
-                // DO NOT clear the cart or navigate away.
-                console.error('[SaveExit] releaseTableLock failed — table lock kept active:', err);
-                saveExitBtn.disabled = false;
-                saveExitBtn.textContent = originalText;
-                _showReleaseError('Table release failed. Check your connection and try again.');
-                return;
-            }
-
-            // ── Release confirmed — now exit ──────────────────────────────────
-            saveExitBtn.disabled = false;
-            saveExitBtn.textContent = originalText;
-
+            // ── Clear cart and navigate back immediately ───────────────────────
             saveLocalCart([]);
             currentCart = [];
             renderCart();
@@ -639,6 +580,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot);
                 }
             }
+
+            // ── Release customer table lock in background (non-blocking) ──────
+            releaseTableLockInBackground(tableName, 'save_exit');
         });
     }
 });
