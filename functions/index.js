@@ -9,40 +9,41 @@
  *
  *   customerAuth        — Secure customer authentication bridge.
  *                         Supports two actions:
- *                           action='lookup'  — normalize phone, check existing profile,
- *                                              return { found, name, phone, token } or
- *                                              { found: false }.
- *                           action='create'  — create new customer profile + Auth user
- *                                              after name confirmation in customer panel.
- *                         Identity is always derived server-side; the browser never
- *                         writes to customers or customer_uid_map directly.
+ *                           action='lookup'  — normalize phone, check existing
+ *                                              profile, return { found, name, phone,
+ *                                              token } or { found: false }.
+ *                           action='create'  — create new customer profile + Auth
+ *                                              user after name confirmation.
+ *                         Identity is always derived server-side.
  *
- *   createCustomerOrder — Validates Firebase Auth identity (must come from customerAuth
- *                         custom token), acquires or reuses the table lock atomically,
- *                         then creates the pending_table_orders document.  Customer
- *                         identity (phone, name) is derived from server-side profile —
- *                         browser-supplied identity data is ignored.
+ *   createCustomerOrder — Validates Firebase Auth identity (must come from
+ *                         customerAuth custom token), acquires or reuses the table
+ *                         lock atomically, creates the pending_table_orders document.
+ *                         Customer identity is derived from server-side profile only.
  *
- *   releaseTableLock    — Called by the Billing Panel (Bill & Settle / SAVE & EXIT
- *                         paths in cart.js).  Verifies the billingOperator claim, then
- *                         atomically releases the session and marks active orders
- *                         completed.
+ *   releaseTableLock    — Called by the Billing Panel (Bill & Settle / SAVE & EXIT).
+ *                         Verifies the billingOperator claim, atomically releases the
+ *                         session and marks active orders completed.
  *
  * Deploy:
  *   cd functions && npm install
  *   firebase deploy --only functions,firestore
  *
- * Secrets / params required before deploy:
+ * Secrets required before deploy:
  *   firebase functions:secrets:set ADMIN_PIN
- *   firebase functions:params:set REQUIRE_PHONE_VERIFICATION=false
- *   (set to true once DLT/OTP approval is complete)
+ *   (enter your chosen PIN when prompted)
+ *
+ * OTP gate — to enable phone verification once DLT approval is complete:
+ *   Change REQUIRE_PHONE_VERIFICATION below from false → true and redeploy.
+ *   No database migration needed; existing profiles have phoneVerified: false
+ *   and will be prompted to verify on their next order attempt.
  *
  * Local emulator:
  *   firebase emulators:start --only functions,firestore,auth
  */
 
 const { onCall, HttpsError }  = require('firebase-functions/v2/https');
-const { defineSecret, defineString } = require('firebase-functions/params');
+const { defineSecret }        = require('firebase-functions/params');
 const { initializeApp }       = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth }             = require('firebase-admin/auth');
@@ -54,35 +55,28 @@ const auth = getAuth();
 // ── Admin PIN (Firebase Secret Manager) ──────────────────────────────────────
 // Must be provisioned before deployment:
 //   firebase functions:secrets:set ADMIN_PIN
-//   (enter your chosen PIN when prompted)
-//
 // defineSecret() binds the secret to the function at deploy time.  If the
-// secret is missing or the function cannot access it, Cloud Functions will
-// refuse to start the function — fail closed, never fall back to a default.
+// secret is missing the function refuses to start — fail closed, no default.
 const adminPinSecret = defineSecret('ADMIN_PIN');
 
 // ── Phone Verification Gate ───────────────────────────────────────────────────
-// Set to 'false' while OTP/DLT approval is pending (temporary phone bridge).
-// Set to 'true' once DLT approval is complete; the backend will then reject
-// any customer whose profile has phoneVerified !== true.
-// The browser cannot influence this check.
+// Controls whether customers must have phoneVerified: true to place orders.
 //
-// Deploy command:
-//   firebase functions:params:set REQUIRE_PHONE_VERIFICATION=false
-//   firebase functions:params:set REQUIRE_PHONE_VERIFICATION=true   (when ready)
-const requirePhoneVerificationParam = defineString('REQUIRE_PHONE_VERIFICATION', {
-    default: 'false',
-    description: 'Set to true to require phoneVerified:true on customer profiles before allowing orders.',
-});
+// Currently: false  (OTP/DLT approval is pending — temporary phone bridge)
+// When ready: change to true and run: firebase deploy --only functions
+//
+// No database migration is needed when you flip this — existing profiles that
+// have phoneVerified: false will simply be rejected and prompted to verify.
+// ─────────────────────────────────────────────────────────────────────────────
+const REQUIRE_PHONE_VERIFICATION = false;  // ← change to true when DLT/OTP is approved
 
 // ── Stable UID constants ──────────────────────────────────────────────────────
 // Billing operator uses a single shared UID.
 const OPERATOR_UID = 'billing-operator-main';
 
-// Customer Auth UIDs are deterministically derived from the normalized phone
-// number so the same customer always gets the same UID across sessions:
+// Customer Auth UIDs are deterministically derived from the normalised phone
+// so the same customer always gets the same UID across sessions:
 //   uid = 'cust_' + e164_digits   e.g. 'cust_919876543210'
-// This prevents duplicate Auth accounts for the same customer.
 function customerUidFromPhone(normalizedPhone) {
     return 'cust_' + normalizedPhone.replace(/^\+/, '');
 }
@@ -96,19 +90,14 @@ function normalizePhone(raw) {
     if (!raw || typeof raw !== 'string') {
         throw new HttpsError('invalid-argument', 'Phone number is required.');
     }
-    // Strip whitespace, dashes, dots, parentheses
     let s = raw.trim().replace(/[\s\-().]/g, '');
-    // Convert legacy '00' prefix
     if (s.startsWith('00')) s = '+' + s.slice(2);
-    // Indian local: leading '0'
-    if (/^0\d{10}$/.test(s)) s = '+91' + s.slice(1);
-    // Bare 10-digit Indian local
-    if (/^\d{10}$/.test(s)) s = '+91' + s;
-    // Numeric E.164 without '+'
+    if (/^0\d{10}$/.test(s))  s = '+91' + s.slice(1);
+    if (/^\d{10}$/.test(s))   s = '+91' + s;
     if (/^91\d{10}$/.test(s)) s = '+' + s;
-    // Validate E.164
     if (!/^\+\d{10,15}$/.test(s)) {
-        throw new HttpsError('invalid-argument', `Invalid phone number: "${raw}". Use format +91XXXXXXXXXX.`);
+        throw new HttpsError('invalid-argument',
+            `Invalid phone number: "${raw}". Use format +91XXXXXXXXXX.`);
     }
     return s;
 }
@@ -120,10 +109,13 @@ function normalizePhone(raw) {
 async function ensureCustomerAuthUser(uid, displayName) {
     try {
         await auth.getUser(uid);
+        console.log(`[ensureCustomerAuthUser] existing user found: ${uid}`);
     } catch (e) {
         if (e.code === 'auth/user-not-found') {
             await auth.createUser({ uid, displayName: displayName || '' });
+            console.log(`[ensureCustomerAuthUser] created new user: ${uid}`);
         } else {
+            console.error(`[ensureCustomerAuthUser] auth.getUser failed for ${uid}:`, e);
             throw e;
         }
     }
@@ -143,7 +135,6 @@ async function ensureOperatorAccount() {
             throw e;
         }
     }
-    // Idempotent — safe to call on every sign-in
     await auth.setCustomUserClaims(OPERATOR_UID, { billingOperator: true });
 }
 
@@ -155,7 +146,8 @@ function requireBillingOperator(authContext) {
         throw new HttpsError('unauthenticated', 'Caller must be authenticated.');
     }
     if (!authContext.token?.billingOperator) {
-        throw new HttpsError('permission-denied', 'Caller is not an authorized billing operator.');
+        throw new HttpsError('permission-denied',
+            'Caller is not an authorized billing operator.');
     }
 }
 
@@ -171,26 +163,22 @@ function requireBillingOperator(authContext) {
 exports.operatorSignIn = onCall(
     { region: 'asia-south1', secrets: [adminPinSecret] },
     async (request) => {
-    const { pin } = request.data || {};
+        const { pin } = request.data || {};
 
-    // Fail closed: if the secret is unavailable (misconfigured deployment),
-    // reject all attempts rather than accepting any default value.
-    const expectedPin = adminPinSecret.value();
-    if (!expectedPin) {
-        throw new HttpsError('internal', 'Server configuration error: ADMIN_PIN secret is not set.');
+        const expectedPin = adminPinSecret.value();
+        if (!expectedPin) {
+            throw new HttpsError('internal',
+                'Server configuration error: ADMIN_PIN secret is not set.');
+        }
+        if (!pin || pin !== expectedPin) {
+            throw new HttpsError('unauthenticated', 'Invalid PIN.');
+        }
+
+        await ensureOperatorAccount();
+        const token = await auth.createCustomToken(OPERATOR_UID, { billingOperator: true });
+        return { token };
     }
-
-    if (!pin || pin !== expectedPin) {
-        throw new HttpsError('unauthenticated', 'Invalid PIN.');
-    }
-
-    await ensureOperatorAccount();
-
-    // Custom token carries the claim directly so the client has it immediately
-    // (before the token is exchanged with Firebase Auth servers).
-    const token = await auth.createCustomToken(OPERATOR_UID, { billingOperator: true });
-    return { token };
-});
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // customerAuth
@@ -200,94 +188,117 @@ exports.operatorSignIn = onCall(
 // server-side; the browser cannot supply or forge customer UID, phone, or name.
 //
 // ── action: 'lookup' ──────────────────────────────────────────────────────────
-// Check whether a customer profile exists for the given phone number.
+// Request:  { action: 'lookup', phone: '+91XXXXXXXXXX' }
+// Response (exists):    { found: true, name, phone, token }
+// Response (not found): { found: false, phone }
 //
-// Request:
-//   { action: 'lookup', phone: '+91XXXXXXXXXX' }
-//
-// Response (customer exists):
-//   { found: true, name: 'Rahul', phone: '+91XXXXXXXXXX', token: '<custom-token>' }
-//
-// Response (customer not found):
-//   { found: false, phone: '+91XXXXXXXXXX' }
-//
-// Behaviour:
-//   - Phone is normalised and validated server-side.
-//   - If the profile exists, a stable Firebase Auth user is created/reused
-//     (UID = 'cust_' + digits) and a custom token is returned.
-//   - lastLoginAt is updated on the profile.
-//   - No account is created for new customers at this stage.
-//   - Existing profiles without authUid or phoneVerified are handled safely
-//     (authUid is backfilled, phoneVerified defaults to false).
+// Phone is normalised server-side.  If the profile exists a custom token is
+// returned; lastLoginAt is updated.  Existing profiles missing authUid or
+// phoneVerified are backfilled non-destructively.
 //
 // ── action: 'create' ──────────────────────────────────────────────────────────
-// Create a new customer profile after the customer confirms their name.
-// Must only be called after a 'lookup' that returned found:false.
+// Request:  { action: 'create', phone: '+91XXXXXXXXXX', name: 'Rahul' }
+// Response: { token, uid, name, phone }
 //
-// Request:
-//   { action: 'create', phone: '+91XXXXXXXXXX', name: 'Rahul' }
+// Called after the customer confirms their name.  If a race condition produces
+// an already-existing profile the function falls back to lookup behaviour.
+// New profiles are written with phoneVerified: false.
 //
-// Response:
-//   { token: '<custom-token>', uid: 'cust_91XXXXXXXXXX', name: 'Rahul', phone: '+91XXXXXXXXXX' }
-//
-// Behaviour:
-//   - Phone is normalised server-side.
-//   - If a profile already exists (race condition), falls back to lookup behaviour.
-//   - Creates the Firestore profile with phoneVerified: false.
-//   - Creates/reuses the Firebase Auth user with the stable UID.
-//   - Writes customer_uid_map/{uid} → { phone } for efficient reverse lookup.
-//   - Never creates a duplicate Auth account for the same phone number.
-//
-// ── OTP compatibility note ─────────────────────────────────────────────────────
-// New customers are created with phoneVerified: false.  When DLT/OTP approval is
-// complete, set REQUIRE_PHONE_VERIFICATION=true and implement an OTP-success
-// handler that updates phoneVerified: true on the customer profile.
-// Existing accounts continue working; no migration or recreation is required.
+// Error codes the caller should handle:
+//   invalid-argument  — bad phone format or missing name
+//   internal          — log message included; surface it for debugging
 // ─────────────────────────────────────────────────────────────────────────────
 exports.customerAuth = onCall({ region: 'asia-south1' }, async (request) => {
     const { action, phone: rawPhone, name: rawName } = request.data || {};
 
+    console.log(`[customerAuth] action=${action} rawPhone=${rawPhone}`);
+
+    // ── Input validation ──────────────────────────────────────────────────────
     if (!action || !['lookup', 'create'].includes(action)) {
         throw new HttpsError('invalid-argument', "action must be 'lookup' or 'create'.");
     }
 
-    const phone = normalizePhone(rawPhone);
-    const uid   = customerUidFromPhone(phone);
+    let phone;
+    try {
+        phone = normalizePhone(rawPhone);
+    } catch (e) {
+        // normalizePhone already throws HttpsError; just re-throw
+        throw e;
+    }
 
-    const profileRef    = db.collection('customers').doc(phone);
-    const uidMapRef     = db.collection('customer_uid_map').doc(uid);
+    const uid        = customerUidFromPhone(phone);
+    const profileRef = db.collection('customers').doc(phone);
+    const uidMapRef  = db.collection('customer_uid_map').doc(uid);
 
+    console.log(`[customerAuth] normalised phone=${phone} uid=${uid}`);
+
+    // ── lookup ────────────────────────────────────────────────────────────────
     if (action === 'lookup') {
-        const snap = await profileRef.get();
+        let snap;
+        try {
+            snap = await profileRef.get();
+        } catch (e) {
+            console.error('[customerAuth:lookup] Firestore get failed:', e);
+            throw new HttpsError('internal',
+                `Firestore read failed: ${e.message}`);
+        }
 
         if (!snap.exists) {
+            console.log(`[customerAuth:lookup] no profile for ${phone}`);
             return { found: false, phone };
         }
 
+        console.log(`[customerAuth:lookup] profile found for ${phone}`);
         const profile = snap.data();
 
-        // Backfill authUid and phoneVerified on legacy profiles that predate this flow.
-        // This is a safe, non-destructive write — existing fields are preserved.
+        // Backfill legacy profiles — non-destructive, preserves all existing fields
         const backfill = {};
-        if (!profile.authUid)                  backfill.authUid = uid;
-        if (profile.phoneVerified === undefined) backfill.phoneVerified = false;
+        if (!profile.authUid)                   backfill.authUid = uid;
+        if (profile.phoneVerified === undefined)  backfill.phoneVerified = false;
 
-        const updatePayload = {
-            lastLoginAt: FieldValue.serverTimestamp(),
-            ...backfill,
-        };
-        await profileRef.update(updatePayload);
+        try {
+            await profileRef.update({
+                lastLoginAt: FieldValue.serverTimestamp(),
+                ...backfill,
+            });
+        } catch (e) {
+            // Non-fatal — profile read succeeded; continue with login
+            console.warn('[customerAuth:lookup] profile update failed (non-fatal):', e);
+        }
 
-        // Ensure reverse-lookup map exists
-        await uidMapRef.set({ phone, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        try {
+            await uidMapRef.set(
+                { phone, updatedAt: FieldValue.serverTimestamp() },
+                { merge: true }
+            );
+        } catch (e) {
+            console.warn('[customerAuth:lookup] uidMapRef.set failed (non-fatal):', e);
+        }
 
-        // Ensure Auth user exists with the stable UID
-        await ensureCustomerAuthUser(uid, profile.name || '');
+        try {
+            await ensureCustomerAuthUser(uid, profile.name || '');
+        } catch (e) {
+            console.error('[customerAuth:lookup] ensureCustomerAuthUser failed:', e);
+            throw new HttpsError('internal',
+                `Auth user creation failed: ${e.message}`);
+        }
 
-        // Issue custom token; customerPhone claim is read by createCustomerOrder
-        // so identity is always derived from the server-issued token.
-        const token = await auth.createCustomToken(uid, { customerPhone: phone });
+        let token;
+        try {
+            token = await auth.createCustomToken(uid, { customerPhone: phone });
+        } catch (e) {
+            // Most common cause: the service account is missing the
+            // "Service Account Token Creator" IAM role in Google Cloud Console.
+            // Go to: IAM & Admin → IAM → find the App Engine / Firebase service
+            // account → add role "Service Account Token Creator".
+            console.error('[customerAuth:lookup] createCustomToken failed:', e);
+            throw new HttpsError('internal',
+                `Custom token creation failed: ${e.message}. ` +
+                'Ensure the service account has the "Service Account Token Creator" IAM role.'
+            );
+        }
 
+        console.log(`[customerAuth:lookup] success for ${phone}`);
         return {
             found: true,
             name:  profile.name  || '',
@@ -296,26 +307,64 @@ exports.customerAuth = onCall({ region: 'asia-south1' }, async (request) => {
         };
     }
 
+    // ── create ────────────────────────────────────────────────────────────────
     if (action === 'create') {
         const name = (rawName || '').trim();
         if (!name) {
-            throw new HttpsError('invalid-argument', 'Customer name is required for account creation.');
+            throw new HttpsError('invalid-argument',
+                'Customer name is required for account creation.');
         }
 
-        // Check for race condition — profile already exists
-        const snap = await profileRef.get();
+        let snap;
+        try {
+            snap = await profileRef.get();
+        } catch (e) {
+            console.error('[customerAuth:create] Firestore get failed:', e);
+            throw new HttpsError('internal', `Firestore read failed: ${e.message}`);
+        }
+
         if (snap.exists) {
-            // Treat as lookup: return existing profile
+            // Race condition — profile already created; treat as lookup
+            console.log(`[customerAuth:create] profile already exists, treating as lookup`);
             const profile = snap.data();
             const backfill = {};
-            if (!profile.authUid)                  backfill.authUid = uid;
-            if (profile.phoneVerified === undefined) backfill.phoneVerified = false;
-            await profileRef.update({ lastLoginAt: FieldValue.serverTimestamp(), ...backfill });
-            await uidMapRef.set({ phone, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-            await ensureCustomerAuthUser(uid, profile.name || name);
-            const token = await auth.createCustomToken(uid, { customerPhone: phone });
+            if (!profile.authUid)                   backfill.authUid = uid;
+            if (profile.phoneVerified === undefined)  backfill.phoneVerified = false;
+            try {
+                await profileRef.update({
+                    lastLoginAt: FieldValue.serverTimestamp(),
+                    ...backfill,
+                });
+            } catch (e) {
+                console.warn('[customerAuth:create] profile update failed (non-fatal):', e);
+            }
+            try {
+                await uidMapRef.set(
+                    { phone, updatedAt: FieldValue.serverTimestamp() },
+                    { merge: true }
+                );
+            } catch (e) {
+                console.warn('[customerAuth:create] uidMapRef.set failed (non-fatal):', e);
+            }
+            try {
+                await ensureCustomerAuthUser(uid, profile.name || name);
+            } catch (e) {
+                console.error('[customerAuth:create] ensureCustomerAuthUser failed:', e);
+                throw new HttpsError('internal',
+                    `Auth user creation failed: ${e.message}`);
+            }
+            let token;
+            try {
+                token = await auth.createCustomToken(uid, { customerPhone: phone });
+            } catch (e) {
+                console.error('[customerAuth:create] createCustomToken failed:', e);
+                throw new HttpsError('internal',
+                    `Custom token creation failed: ${e.message}. ` +
+                    'Ensure the service account has the "Service Account Token Creator" IAM role.'
+                );
+            }
             return {
-                found: true,   // signals caller that account already existed
+                found: true,
                 name:  profile.name || name,
                 phone: profile.phone || phone,
                 token,
@@ -323,25 +372,47 @@ exports.customerAuth = onCall({ region: 'asia-south1' }, async (request) => {
             };
         }
 
-        // New customer — create profile, Auth user, and UID map atomically.
+        // New customer — write profile, UID map, and Auth user
+        console.log(`[customerAuth:create] creating new profile for ${phone}`);
         const now = FieldValue.serverTimestamp();
-        await Promise.all([
-            profileRef.set({
-                phone,
-                name,
-                phoneVerified: false,   // upgraded to true when OTP flow completes
-                authUid:       uid,
-                createdAt:     now,
-                updatedAt:     now,
-                lastLoginAt:   now,
-            }),
-            uidMapRef.set({ phone, createdAt: now }),
-        ]);
+        try {
+            await Promise.all([
+                profileRef.set({
+                    phone,
+                    name,
+                    phoneVerified: false,
+                    authUid:       uid,
+                    createdAt:     now,
+                    updatedAt:     now,
+                    lastLoginAt:   now,
+                }),
+                uidMapRef.set({ phone, createdAt: now }),
+            ]);
+        } catch (e) {
+            console.error('[customerAuth:create] Firestore write failed:', e);
+            throw new HttpsError('internal', `Profile creation failed: ${e.message}`);
+        }
 
-        await ensureCustomerAuthUser(uid, name);
+        try {
+            await ensureCustomerAuthUser(uid, name);
+        } catch (e) {
+            console.error('[customerAuth:create] ensureCustomerAuthUser failed:', e);
+            throw new HttpsError('internal',
+                `Auth user creation failed: ${e.message}`);
+        }
 
-        const token = await auth.createCustomToken(uid, { customerPhone: phone });
+        let token;
+        try {
+            token = await auth.createCustomToken(uid, { customerPhone: phone });
+        } catch (e) {
+            console.error('[customerAuth:create] createCustomToken failed:', e);
+            throw new HttpsError('internal',
+                `Custom token creation failed: ${e.message}. ` +
+                'Ensure the service account has the "Service Account Token Creator" IAM role.'
+            );
+        }
 
+        console.log(`[customerAuth:create] success for ${phone}`);
         return { token, uid, name, phone };
     }
 });
@@ -356,16 +427,9 @@ exports.customerAuth = onCall({ region: 'asia-south1' }, async (request) => {
 // Firestore customer profile.  Browser-supplied customer name/phone/UID values
 // are ignored — the backend is the sole authority for customer identity.
 //
-// OTP gate: if REQUIRE_PHONE_VERIFICATION=true, customers with
-//   phoneVerified !== true are rejected before any lock is acquired.
-//   This check cannot be bypassed from the browser.
-//
-// Lock strategy — double-booking prevention:
-//   A per-table sentinel document `table_locks/{tableId}` is both READ and
-//   WRITTEN in the same Firestore transaction.  Because a transaction retries
-//   on write-write conflicts, two concurrent requests for the same table will
-//   never both succeed: one will retry, find the lock already taken, and throw
-//   `already-exists`.
+// OTP gate: controlled by the REQUIRE_PHONE_VERIFICATION constant at the top
+// of this file.  Set it to true and redeploy to enable enforcement.
+// The browser cannot influence this check.
 //
 // Request:
 //   {
@@ -377,58 +441,52 @@ exports.customerAuth = onCall({ region: 'asia-south1' }, async (request) => {
 // Response:
 //   {
 //     orderId:   "<doc ID>",
-//     tableId:   "Table 1",   // authoritative — may differ from request if
-//                             // customer already holds a lock on another table
+//     tableId:   "Table 1",   // authoritative — may differ from request
 //     sessionId: "<customerUid>",
 //     lockId:    "<string>"
 //   }
 //
 // Error codes:
-//   unauthenticated  — not signed in, or not signed in via customerAuth
+//   unauthenticated   — not signed in via customerAuth
 //   permission-denied — phoneVerified check failed (when gate is enabled)
-//   not-found        — customer profile not found for this UID
-//   already-exists   — table is occupied by a different customer
-//   invalid-argument — missing or invalid request fields
+//   not-found         — customer profile not found for this UID
+//   already-exists    — table occupied by a different customer
+//   invalid-argument  — missing/invalid request fields
 // ─────────────────────────────────────────────────────────────────────────────
 exports.createCustomerOrder = onCall({ region: 'asia-south1' }, async (request) => {
     if (!request.auth?.uid) {
-        throw new HttpsError('unauthenticated', 'Customer must be signed in with Firebase Auth.');
+        throw new HttpsError('unauthenticated',
+            'Customer must be signed in with Firebase Auth.');
     }
 
     const customerUid = request.auth.uid;
 
-    // ── Derive phone from the server-issued token claim (not from request.data) ──
+    // ── Derive phone from the server-issued token claim (not request.data) ────
     const customerPhone = request.auth.token?.customerPhone || '';
     if (!customerPhone) {
-        throw new HttpsError(
-            'unauthenticated',
-            'Session was not established via customerAuth. Please sign in through the customer login flow.'
-        );
+        throw new HttpsError('unauthenticated',
+            'Session was not established via customerAuth. ' +
+            'Please sign in through the customer login flow.');
     }
 
     // ── Look up the server-side customer profile ──────────────────────────────
     const profileSnap = await db.collection('customers').doc(customerPhone).get();
     if (!profileSnap.exists) {
-        throw new HttpsError(
-            'not-found',
-            'Customer profile not found. Please complete registration through the customer panel.'
-        );
+        throw new HttpsError('not-found',
+            'Customer profile not found. ' +
+            'Please complete registration through the customer panel.');
     }
     const profile = profileSnap.data();
 
-    // ── OTP verification gate ─────────────────────────────────────────────────
-    // Reads the server-controlled parameter; the browser cannot influence this.
-    const requireVerification = requirePhoneVerificationParam.value() === 'true';
-    if (requireVerification && profile.phoneVerified !== true) {
-        throw new HttpsError(
-            'permission-denied',
-            'Phone number verification is required to place orders. Please complete OTP verification.'
-        );
+    // ── OTP verification gate (server-controlled, cannot be bypassed) ─────────
+    if (REQUIRE_PHONE_VERIFICATION && profile.phoneVerified !== true) {
+        throw new HttpsError('permission-denied',
+            'Phone number verification is required to place orders. ' +
+            'Please complete OTP verification.');
     }
 
     // ── Authoritative customer identity (server-side only) ────────────────────
     const customerName = profile.name || '';
-    // phone is already validated in customerPhone
 
     // ── Parse and validate request payload ───────────────────────────────────
     const { requestedTableId, items = [] } = request.data || {};
@@ -458,20 +516,16 @@ exports.createCustomerOrder = onCall({ region: 'asia-south1' }, async (request) 
         let isNewLock = false;
 
         if (existingSession && existingSession.lockStatus === 'active') {
-            // This customer already holds a lock on a table — honour it.
-            // The requested table is ignored; the customer is always redirected
-            // to their locked table so they cannot silently switch mid-session.
+            // Customer already holds a lock — honour it; ignore requested table.
             assignedTableId = existingSession.activeTableId;
             lockId          = existingSession.lockId;
 
         } else if (existingTableLock && existingTableLock.status === 'active') {
             if (existingTableLock.customerUid !== customerUid) {
-                // Table is held by a different customer — reject.
                 throw new HttpsError('already-exists',
                     `Table "${requestedTableId}" is currently occupied by another customer.`);
             }
-            // Same customer — table lock active but session doc was cleared
-            // (edge case recovery).
+            // Same customer — recover from partial state
             assignedTableId = requestedTableId;
             lockId          = existingTableLock.lockId;
 
@@ -489,17 +543,18 @@ exports.createCustomerOrder = onCall({ region: 'asia-south1' }, async (request) 
             });
         }
 
-        // ── Create order document ─────────────────────────────────────────────
         const orderId    = `ORD_${Date.now()}_${customerUid.slice(0, 10)}`;
         const orderRef   = db.collection('pending_table_orders').doc(orderId);
-        const totalPrice = items.reduce((s, i) => s + (Number(i.price) * (Number(i.quantity) || 1)), 0);
+        const totalPrice = items.reduce(
+            (s, i) => s + (Number(i.price) * (Number(i.quantity) || 1)), 0
+        );
 
         tx.set(orderRef, {
             tableId: assignedTableId,
             customer: {
                 uid:   customerUid,
-                name:  customerName,   // from server-side profile, not request.data
-                phone: customerPhone,  // from server-issued token claim, not request.data
+                name:  customerName,   // from server-side profile
+                phone: customerPhone,  // from server-issued token claim
             },
             customerSessionId: customerUid,
             tableLockId:       lockId,
@@ -509,7 +564,6 @@ exports.createCustomerOrder = onCall({ region: 'asia-south1' }, async (request) 
             createdAt: FieldValue.serverTimestamp(),
         });
 
-        // ── Update customer session ───────────────────────────────────────────
         const newOrderIds = (existingSession?.activeOrderIds || []).concat(orderId);
         const sessionData = {
             customerUid,
@@ -526,7 +580,7 @@ exports.createCustomerOrder = onCall({ region: 'asia-south1' }, async (request) 
         return { orderId, tableId: assignedTableId, sessionId: customerUid, lockId };
     });
 
-    // Update profile lastLoginAt outside the transaction (non-critical)
+    // Update lastLoginAt outside the transaction (non-critical)
     db.collection('customers').doc(customerPhone).update({
         lastLoginAt: FieldValue.serverTimestamp(),
     }).catch(e => console.warn('[createCustomerOrder] lastLoginAt update failed:', e));
@@ -545,11 +599,12 @@ exports.createCustomerOrder = onCall({ region: 'asia-south1' }, async (request) 
 //   { tableId: "Table 1", releaseReason: "bill_settle" | "save_exit" }
 //
 // Response:
-//   { released: true,  tableId, releaseReason }   — session found and released
-//   { released: false, reason: "no_active_session" } — no active session (safe, not an error)
+//   { released: true,  tableId, releaseReason }
+//   { released: false, reason: "no_active_session" }
 //
-// On any error (auth failure, invalid args, Firestore error), throws HttpsError.
-// The caller must treat a thrown error as "table still locked" and not proceed.
+// On any error throws HttpsError — the caller must NOT proceed with clear/navigate.
+// Uses composite index on customer_table_sessions (activeTableId + lockStatus)
+// — deployed via: firebase deploy --only firestore:indexes
 // ─────────────────────────────────────────────────────────────────────────────
 exports.releaseTableLock = onCall({ region: 'asia-south1' }, async (request) => {
     requireBillingOperator(request.auth);
@@ -563,8 +618,8 @@ exports.releaseTableLock = onCall({ region: 'asia-south1' }, async (request) => 
             `releaseReason must be one of: ${valid.join(', ')}`);
     }
 
-    // Query the session by table — uses the composite index on
-    // (activeTableId ASC, lockStatus ASC) in firestore.indexes.json.
+    // Composite index on (activeTableId ASC, lockStatus ASC) required.
+    // Deploy with: firebase deploy --only firestore:indexes
     const sessSnap = await db.collection('customer_table_sessions')
         .where('activeTableId', '==', tableId)
         .where('lockStatus',    '==', 'active')
@@ -580,10 +635,9 @@ exports.releaseTableLock = onCall({ region: 'asia-south1' }, async (request) => 
         ? sessDoc.data().activeOrderIds : [];
 
     await db.runTransaction(async (tx) => {
-        // Mark all tracked orders as completed.
-        // Only orders that belong to this session are touched — identified by
-        // activeOrderIds on the session document.  We never complete orders by
-        // tableId alone, which would risk completing another customer's orders.
+        // Only orders tracked by this session are touched.
+        // Never complete orders by tableId alone — would risk affecting
+        // another customer's concurrent orders on a different session.
         for (const orderId of orderIds) {
             const ref  = db.collection('pending_table_orders').doc(orderId);
             const snap = await tx.get(ref);
@@ -595,7 +649,6 @@ exports.releaseTableLock = onCall({ region: 'asia-south1' }, async (request) => 
             }
         }
 
-        // Release the customer session
         tx.update(sessDoc.ref, {
             lockStatus:     'released',
             activeTableId:  null,
@@ -604,8 +657,6 @@ exports.releaseTableLock = onCall({ region: 'asia-south1' }, async (request) => 
             releasedAt:     FieldValue.serverTimestamp(),
         });
 
-        // Clear the per-table sentinel so the table becomes available again.
-        // Written by Admin SDK — Firestore rules deny all browser writes to table_locks.
         const tableLockRef = db.collection('table_locks').doc(tableId);
         tx.set(tableLockRef, {
             customerUid: null,
