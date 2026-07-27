@@ -41,3 +41,4 @@ publicDir = "."
 [userenv]
 
 [userenv.shared]
+CLOUDFLARE_API_TOKEN = "cfat_B9n2W59jDokfLLREWBQYuaYN4JrASQ0DsE8nDDlD5914e639"
