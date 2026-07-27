@@ -33,5 +33,6 @@ export const storage = getStorage(app);
 // Firebase Auth — persists operator session automatically in IndexedDB
 export const auth = getAuth(app);
 
-// Firebase Functions — region must match Cloud Function deployment region
+// Firebase Functions — routed through Cloudflare Worker (free tier, no Blaze plan required)
 export const functions = getFunctions(app, 'asia-south1');
+functions.customDomain = 'https://young-moon-f3b7.realarnavm.workers.dev';

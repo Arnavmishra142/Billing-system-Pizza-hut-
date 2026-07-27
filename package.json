@@ -3,9 +3,6 @@
   "version": "1.0.0",
   "description": "",
   "main": "build.js",
-  "dependencies": {
-    "serve": "^14.2.6"
-  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "node build.js",
@@ -13,5 +10,8 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "serve": "^14.2.6"
+  }
 }
