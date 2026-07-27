@@ -17,7 +17,8 @@ const STATIC_ASSETS = [
     '/js/admin.js',
     '/js/expense.js',
     '/manifest.json',
-    '/sounds/'
+    '/sounds/pop.sfx.mp3',
+    '/sounds/cash.sfx.mp3'
 ];
 
 // ── INSTALL: pre-cache all static assets ──────────────────
