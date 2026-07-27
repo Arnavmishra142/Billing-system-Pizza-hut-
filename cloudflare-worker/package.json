@@ -1,0 +1,14 @@
+{
+  "name": "pizza-billing-functions",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker — Firebase callable functions for Pizza Hut Billing System",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev":    "wrangler dev",
+    "secrets": "node scripts/set-secrets.js"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

@@ -1,0 +1,14 @@
+name = "pizza-billing-functions"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+FIREBASE_PROJECT_ID = "billing-system-f8531"
+
+# Secrets — set these via: wrangler secret put <NAME>
+# (never put secret values in this file)
+#
+#   wrangler secret put FIREBASE_PRIVATE_KEY
+#   wrangler secret put FIREBASE_CLIENT_EMAIL
+#   wrangler secret put ADMIN_PIN
