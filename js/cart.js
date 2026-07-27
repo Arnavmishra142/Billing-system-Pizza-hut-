@@ -3,83 +3,68 @@ import { doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, collect
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 
 // ── Authoritative table-lock release ─────────────────────────────────────────
-// Primary path: calls the releaseTableLock Cloud Function (requires the
-// operator to be signed in with Firebase Auth via the PIN flow in admin.js).
-// The function runs with Admin SDK privileges — it atomically marks all
-// session-tracked orders as "completed" and clears the customer_table_sessions
-// record.
 //
-// Fallback path (used if the function call fails for any reason): direct
-// Firestore writes that mirror the pre-Cloud-Function behaviour.  This path
-// is retained so the billing panel keeps working during the transition period
-// before Cloud Functions are deployed / operator auth is fully wired up.
-// Remove the fallback once the Cloud Function is stable in production.
+// Calls the releaseTableLock Cloud Function (requires the operator to be signed
+// in with Firebase Auth via the PIN flow in admin.js).  The function runs with
+// Admin SDK privileges — it atomically marks all session-tracked orders as
+// "completed" and clears the customer_table_sessions record.
+//
+// IMPORTANT: There is no fallback to direct Firestore writes.
+//
+// If the Cloud Function fails, this function throws so the caller (Bill & Settle
+// or Save & Exit) can show an error and keep the table lock active.  The operator
+// must not be allowed to silently navigate away while a lock is still held.
+//
+// Return values:
+//   Resolves normally — lock was released (or no active session existed).
+//   Throws            — lock release failed; caller must show error and NOT proceed.
+//
+// ─────────────────────────────────────────────────────────────────────────────
 async function releaseTableLock(tableName, releaseReason) {
-    // ── Primary: Cloud Function ───────────────────────────────────────────────
+    const fn = httpsCallable(functions, 'releaseTableLock');
     try {
-        const fn = httpsCallable(functions, 'releaseTableLock');
-        await fn({ tableId: tableName, releaseReason });
-        console.log(`[LockRelease] Cloud Function succeeded for "${tableName}", reason: ${releaseReason}`);
-        return;
-    } catch (fnErr) {
-        // permission-denied = operator not yet authenticated via Firebase Auth
-        // (Cloud Functions not deployed, or sign-in not completed)
-        console.warn(`[LockRelease] Cloud Function failed (${fnErr.code}), falling back to direct Firestore:`, fnErr.message);
-    }
-
-    // ── Fallback: direct Firestore writes ─────────────────────────────────────
-    // TODO: remove once Cloud Function deployment and operator auth are stable.
-    try {
-        const sessSnap = await getDocs(query(
-            collection(db, 'customer_table_sessions'),
-            where('activeTableId', '==', tableName),
-            where('lockStatus', '==', 'active')
-        ));
-
-        if (!sessSnap.empty) {
-            const sessDoc        = sessSnap.docs[0];
-            const activeOrderIds = Array.isArray(sessDoc.data().activeOrderIds)
-                ? sessDoc.data().activeOrderIds : [];
-
-            const orderUpdates = activeOrderIds.map(orderId =>
-                updateDoc(doc(db, 'pending_table_orders', orderId), { status: 'completed' })
-                    .catch(e => console.warn('[LockRelease-fallback] order failed:', orderId, e))
-            );
-            const sessionRelease = updateDoc(sessDoc.ref, {
-                lockStatus:     'released',
-                activeTableId:  null,
-                activeOrderIds: [],
-                releaseReason,
-                releasedAt:     serverTimestamp()
-            }).catch(e => console.warn('[LockRelease-fallback] session failed:', e));
-
-            await Promise.all([...orderUpdates, sessionRelease]);
-            console.log(`[LockRelease-fallback] Firestore release done for "${tableName}"`);
-            return;
-        }
-
-        // No session record — fall back to simple tableId-based completion
-        await _legacyCompleteByTable(tableName, 'LockRelease-legacy');
-
-    } catch (e) {
-        console.warn('[LockRelease-fallback] failed:', e);
-        try { await _legacyCompleteByTable(tableName, 'LockRelease-emergency'); }
-        catch (e2) { console.warn('[LockRelease] all paths failed:', e2); }
+        const result = await fn({ tableId: tableName, releaseReason });
+        console.log(`[LockRelease] Cloud Function succeeded for "${tableName}", reason: ${releaseReason}`, result.data);
+        // released:false with reason no_active_session is not an error —
+        // the table simply had no customer lock, which is valid.
+    } catch (err) {
+        console.error(`[LockRelease] Cloud Function FAILED for "${tableName}":`, err.code, err.message);
+        // Re-throw so the caller knows release did not succeed.
+        // The caller is responsible for keeping the UI in an error state.
+        throw err;
     }
 }
 
-async function _legacyCompleteByTable(tableName, tag) {
-    const snap = await getDocs(query(
-        collection(db, 'pending_table_orders'),
-        where('tableId', '==', tableName)
-    ));
-    snap.docs.forEach(_d => {
-        const st = (_d.data().status || 'pending').toLowerCase();
-        if (['pending', 'accepted', 'kot'].includes(st)) {
-            updateDoc(_d.ref, { status: 'completed' })
-                .catch(e => console.warn(`[${tag}] sync failed:`, e));
-        }
-    });
+// ── Error banner helper ───────────────────────────────────────────────────────
+// Shows a temporary error message near the action buttons.
+// Auto-removes after 6 seconds.  Uses the dark POS colour palette.
+function _showReleaseError(message) {
+    const existing = document.getElementById('lock-release-error');
+    if (existing) existing.remove();
+
+    const banner = document.createElement('div');
+    banner.id = 'lock-release-error';
+    banner.style.cssText = [
+        'position:fixed',
+        'bottom:80px',
+        'left:50%',
+        'transform:translateX(-50%)',
+        'background:#7f1d1d',
+        'color:#fecaca',
+        'border:1px solid #ef4444',
+        'border-radius:10px',
+        'padding:12px 20px',
+        'font-size:0.9rem',
+        'font-weight:600',
+        'text-align:center',
+        'z-index:9999',
+        'max-width:90vw',
+        'box-shadow:0 4px 20px rgba(0,0,0,0.5)',
+    ].join(';');
+    banner.textContent = '⚠️ ' + message;
+    document.body.appendChild(banner);
+
+    setTimeout(() => banner.remove(), 6000);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -504,14 +489,22 @@ document.addEventListener('DOMContentLoaded', () => {
         kotBtn.addEventListener('click', () => printKOT(false));
     }
 
+    // ── Bill & Settle ──────────────────────────────────────────────────────────
+    // Flow:
+    //  1. Print the bill immediately (no network wait).
+    //  2. AWAIT releaseTableLock — the operator waits for confirmed release.
+    //  3. Only after successful release: clear cart, save history, navigate back.
+    //  4. If release fails: show error, keep cart intact, re-enable button.
+    //     The operator must not be allowed to navigate away with a dangling lock.
     if (checkoutBtn) {
         checkoutBtn.addEventListener('click', async () => {
             if (currentCart.length === 0) return;
-            const tableName = getCurrentTable();
-            const customerName = getCurrentCustomer();
-            const total = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
-            // ── Build bill text immediately (no network wait) ──
+            const tableName    = getCurrentTable();
+            const customerName = getCurrentCustomer();
+            const total        = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+
+            // ── Build bill text immediately (no network wait) ──────────────────
             const BOLD_ON = '\x1B\x45\x01';
             const BOLD_OFF = '\x1B\x45\x00';
             let shortOrderId = String(Date.now()).slice(-5);
@@ -537,20 +530,39 @@ document.addEventListener('DOMContentLoaded', () => {
             billText += centerText(`TOTAL: Rs ${total}`) + "\n\n";
             billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
 
-            // ── Snapshot cart before clearing ──
+            // ── Snapshot cart before any async work ───────────────────────────
             const cartSnapshot = currentCart.slice();
 
-            // ── Instant actions — no Firestore wait ──
-            triggerRawBTPrint(billText);           // print fires immediately
-            // ── Release table lock + mark orders completed (Bill & Settle) ─────────
-            releaseTableLock(getCurrentTable(), 'bill_settle')
-                .catch(e => console.warn('[Checkout] lock release error:', e));
+            // ── Print immediately — no network dependency ─────────────────────
+            triggerRawBTPrint(billText);
+
+            // ── Disable button and await lock release ─────────────────────────
+            const originalText = checkoutBtn.textContent;
+            checkoutBtn.disabled = true;
+            checkoutBtn.textContent = 'Releasing…';
+
+            try {
+                await releaseTableLock(tableName, 'bill_settle');
+            } catch (err) {
+                // Release failed — keep table lock active.
+                // DO NOT clear the cart or navigate away.
+                console.error('[Checkout] releaseTableLock failed — table lock kept active:', err);
+                checkoutBtn.disabled = false;
+                checkoutBtn.textContent = originalText;
+                _showReleaseError('Table release failed. Check your connection and try again.');
+                return;
+            }
+
+            // ── Release confirmed — now settle ────────────────────────────────
+            checkoutBtn.disabled = false;
+            checkoutBtn.textContent = originalText;
+
             saveLocalCart([]);
             currentCart = [];
             renderCart();
             setTimeout(() => { if (backToTablesBtn) backToTablesBtn.click(); }, 300);
 
-            // ── Save to Firestore in background (fire & forget) ──
+            // ── Save to Firestore in background (fire & forget) ───────────────
             const billId = `SALE_${Date.now()}`;
             setDoc(doc(db, "sales_history", billId), {
                 table: tableName,
@@ -567,39 +579,65 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // ── Save & Exit ────────────────────────────────────────────────────────────
+    // Flow:
+    //  1. AWAIT releaseTableLock — always attempted, regardless of cart length.
+    //     A table can have an active customer session even if the billing panel's
+    //     local cart is empty (e.g. operator opened the table but didn't add items,
+    //     or items were removed after the customer locked the table).
+    //  2. Only after successful release: clear cart, save history, navigate back.
+    //  3. If release fails: show error, re-enable button. Do not navigate away.
     if (saveExitBtn) {
-        saveExitBtn.addEventListener('click', () => {
-            if (currentCart.length === 0) {
-                if (backToTablesBtn) backToTablesBtn.click();
-                return;
-            }
+        saveExitBtn.addEventListener('click', async () => {
             const tableName    = getCurrentTable();
             const customerName = getCurrentCustomer();
-            const total        = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
-            // ── Snapshot cart before clearing ──
+            // Snapshot current cart before any async work.
+            // currentCart may be empty — we still attempt release because a
+            // customer session may exist independently of the local cart state.
             const cartSnapshot = currentCart.slice();
+            const total        = cartSnapshot.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
-            // ── Release table lock + mark orders completed (SAVE & EXIT) ────────
-            releaseTableLock(getCurrentTable(), 'save_exit')
-                .catch(e => console.warn('[SaveExit] lock release error:', e));
+            // ── Disable button and await lock release ─────────────────────────
+            const originalText = saveExitBtn.textContent;
+            saveExitBtn.disabled = true;
+            saveExitBtn.textContent = 'Releasing…';
+
+            try {
+                await releaseTableLock(tableName, 'save_exit');
+            } catch (err) {
+                // Release failed — keep table lock active.
+                // DO NOT clear the cart or navigate away.
+                console.error('[SaveExit] releaseTableLock failed — table lock kept active:', err);
+                saveExitBtn.disabled = false;
+                saveExitBtn.textContent = originalText;
+                _showReleaseError('Table release failed. Check your connection and try again.');
+                return;
+            }
+
+            // ── Release confirmed — now exit ──────────────────────────────────
+            saveExitBtn.disabled = false;
+            saveExitBtn.textContent = originalText;
+
             saveLocalCart([]);
             currentCart = [];
             renderCart();
             if (backToTablesBtn) backToTablesBtn.click();
 
-            // ── Save to Firestore in background (fire & forget) ──
-            setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
-                table: tableName,
-                customer: customerName,
-                items: cartSnapshot,
-                total: total,
-                timestamp: new Date().toISOString()
-            }).catch(err => console.error("Save & Exit Firestore failed:", err));
+            // ── Save to Firestore in background only if there were items ──────
+            if (cartSnapshot.length > 0) {
+                setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
+                    table: tableName,
+                    customer: customerName,
+                    items: cartSnapshot,
+                    total: total,
+                    timestamp: new Date().toISOString()
+                }).catch(err => console.error("Save & Exit Firestore failed:", err));
 
-            if (window.saveToGhostHistory) {
-                let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
-                window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot);
+                if (window.saveToGhostHistory) {
+                    let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
+                    window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot);
+                }
             }
         });
     }

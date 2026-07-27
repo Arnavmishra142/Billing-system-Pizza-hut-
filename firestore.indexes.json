@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "customer_table_sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "activeTableId", "order": "ASCENDING" },
+        { "fieldPath": "lockStatus",    "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
