@@ -233,6 +233,13 @@ function renderDrawer(orders) {
 
         // Accept → load items into POS cart then open the table
         card.querySelector('.oc-btn-accept').addEventListener('click', async () => {
+            // ── Capture authoritative session identifiers from the order ──────────
+            // These are stored as UI convenience only.  Settlement decisions in
+            // cart.js use Firestore (customer_table_sessions) as the source of truth.
+            const customerUid      = order.customer?.uid          || '';
+            const customerSessionId = order.customerSessionId      || '';
+            const tableLockId      = order.tableLockId             || '';
+
             // 1. Merge customer items into localStorage cart for this table
             const cartKey = `cart_${tableName}_C1`;
             let existing = [];
@@ -273,7 +280,13 @@ function renderDrawer(orders) {
             // 2. Mark order as accepted in Firestore
             try {
                 await updateDoc(doc(db, 'pending_table_orders', id), { status: 'accepted' });
+
+                // UI convenience cache — NOT the source of truth for settlement.
+                // cart.js reads customer_table_sessions from Firestore for lock release.
                 localStorage.setItem(`activeOrderDocId_${tableName}`, id);
+                if (customerUid)       localStorage.setItem(`activeCustomerUid_${tableName}`,  customerUid);
+                if (customerSessionId) localStorage.setItem(`activeSessionId_${tableName}`,    customerSessionId);
+                if (tableLockId)       localStorage.setItem(`activeLockId_${tableName}`,       tableLockId);
             } catch(e) { console.warn('Could not update order status:', e); }
 
             closeDrawer();

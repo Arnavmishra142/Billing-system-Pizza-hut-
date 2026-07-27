@@ -1,38 +1,71 @@
-import { db, storage } from './firebase-config.js';
+import { db, storage, auth, functions } from './firebase-config.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
     getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
+import { onAuthStateChanged, signInWithCustomToken, signOut }
+    from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+import { httpsCallable }
+    from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 
 // ==========================================
-// LOGIN & SESSION
+// LOGIN & SESSION  (Firebase Auth-backed)
 // ==========================================
+// The PIN is verified client-side for instant UI feedback AND server-side
+// inside the operatorSignIn Cloud Function, which returns a Firebase custom
+// token with { billingOperator: true }.  The browser signs in with that token
+// so all subsequent Firestore operations and Cloud Function calls carry a
+// verified operator identity.
+//
+// Firebase Auth persists the session in IndexedDB, so onAuthStateChanged fires
+// with the existing user on subsequent page loads — no re-entry of the PIN
+// until the session expires (1 hour for custom tokens, auto-refreshed by SDK).
+
 document.addEventListener('DOMContentLoaded', () => {
-    if (localStorage.getItem('adminLoggedIn') === 'true') {
-        showDashboard();
-    }
-
-    // Enter key on PIN
+    // Restore PIN-input enter-key shortcut
     document.getElementById('pinInput').addEventListener('keydown', (e) => {
         if (e.key === 'Enter') document.getElementById('loginBtn').click();
     });
+
+    // Firebase Auth is the authoritative session gate
+    onAuthStateChanged(auth, (user) => {
+        if (user && user.uid === 'billing-operator-main') {
+            showDashboard();
+        }
+        // If no Firebase Auth session, the login screen stays visible (default)
+    });
 });
 
-document.getElementById('loginBtn').addEventListener('click', () => {
-    const pin = document.getElementById('pinInput').value;
-    if (pin === "1414") {
-        localStorage.setItem('adminLoggedIn', 'true');
-        showDashboard();
-    } else {
-        document.getElementById('pinInput').value = '';
-        document.getElementById('pinInput').placeholder = 'Wrong PIN!';
-        setTimeout(() => { document.getElementById('pinInput').placeholder = '••••'; }, 1500);
+document.getElementById('loginBtn').addEventListener('click', async () => {
+    const pinInput = document.getElementById('pinInput');
+    const pin = pinInput.value.trim();
+
+    // Client-side pre-check for instant feedback
+    if (!pin) return;
+
+    const loginBtn = document.getElementById('loginBtn');
+    loginBtn.disabled = true;
+    loginBtn.textContent = '…';
+
+    try {
+        const operatorSignIn = httpsCallable(functions, 'operatorSignIn');
+        const result = await operatorSignIn({ pin });
+        await signInWithCustomToken(auth, result.data.token);
+        // onAuthStateChanged above will call showDashboard() automatically
+    } catch (err) {
+        // Wrong PIN → Cloud Function throws unauthenticated; network errors also land here
+        pinInput.value = '';
+        pinInput.placeholder = err.code === 'functions/unauthenticated' ? 'Wrong PIN!' : 'Error — try again';
+        setTimeout(() => { pinInput.placeholder = '••••'; }, 1500);
+    } finally {
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'LOGIN';
     }
 });
 
-document.getElementById('logoutBtn').addEventListener('click', () => {
-    localStorage.removeItem('adminLoggedIn');
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+    await signOut(auth).catch(() => {});
     location.reload();
 });
 

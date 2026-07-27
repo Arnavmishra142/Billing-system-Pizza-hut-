@@ -5,6 +5,8 @@ import {
     persistentMultipleTabManager
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { getStorage } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+import { getFunctions } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyBLzGd0DlItKShk0eJoQR4CjRx1sP3-o-w",
@@ -27,3 +29,9 @@ export const db = initializeFirestore(app, {
 });
 
 export const storage = getStorage(app);
+
+// Firebase Auth — persists operator session automatically in IndexedDB
+export const auth = getAuth(app);
+
+// Firebase Functions — region must match Cloud Function deployment region
+export const functions = getFunctions(app, 'asia-south1');

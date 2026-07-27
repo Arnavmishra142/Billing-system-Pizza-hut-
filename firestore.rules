@@ -1,0 +1,111 @@
+// firestore.rules
+// Deploy with: firebase deploy --only firestore:rules
+//
+// Identity model:
+//  • Customers   — Firebase Anonymous Auth (UID is server-issued).
+//  • Operators   — Firebase Custom Auth via the operatorSignIn Cloud Function,
+//                  which issues a token with claim { billingOperator: true }.
+//  • Cloud Fns   — Admin SDK; bypass all rules automatically.
+//
+// Order creation & lock acquisition → createCustomerOrder Cloud Function only.
+// Lock release                       → releaseTableLock Cloud Function only.
+// Status updates (accept/dismiss/kot) → operators may call directly from the panel.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    function isOperator() {
+      return request.auth != null
+          && request.auth.token.get('billingOperator', false) == true;
+    }
+
+    function isSameCustomer(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function isOrderOwner() {
+      return request.auth != null
+          && resource.data.keys().hasAll(['customer'])
+          && resource.data.customer.get('uid', '') == request.auth.uid;
+    }
+
+    // Status values an operator is allowed to write on an order.
+    // Cloud Functions write 'completed'; that path uses Admin SDK and bypasses rules.
+    function isAllowedStatusUpdate() {
+      let allowed = ['accepted', 'dismissed', 'kot'];
+      return request.resource.data.keys().hasAll(['status'])
+          && allowed.hasAny([request.resource.data.status]);
+    }
+
+    // ── pending_table_orders ──────────────────────────────────────────────────
+    // • Reads:    owning customer OR any operator
+    // • Creates:  DENIED — must go through createCustomerOrder Cloud Function
+    // • Updates:  operators only, and only for status transitions they own
+    //             (accept, dismiss, kot).  'completed' is set by releaseTableLock
+    //             Cloud Function via Admin SDK (bypasses rules).
+    match /pending_table_orders/{orderId} {
+      allow read:   if isOrderOwner() || isOperator();
+      allow create: if false;
+      allow update: if isOperator() && isAllowedStatusUpdate();
+    }
+
+    // ── customer_table_sessions ───────────────────────────────────────────────
+    // Created & released exclusively by Cloud Functions (Admin SDK).
+    // Customers may read their own session so the UI can show the assigned table.
+    match /customer_table_sessions/{customerUid} {
+      allow read:          if isSameCustomer(customerUid) || isOperator();
+      allow create, update: if false;
+    }
+
+    // ── table_locks ───────────────────────────────────────────────────────────
+    // One sentinel document per table: `table_locks/{tableId}`.
+    // Exclusively written by createCustomerOrder and releaseTableLock Cloud
+    // Functions via Admin SDK (bypasses rules).  Operators may read to display
+    // which tables are currently occupied; customers may not read — they receive
+    // the authoritative tableId in the createCustomerOrder response instead.
+    match /table_locks/{tableId} {
+      allow read:          if isOperator();
+      allow create, update: if false;
+    }
+
+    // ── menu_items ────────────────────────────────────────────────────────────
+    match /menu_items/{itemId} {
+      allow read:  if true;
+      allow write: if isOperator();
+    }
+
+    // ── settings (pizza sizes, etc.) ──────────────────────────────────────────
+    match /settings/{docId} {
+      allow read:  if true;
+      allow write: if isOperator();
+    }
+
+    // ── sales_history ─────────────────────────────────────────────────────────
+    match /sales_history/{docId} {
+      allow read, write: if isOperator();
+    }
+
+    // ── tables ────────────────────────────────────────────────────────────────
+    match /tables/{tableId} {
+      allow read:  if true;
+      allow write: if isOperator();
+    }
+
+    // ── expenses / daily_expenses ─────────────────────────────────────────────
+    match /expenses/{docId}       { allow read, write: if isOperator(); }
+    match /daily_expenses/{docId} { allow read, write: if isOperator(); }
+
+    // ── customers (legacy phone-keyed profile) ────────────────────────────────
+    match /customers/{phone} {
+      allow read, write: if isOperator();
+    }
+
+    // ── Catch-all ─────────────────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

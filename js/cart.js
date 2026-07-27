@@ -1,5 +1,86 @@
-import { db } from './firebase-config.js';
+import { db, functions } from './firebase-config.js';
 import { doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, collection } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
+
+// ── Authoritative table-lock release ─────────────────────────────────────────
+// Primary path: calls the releaseTableLock Cloud Function (requires the
+// operator to be signed in with Firebase Auth via the PIN flow in admin.js).
+// The function runs with Admin SDK privileges — it atomically marks all
+// session-tracked orders as "completed" and clears the customer_table_sessions
+// record.
+//
+// Fallback path (used if the function call fails for any reason): direct
+// Firestore writes that mirror the pre-Cloud-Function behaviour.  This path
+// is retained so the billing panel keeps working during the transition period
+// before Cloud Functions are deployed / operator auth is fully wired up.
+// Remove the fallback once the Cloud Function is stable in production.
+async function releaseTableLock(tableName, releaseReason) {
+    // ── Primary: Cloud Function ───────────────────────────────────────────────
+    try {
+        const fn = httpsCallable(functions, 'releaseTableLock');
+        await fn({ tableId: tableName, releaseReason });
+        console.log(`[LockRelease] Cloud Function succeeded for "${tableName}", reason: ${releaseReason}`);
+        return;
+    } catch (fnErr) {
+        // permission-denied = operator not yet authenticated via Firebase Auth
+        // (Cloud Functions not deployed, or sign-in not completed)
+        console.warn(`[LockRelease] Cloud Function failed (${fnErr.code}), falling back to direct Firestore:`, fnErr.message);
+    }
+
+    // ── Fallback: direct Firestore writes ─────────────────────────────────────
+    // TODO: remove once Cloud Function deployment and operator auth are stable.
+    try {
+        const sessSnap = await getDocs(query(
+            collection(db, 'customer_table_sessions'),
+            where('activeTableId', '==', tableName),
+            where('lockStatus', '==', 'active')
+        ));
+
+        if (!sessSnap.empty) {
+            const sessDoc        = sessSnap.docs[0];
+            const activeOrderIds = Array.isArray(sessDoc.data().activeOrderIds)
+                ? sessDoc.data().activeOrderIds : [];
+
+            const orderUpdates = activeOrderIds.map(orderId =>
+                updateDoc(doc(db, 'pending_table_orders', orderId), { status: 'completed' })
+                    .catch(e => console.warn('[LockRelease-fallback] order failed:', orderId, e))
+            );
+            const sessionRelease = updateDoc(sessDoc.ref, {
+                lockStatus:     'released',
+                activeTableId:  null,
+                activeOrderIds: [],
+                releaseReason,
+                releasedAt:     serverTimestamp()
+            }).catch(e => console.warn('[LockRelease-fallback] session failed:', e));
+
+            await Promise.all([...orderUpdates, sessionRelease]);
+            console.log(`[LockRelease-fallback] Firestore release done for "${tableName}"`);
+            return;
+        }
+
+        // No session record — fall back to simple tableId-based completion
+        await _legacyCompleteByTable(tableName, 'LockRelease-legacy');
+
+    } catch (e) {
+        console.warn('[LockRelease-fallback] failed:', e);
+        try { await _legacyCompleteByTable(tableName, 'LockRelease-emergency'); }
+        catch (e2) { console.warn('[LockRelease] all paths failed:', e2); }
+    }
+}
+
+async function _legacyCompleteByTable(tableName, tag) {
+    const snap = await getDocs(query(
+        collection(db, 'pending_table_orders'),
+        where('tableId', '==', tableName)
+    ));
+    snap.docs.forEach(_d => {
+        const st = (_d.data().status || 'pending').toLowerCase();
+        if (['pending', 'accepted', 'kot'].includes(st)) {
+            updateDoc(_d.ref, { status: 'completed' })
+                .catch(e => console.warn(`[${tag}] sync failed:`, e));
+        }
+    });
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     const cartItemsContainer = document.getElementById('cartItems');
@@ -461,22 +542,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // ── Instant actions — no Firestore wait ──
             triggerRawBTPrint(billText);           // print fires immediately
-            // ── Mark order as completed in customer panel ───────────────────────────
-            (async () => {
-                try {
-                    const _snap = await getDocs(query(
-                        collection(db, 'pending_table_orders'),
-                        where('tableId', '==', getCurrentTable())
-                    ));
-                    _snap.docs.forEach(_d => {
-                        const _st = (_d.data().status || 'pending').toLowerCase();
-                        if (['pending', 'accepted', 'kot'].includes(_st)) {
-                            updateDoc(_d.ref, { status: 'completed' })
-                                .catch(e => console.warn('[Checkout] sync failed:', e));
-                        }
-                    });
-                } catch(e) { console.warn('[Checkout] query failed:', e); }
-            })();
+            // ── Release table lock + mark orders completed (Bill & Settle) ─────────
+            releaseTableLock(getCurrentTable(), 'bill_settle')
+                .catch(e => console.warn('[Checkout] lock release error:', e));
             saveLocalCart([]);
             currentCart = [];
             renderCart();
@@ -512,23 +580,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // ── Snapshot cart before clearing ──
             const cartSnapshot = currentCart.slice();
 
-            // ── Instant UI — go back immediately, no network wait ──
-            // ── Mark order as completed in customer panel ───────────────────────────
-            (async () => {
-                try {
-                    const _snap = await getDocs(query(
-                        collection(db, 'pending_table_orders'),
-                        where('tableId', '==', getCurrentTable())
-                    ));
-                    _snap.docs.forEach(_d => {
-                        const _st = (_d.data().status || 'pending').toLowerCase();
-                        if (['pending', 'accepted', 'kot'].includes(_st)) {
-                            updateDoc(_d.ref, { status: 'completed' })
-                                .catch(e => console.warn('[SaveExit] sync failed:', e));
-                        }
-                    });
-                } catch(e) { console.warn('[SaveExit] query failed:', e); }
-            })();
+            // ── Release table lock + mark orders completed (SAVE & EXIT) ────────
+            releaseTableLock(getCurrentTable(), 'save_exit')
+                .catch(e => console.warn('[SaveExit] lock release error:', e));
             saveLocalCart([]);
             currentCart = [];
             renderCart();

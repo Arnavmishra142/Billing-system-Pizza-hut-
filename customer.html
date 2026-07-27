@@ -185,11 +185,15 @@
 </div>
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
 import {
     getFirestore,
-    collection, doc, onSnapshot, addDoc, query, orderBy, serverTimestamp
+    collection, doc, onSnapshot, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { getAuth, signInAnonymously }
+    from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+import { getFunctions, httpsCallable }
+    from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 
 // ── Firebase init ──────────────────────────────────────────
 const app = initializeApp({
@@ -200,7 +204,18 @@ const app = initializeApp({
     messagingSenderId: "921228841270",
     appId: "1:921228841270:web:9013d59b3ef96dda40e397"
 });
-const db = getFirestore(app);
+const db        = getFirestore(app);
+const auth      = getAuth(app);
+// Region must match Cloud Function deployment region
+const fnClient  = getFunctions(app, 'asia-south1');
+
+// ── Anonymous Auth — gives each customer a server-issued UID ─────────────
+// signInAnonymously is idempotent: if the browser already has an anonymous
+// session the SDK returns the existing user without creating a new one.
+let _authReady = false;
+signInAnonymously(auth)
+    .then(() => { _authReady = true; })
+    .catch(err => console.warn('[Auth] anonymous sign-in failed:', err));
 
 // ── Table from URL ─────────────────────────────────────────
 const params    = new URLSearchParams(location.search);
@@ -376,6 +391,11 @@ function updateCartBar() {
 }
 
 // ── Place Order ────────────────────────────────────────────
+// Orders are created via the createCustomerOrder Cloud Function, NOT by
+// writing directly to pending_table_orders.  The function:
+//   1. Validates the anonymous Firebase Auth UID (server-issued, unforgeable)
+//   2. Acquires or reuses the table lock atomically
+//   3. Returns the authoritative tableId (may differ from URL if lock exists)
 document.getElementById('placeOrderBtn').addEventListener('click', async () => {
     const totalItems = Object.values(cart).reduce((s,q) => s+q, 0);
     if (totalItems === 0) return;
@@ -385,32 +405,44 @@ document.getElementById('placeOrderBtn').addEventListener('click', async () => {
     btn.disabled = true;
 
     const items = Object.entries(cart).map(([id, qty]) => ({
-        id,
-        name: menuMap[id].name,
-        price: menuMap[id].price,
+        itemId:   id,
+        name:     menuMap[id].name,
+        price:    menuMap[id].price,
         quantity: qty
     }));
 
     try {
-        const total = items.reduce((s, i) => s + i.price * i.quantity, 0);
-        await addDoc(collection(db, 'pending_table_orders'), {
-            tableId: tableName,
-            items,
-            totalPrice: total,
-            status: 'pending',
-            timestamp: new Date().toISOString(),
-            createdAt: serverTimestamp()
+        // Ensure anonymous auth is ready before calling the function
+        if (!_authReady) {
+            await signInAnonymously(auth);
+            _authReady = true;
+        }
+
+        const createOrder = httpsCallable(fnClient, 'createCustomerOrder');
+        const result = await createOrder({
+            requestedTableId: tableName,   // may be overridden by an existing lock
+            customer:         {},          // name/phone not collected on this panel
+            items
         });
+
+        // Use the server-returned tableId as the authoritative assigned table
+        const assignedTable = result.data.tableId || tableName;
 
         // Show success screen
         cart = {};
-        document.getElementById('successTableLabel').textContent = `📍 ${tableName}`;
+        document.getElementById('successTableLabel').textContent = `📍 ${assignedTable}`;
         const successScreen = document.getElementById('successScreen');
         successScreen.classList.add('show');
     } catch(e) {
+        console.error('[PlaceOrder] failed:', e);
         btn.textContent = 'Place Order →';
         btn.disabled = false;
-        alert('Order failed. Please try again.');
+        const msg = e.code === 'functions/already-exists'
+            ? 'This table is currently occupied. Please wait or choose another.'
+            : e.code === 'functions/not-found'
+            ? 'Table not found. Please scan the QR code again.'
+            : 'Order failed. Please check your connection and try again.';
+        alert(msg);
     }
 });
 
