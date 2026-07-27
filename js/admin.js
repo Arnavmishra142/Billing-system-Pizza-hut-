@@ -25,13 +25,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Restore session on page reload (same tab)
     if (sessionStorage.getItem('operatorLoggedIn') === 'true') {
-        // Re-establish Firebase Auth anonymous session silently
+        // Show dashboard immediately — PIN was already verified this session.
+        // Re-establish Firebase Auth in the background for Firestore rules.
+        showDashboard();
         onAuthStateChanged(auth, (user) => {
-            if (user) {
-                showDashboard();
-            } else {
-                signInAnonymously(auth).then(() => showDashboard()).catch(() => {
-                    sessionStorage.removeItem('operatorLoggedIn');
+            if (!user) {
+                signInAnonymously(auth).catch(err => {
+                    console.warn('[Session restore] Firebase anonymous sign-in failed:', err.code);
                 });
             }
         });
@@ -52,23 +52,25 @@ document.getElementById('loginBtn').addEventListener('click', async () => {
         pinInput.placeholder = 'Wrong PIN!';
         setTimeout(() => { pinInput.placeholder = '••••'; }, 1500);
         loginBtn.disabled = false;
-        loginBtn.textContent = 'LOGIN';
+        loginBtn.textContent = 'Unlock Dashboard';
         return;
     }
 
-    try {
-        await signInAnonymously(auth);
-        sessionStorage.setItem('operatorLoggedIn', 'true');
-        showDashboard();
-    } catch (err) {
-        console.error('[Login] signInAnonymously failed:', err);
-        pinInput.value = '';
-        pinInput.placeholder = 'Error — try again';
-        setTimeout(() => { pinInput.placeholder = '••••'; }, 1500);
-    } finally {
-        loginBtn.disabled = false;
-        loginBtn.textContent = 'LOGIN';
-    }
+    // PIN is correct — unlock the dashboard immediately.
+    // Firebase anonymous sign-in runs in the background so Firestore security
+    // rules (which require request.auth != null) can be satisfied.
+    // A Firebase Auth failure must NOT block the login — the PIN already
+    // proved identity; auth/operation-not-allowed just means Anonymous Auth
+    // isn't enabled in the Firebase console, which is a Firebase config issue,
+    // not a wrong-password issue.
+    sessionStorage.setItem('operatorLoggedIn', 'true');
+    showDashboard();
+    loginBtn.disabled = false;
+    loginBtn.textContent = 'Unlock Dashboard';
+
+    signInAnonymously(auth).catch(err => {
+        console.warn('[Login] Firebase anonymous sign-in failed — Firestore writes may be blocked if security rules require auth. Error:', err.code, err.message);
+    });
 });
 
 document.getElementById('logoutBtn').addEventListener('click', async () => {
