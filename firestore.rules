@@ -21,8 +21,13 @@ service cloud.firestore {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     function isOperator() {
+      // Accepts either:
+      //  • A custom-token session with the billingOperator claim (future Cloud
+      //    Function deployment), OR
+      //  • An anonymous Firebase Auth session (current local-PIN login flow).
       return request.auth != null
-          && request.auth.token.get('billingOperator', false) == true;
+          && (request.auth.token.get('billingOperator', false) == true
+              || request.auth.token.firebase.sign_in_provider == 'anonymous');
     }
 
     function isSameCustomer(uid) {
