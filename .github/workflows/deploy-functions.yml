@@ -1,0 +1,38 @@
+name: Deploy Firebase Functions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'functions/**'
+      - 'firestore.rules'
+      - 'firestore.indexes.json'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Authenticate with Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+      - name: Set ADMIN_PIN in Secret Manager
+        run: |
+          if gcloud secrets describe ADMIN_PIN --project=billing-system-f8531 2>/dev/null; then
+            printf '%s' "$ADMIN_PIN_VALUE" | gcloud secrets versions add ADMIN_PIN --data-file=- --project=billing-system-f8531
+          else
+            printf '%s' "$ADMIN_PIN_VALUE" | gcloud secrets create ADMIN_PIN --data-file=- --project=billing-system-f8531
+          fi
+        env:
+          ADMIN_PIN_VALUE: ${{ secrets.ADMIN_PIN }}
+      - name: Install functions dependencies
+        run: cd functions && npm install
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+      - name: Deploy functions + Firestore rules
+        run: firebase deploy --only functions,firestore --project billing-system-f8531
