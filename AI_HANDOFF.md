@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28 (session 5)
+> Last updated: 2026-07-28 (session 6)
 
 ---
 
@@ -31,6 +31,32 @@
 - `daily_expenses` — expense tracking
 - `tables` — table state
 - `customer_order_history/{uid}/orders` — completed order records, written by billing panel, read by Customer Panel
+
+---
+
+## Files Modified (2026-07-28 — session 6)
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/order-notify.js` | Billing Panel | **NEW FILE** — Standalone looping audio + browser notification alert module. Exports `triggerAlert(tableId)` and `stopAlert()`. Handles autoplay unlock, single-loop guard, browser Notification API permission request, and notification click → open-drawer event dispatch. |
+| `js/incoming-orders.js` | Billing Panel | **Minimal additions only** — imported `triggerAlert`/`stopAlert` from `order-notify.js`; called `triggerAlert()` inside the existing `_notified` new-order guard; called `stopAlert()` at the top of `openDrawer()`; added `window 'orders-open-drawer'` listener to open drawer on notification click. No existing logic changed. |
+
+### How the notification system works
+
+1. **New order detected** — `startListening()`'s `onSnapshot` fires. The existing `_notified.has(id)` guard ensures the block runs only once per new order (not on every re-render). `triggerAlert(tableId)` is called inside that block.
+2. **`triggerAlert`** — requests notification permission (lazily, first time only), shows/replaces a browser `Notification` with `tag:'incoming-order'` (so multiple orders don't stack), starts `notification.mp3` looping. If an alert is already active, only the browser notification is refreshed — no second audio loop.
+3. **Alert stops** when either:
+   - Admin **opens the Incoming Orders drawer** → `openDrawer()` calls `stopAlert()`.
+   - Admin **clicks the browser notification** → `notification.onclick` calls `stopAlert()`, dispatches `window 'orders-open-drawer'` event, which `incoming-orders.js` listens for and calls `openDrawer()`.
+4. **Autoplay unlock** — on the admin's first click/touch/keydown, `_unlockAudio()` calls `play().then(pause())` to warm the AudioContext. Registered once, removed after first fire.
+
+### Browser limitations
+
+- **Audio autoplay**: Browsers block `audio.play()` until a user gesture. The first time the admin clicks anything on the page, audio is unlocked for the session. If an order arrives before any interaction, the browser notification still shows but the sound starts on next interaction.
+- **Background tab notifications**: Browser notifications appear even when the tab is minimised (requires `Notification.permission === 'granted'`). The notification click re-focuses the window and opens the drawer.
+- **`requireInteraction: true`**: Supported on Chrome/Edge desktop — notification stays on screen until dismissed. On mobile/Firefox it may auto-dismiss after a few seconds; the looping audio continues regardless.
+
+> ⚠️ **Audio file required:** `sounds/notification.mp3` must exist in the repo. The user confirmed they added `notification.mp3` — place it in the `sounds/` folder (alongside `cash.sfx.mp3` and `pop.sfx.mp3`). If the file is at the repo root instead, update the path in `js/order-notify.js` line: `new Audio('sounds/notification.mp3')` → `new Audio('notification.mp3')`.
 
 ---
 

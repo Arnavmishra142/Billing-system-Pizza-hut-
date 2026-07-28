@@ -1,6 +1,22 @@
 // incoming-orders.js
 // Listens to Firestore `pending_table_orders` for new customer orders.
-// Shows badge on #btn-orders and a toast notification — NO SOUND.
+// Shows badge on #btn-orders, a toast notification, and a looping audio alert.
+
+// ===== AI UPDATE =====
+// Date: 2026-07-28 (v4)
+// Feature: Looping audio alert + browser notification for new incoming orders
+// Summary:
+// - Imported triggerAlert() and stopAlert() from js/order-notify.js.
+// - triggerAlert(tableId) called for every genuinely new order (inside the
+//   existing _notified.has() guard so it only fires once per order, not on
+//   every Firestore snapshot re-render).
+// - stopAlert() called at the top of openDrawer() so the sound stops the
+//   moment the admin opens the Incoming Orders drawer.
+// - Added window 'orders-open-drawer' listener: order-notify.js dispatches
+//   this event when the admin clicks the browser notification so the drawer
+//   opens and stopAlert() fires even when the tab is in the background.
+// - No changes to order logic, Firestore reads/writes, KOT, or billing flow.
+// =====================
 
 // ===== AI UPDATE =====
 // Date: 2026-07-28
@@ -68,6 +84,7 @@ import {
     enableNetwork
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+import { triggerAlert, stopAlert } from './order-notify.js';
 
 // ── Order-count cache: keyed by phone number ──────────────────────────────────
 // getCustomerOrderCount is called for every order on every renderDrawer() call.
@@ -234,6 +251,7 @@ function showToast(tableName, itemCount) {
 
 // ── Drawer open / close ───────────────────────────────────────────────────────
 function openDrawer()  {
+    stopAlert(); // AI UPDATE [2026-07-28]: stop looping alert when admin opens drawer
     drawer && drawer.classList.add('open');
     overlay && overlay.classList.add('open');
 }
@@ -408,11 +426,15 @@ function startListening() {
             const order = { id: docSnap.id, ...data };
             pending.push(order);
 
-            // Toast only for truly new orders we haven't seen yet
+            // Toast + alert only for truly new orders we haven't seen yet
             if (!_notified.has(docSnap.id)) {
                 _notified.add(docSnap.id);
                 const itemCount = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
                 showToast(data.tableId || 'Unknown Table', itemCount || 1);
+                // AI UPDATE [2026-07-28]: trigger looping audio + browser notification.
+                // triggerAlert is safe to call for every new order — only one audio
+                // loop ever runs; subsequent calls refresh the browser notification only.
+                triggerAlert(data.tableId || 'Unknown Table');
             }
         });
 
@@ -473,6 +495,11 @@ document.addEventListener('DOMContentLoaded', () => {
         btnOrders.addEventListener('click', openDrawer);
     }
     if (overlay) overlay.addEventListener('click', closeDrawer);
+
+    // AI UPDATE [2026-07-28]: when the admin clicks the browser notification
+    // (fired from order-notify.js), open the drawer and stop the alert.
+    // stopAlert() is already called inside openDrawer() so no duplicate call needed.
+    window.addEventListener('orders-open-drawer', openDrawer);
 
     // Re-establish the Firestore network channel whenever the tab comes back
     // into focus (browsers throttle WebSocket connections in background tabs).
