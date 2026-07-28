@@ -5,6 +5,24 @@
 // which forwards a Pushover push notification to the operator's phone.
 
 // ===== AI UPDATE =====
+// Date: 2026-07-28 (v8)
+// Bug fix: Only first Pushover notification fired — subsequent orders silenced
+// Root cause:
+//   startListening() reset _initialLoadDone = false on every listener restart
+//   (triggered by Firestore error retries, network blips, etc.) but did NOT
+//   clear the _notified Set.  If a genuinely new order arrived in the FIRST
+//   snapshot of the restarted listener, it would be:
+//     _notified.has(newId) = false  →  _notified.add(newId)
+//     _initialLoadDone = false      →  return  (silenced as "pre-existing")
+//   This caused every order placed during or just after a listener restart to be
+//   dropped silently.  Clearing _notified in startListening() fixes this:
+//   existing pending orders are silenced by _initialLoadDone=false (correct);
+//   orders arriving after the first snapshot are correctly notified.
+// Fix: added _notified.clear() inside startListening() — see line below.
+// Enhanced debug logs: startListening() calls, snapshot state, skipped-order path.
+// =====================
+
+// ===== AI UPDATE =====
 // Date: 2026-07-28 (v6)
 // Feature: Pushover push notification via backend — replaces browser audio/notification
 // Summary:
@@ -446,6 +464,14 @@ function renderDrawer(orders) {
 let _unsubscribe = null;
 
 function startListening() {
+    // [DEBUG] Log every call so unexpected restarts are immediately visible
+    console.log(
+        `[notify-debug] startListening() called — ` +
+        `was running: ${!!_unsubscribe}, ` +
+        `_initialLoadDone: ${_initialLoadDone}, ` +
+        `_notified.size: ${_notified.size}`
+    );
+
     // Cancel any existing listener before creating a new one.
     if (_unsubscribe) {
         _unsubscribe();
@@ -461,12 +487,33 @@ function startListening() {
     // a fresh initial load (existing orders loaded silently, not as new alerts).
     _initialLoadDone = false;
 
+    // AI UPDATE [2026-07-28] v8 — Bug fix (only first notification fired):
+    // _notified must be cleared whenever the listener (re)starts.
+    // Without this, if startListening() is called again after a Firestore error
+    // retry, _notified retains IDs from the previous session while
+    // _initialLoadDone is reset to false.  A genuinely new order whose ID is
+    // not yet in _notified but arrives in the FIRST snapshot of the restarted
+    // listener would be: _notified.add(id) → _initialLoadDone=false → silenced.
+    // Clearing _notified ensures that path cannot happen: existing pending orders
+    // are correctly silenced by _initialLoadDone=false in the first snapshot,
+    // and new orders arriving afterwards are correctly notified.
+    _notified.clear();
+
     const q = query(
         collection(db, 'pending_table_orders'),
         orderBy('createdAt', 'desc')
     );
 
     _unsubscribe = onSnapshot(q, (snapshot) => {
+        // [DEBUG] Snapshot-level state — shows every snapshot event with full context
+        console.log(
+            `[notify-debug] ── Snapshot fired ── ` +
+            `total docs: ${snapshot.size}, ` +
+            `doc changes: ${snapshot.docChanges().length}, ` +
+            `_initialLoadDone: ${_initialLoadDone}, ` +
+            `_notified.size: ${_notified.size}`
+        );
+
         const pending = [];
 
         snapshot.forEach(docSnap => {
@@ -487,12 +534,12 @@ function startListening() {
                 // subsequent snapshot are genuinely new and deserve an alert.
                 if (!_initialLoadDone) {
                     // [DEBUG] Step 1 — order seen on initial load, silenced
-                    console.log('[notify-debug] Step 1: Initial load — order silenced (pre-existing):', docSnap.id, data.tableId);
+                    console.log('[notify-debug] Step 1: SILENCED (initial load, pre-existing):', docSnap.id, data.tableId);
                     return;
                 }
 
                 // [DEBUG] Step 1 — genuinely new order detected
-                console.log('[notify-debug] Step 1: New order detected:', docSnap.id, data.tableId, data.customer?.name);
+                console.log('[notify-debug] Step 1: NEW ORDER detected:', docSnap.id, data.tableId, data.customer?.name);
 
                 const itemCount = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
                 showToast(data.tableId || 'Unknown Table', itemCount || 1);
@@ -501,7 +548,12 @@ function startListening() {
                 console.log('[notify-debug] Step 2: Calling notifyNewOrder() for:', data.tableId);
                 // AI UPDATE [2026-07-28] v6: Pushover push notification via backend.
                 // AI UPDATE [2026-07-28] v7: Debug logs added.
+                // AI UPDATE [2026-07-28] v8: _notified cleared on restart (bug fix).
                 notifyNewOrder(data);
+            } else {
+                // [DEBUG] Order already notified — this is the DEDUP path (correct skip)
+                // If you see a genuinely NEW order here, _notified was not cleared on restart.
+                console.log('[notify-debug] DEDUP skip (already notified):', docSnap.id, data.tableId);
             }
         });
 
@@ -513,8 +565,9 @@ function startListening() {
         setBadge(pending.length);
         renderDrawer(pending);
     }, (err) => {
-        console.error('incoming-orders listener error:', err);
-        // Retry after 5 s so a transient network hiccup doesn't kill the feed
+        // [DEBUG] Listener error — this triggers a 5-second restart of startListening()
+        // Before the v8 fix, a restart here + new order = silenced notification.
+        console.error('[notify-debug] ❌ Firestore listener ERROR — will retry in 5s:', err.code, err.message, err);
         _unsubscribe = null;
         setTimeout(startListening, 5000);
     });

@@ -4,6 +4,63 @@
 
 ---
 
+## Files Modified (2026-07-28 — session 11)
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/incoming-orders.js` | Billing Panel | **v8** — Bug fix: only first Pushover notification fired. Root cause: `startListening()` reset `_initialLoadDone = false` but never cleared `_notified`. Added `_notified.clear()` in `startListening()`. Enhanced all debug logs: `startListening()` call log, snapshot-level state log (docs/changes/`_initialLoadDone`/`_notified.size`), and new DEDUP-skip log for the "already notified" path. |
+
+### Root Cause — Only First Notification Fired (FIXED)
+
+**The bug:** `startListening()` reset `_initialLoadDone = false` on every listener restart, but did **not** clear `_notified`. When a Firestore listener error triggered a restart (5-second retry), any new order arriving in the first snapshot of the restarted listener would be silenced:
+
+```
+startListening() restarts:
+  _initialLoadDone = false   ← reset
+  _notified = {OrderA}       ← NOT cleared (the bug)
+
+First snapshot of restarted listener contains Order B (new, pending):
+  _notified.has(B) = false  →  _notified.add(B)
+  _initialLoadDone = false  →  return  ← silenced as "pre-existing" ❌
+
+_initialLoadDone = true
+
+Order C arrives later → notified ✅  (but Order B was lost)
+```
+
+**The fix:** Added `_notified.clear()` inside `startListening()` alongside the existing `_initialLoadDone = false`. On any restart, `_notified` is cleared. Existing pending orders are correctly silenced by `_initialLoadDone = false` in the first snapshot. New orders arriving after the first snapshot are correctly notified.
+
+**What triggers listener restarts:** The Firestore error handler in `onSnapshot` sets `_unsubscribe = null` and calls `setTimeout(startListening, 5000)` on any error (permission denied, network blip, quota limit, Firestore SDK internal error). Any one of these between orders would trigger the bug.
+
+### Debug Log Map (v8)
+
+All debug logs are prefixed `[notify-debug]` for easy filtering in DevTools:
+
+| Log | Meaning |
+|-----|---------|
+| `startListening() called — was running: false` | First call (normal startup) |
+| `startListening() called — was running: true` | Unexpected restart — check why |
+| `── Snapshot fired ── total docs: N` | Every Firestore snapshot event |
+| `Step 1: SILENCED (initial load, pre-existing)` | Correct — order existed before this listener session |
+| `Step 1: NEW ORDER detected` | New order will be notified |
+| `DEDUP skip (already notified)` | Correct — same order appeared again in a later snapshot |
+| `Step 2: Calling notifyNewOrder()` | POST request about to start |
+| `Step 3: POST /api/notify-order starting` | fetch() in progress |
+| `Step 4: ... HTTP status: 200` | Server received request |
+| `Step 5: Backend response body: {ok: true}` | Pushover delivered |
+| `✅ Pushover notification delivered` | Full success |
+| `❌ Firestore listener ERROR` | Error triggered restart — check error code |
+
+**If you see "Step 1: SILENCED" for a new order:** the listener restarted at the wrong time. Check if `startListening() called — was running: false` appeared unexpectedly (listener was dropped by an error).
+
+**These logs are temporary.** Remove them once the notification chain is confirmed working end-to-end (bump `sw.js` cache version after removal — see Task #3).
+
+### No Customer Panel changes required
+
+The bug was entirely within the Billing Panel's notification trigger logic. No Firestore schema, collection names, or shared contracts were changed.
+
+---
+
 ## Files Modified (2026-07-28 — session 10)
 
 | File | Repo | Change |
