@@ -31,6 +31,30 @@
 //   registered as early as possible and cannot miss the initial auth state.
 // =====================
 
+// ===== AI UPDATE =====
+// Date: 2026-07-28 (v3)
+// Feature: Incoming Orders — Two performance / delay fixes
+// Summary:
+//
+// Fix A — visibilitychange was cancelling and recreating the listener:
+//   The handler called enableNetwork(db).then(startListening), which always
+//   unsubscribed the existing listener and created a new one.  A new onSnapshot
+//   with persistentLocalCache first emits the stale IndexedDB cache, then the
+//   fresh network result — introducing a perceived delay on every tab focus.
+//   Fix: visibilitychange now only calls enableNetwork() to re-open the network
+//   channel and only calls startListening() if the listener was actually null
+//   (dropped by an error or sign-out).  An already-live listener is left in
+//   place and automatically resumes receiving real-time updates.
+//
+// Fix B — getCustomerOrderCount ran an uncached getDocs on every render:
+//   renderDrawer() calls getCustomerOrderCount(phone) for every pending order.
+//   With three orders in the drawer that was three extra Firestore round-trips
+//   on every snapshot fire, blocking the card HTML from appearing.
+//   Fix: results are stored in _countCache (Map keyed by phone number).
+//   The cache is cleared whenever startListening() recreates the snapshot so
+//   counts stay accurate across reconnects.
+// =====================
+
 import { db, auth } from './firebase-config.js';
 import {
     collection,
@@ -45,13 +69,23 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
+// ── Order-count cache: keyed by phone number ──────────────────────────────────
+// getCustomerOrderCount is called for every order on every renderDrawer() call.
+// Without caching that is N Firestore getDocs round-trips per render, which
+// blocks card HTML from painting.  Cache is cleared in startListening() so
+// counts stay accurate across reconnects and listener restarts.
+const _countCache = new Map();
+
 // ── Fix 3: Count how many times a phone number has ordered ───────────────────
 async function getCustomerOrderCount(phone) {
     if (!phone) return 1;
+    if (_countCache.has(phone)) return _countCache.get(phone);
     try {
-        const q    = query(collection(db, 'pending_table_orders'), where('customer.phone', '==', phone));
-        const snap = await getDocs(q);
-        return Math.max(1, snap.size);
+        const q     = query(collection(db, 'pending_table_orders'), where('customer.phone', '==', phone));
+        const snap  = await getDocs(q);
+        const count = Math.max(1, snap.size);
+        _countCache.set(phone, count);
+        return count;
     } catch(e) { return 1; }
 }
 
@@ -348,11 +382,15 @@ function renderDrawer(orders) {
 let _unsubscribe = null;
 
 function startListening() {
-    // Cancel any existing listener before creating a new one
+    // Cancel any existing listener before creating a new one.
     if (_unsubscribe) {
         _unsubscribe();
         _unsubscribe = null;
     }
+
+    // Fresh listener — clear cached order counts so they're re-fetched
+    // from Firestore rather than returning stale values from a previous session.
+    _countCache.clear();
 
     const q = query(
         collection(db, 'pending_table_orders'),
@@ -436,15 +474,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (overlay) overlay.addEventListener('click', closeDrawer);
 
-    // Re-establish the listener whenever the tab comes back into focus.
-    // Browsers throttle/suspend WebSocket & long-poll connections in backgrounded
-    // tabs, which silently kills the Firestore onSnapshot feed. Calling
-    // enableNetwork + restarting the listener brings it back immediately.
+    // Re-establish the Firestore network channel whenever the tab comes back
+    // into focus (browsers throttle WebSocket connections in background tabs).
+    //
+    // IMPORTANT: we do NOT recreate the listener here unless it was actually
+    // dropped (null).  Previously this always called startListening(), which
+    // cancelled and recreated the onSnapshot — causing Firestore to emit a
+    // stale IndexedDB cache snapshot first, introducing a visible delay before
+    // the live data appeared.  Now we just call enableNetwork() to resume the
+    // existing listener, which picks up any missed updates automatically.
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && auth.currentUser) {
-            enableNetwork(db)
-                .then(startListening)
-                .catch(() => startListening()); // start even if enableNetwork fails
+            enableNetwork(db).catch(() => {});
+            // Only restart the listener if it was truly dropped (error / sign-out).
+            if (!_unsubscribe) {
+                startListening();
+            }
         }
     });
 });

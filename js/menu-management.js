@@ -11,27 +11,45 @@
 // - Root cause: menu items are served from IndexedDB offline cache (reads work
 //   without auth), but updateDoc/setDoc writes always hit the Firestore server
 //   which returns permission-denied when auth.currentUser is null.
-// - auth.currentUser is null because signInAnonymously() in admin.js is async
-//   and may not have resolved by the time the user opens Menu Management.
 // - Fix: imported auth from firebase-config; _toggle() and _togglePizzaSize()
-//   now check auth.currentUser before attempting a write.  If auth is not yet
-//   ready a clear user-facing message is shown instead of a silent failure.
+//   now check auth.currentUser before attempting a write.
 // =====================
 
 // ===== AI UPDATE =====
 // Date: 2026-07-28 (v2)
 // Feature: Menu Management Toggle — Auth Wait Fix
 // Summary:
-// - Deeper root cause: index.html never calls signInAnonymously at all
-//   (admin.js is only loaded by admin/index.html, not by the main billing panel).
-//   The auth.currentUser guard added in v1 was correct but always fired "not
-//   signed in yet" because nobody on index.html ever triggered an auth session.
-// - This is now fixed in incoming-orders.js (which bootstraps anonymous auth
-//   for the billing panel).  With that fix in place, auth.currentUser will be
-//   set well before the user can open the Menu Management tab.
-// - Additional defensive fix here: _toggle() and _togglePizzaSize() now wait
-//   up to 5 s for auth instead of bailing immediately, so edge cases where the
-//   user somehow taps the toggle before auth resolves still recover gracefully.
+// - Deeper root cause: index.html never calls signInAnonymously at all.
+// - Fix: incoming-orders.js bootstraps anonymous auth; menu-management.js
+//   now waits up to 5 s for auth instead of bailing immediately.
+// =====================
+
+// ===== AI UPDATE =====
+// Date: 2026-07-28 (v3)
+// Feature: Menu Management — Three root-cause fixes
+// Summary:
+//
+// Fix A — Individual pizza variant toggles:
+//   Pizza variant items (e.g. "Paneer Pizza (Large)") were permanently excluded
+//   from the toggle list and could only be affected by the whole-size toggle.
+//   An operator could NOT mark a single pizza variant as out of stock.
+//   Fix: a new "Individual Pizza Availability" section now renders all pizza
+//   variant items with their own inStock toggle, below the size cards, whenever
+//   the Pizza or All category is shown.
+//
+// Fix B — Listener error recovery:
+//   When the Firestore onSnapshot listener hit an error (network drop, auth
+//   expiry), it stopped firing but _unsubItems stayed non-null, so
+//   initMenuManagement() thought listeners were still alive and never restarted
+//   them. The error state was permanent until a full page reload.
+//   Fix: error handlers now set _unsubItems / _unsubPizzaSizes = null and
+//   schedule an auto-retry after 5 s. initMenuManagement() detects dropped
+//   listeners (null refs) and restarts them without a loading flash.
+//
+// Fix C — Category stats accuracy:
+//   Pizza variant items were excluded from category stats (offCount), so the
+//   "N off" badge on the "All" category header was inaccurate.
+//   Fix: stats now include pizza variant items.
 // =====================
 
 import { db, auth } from './firebase-config.js';
@@ -311,12 +329,25 @@ function _getPizzaSize(item) {
 
 export function initMenuManagement() {
     if (!_initted) {
+        // First call — set up search bar and start both listeners.
         _initted = true;
         _setupSearch();
         _showLoading();
         _startItemsListener();
         _startPizzaSizesListener();
+    } else if (!_unsubItems || !_unsubPizzaSizes) {
+        // Listeners were dropped (network error / auth expiry) — restart them.
+        // Don't re-setup search (already wired) and avoid a loading flash if we
+        // already have cached items to display.
+        if (!_unsubItems) {
+            if (_allItems.length === 0) _showLoading();
+            _startItemsListener();
+        }
+        if (!_unsubPizzaSizes) {
+            _startPizzaSizesListener();
+        }
     } else {
+        // Listeners are alive — just re-render with current data.
         _render();
     }
 }
@@ -336,7 +367,7 @@ export function destroyMenuManagement() {
 // ── Firestore listeners ───────────────────────────────────────────────────────
 
 function _startItemsListener() {
-    if (_unsubItems) { _unsubItems(); }
+    if (_unsubItems) { _unsubItems(); _unsubItems = null; }
     _unsubItems = onSnapshot(
         collection(db, 'menu_items'),
         (snap) => {
@@ -352,17 +383,23 @@ function _startItemsListener() {
         },
         (err) => {
             console.error('[menu-mgmt] items listener error:', err);
+            // Mark listener as dropped so initMenuManagement() can restart it.
+            _unsubItems = null;
             const el = document.getElementById('menuMgmtItems');
             if (el) el.innerHTML = `<div class="mm-empty">
                 <div class="mm-empty-icon">⚠️</div>
-                <div>Failed to load menu. Check connection.</div>
+                <div>Failed to load menu. Retrying…</div>
             </div>`;
+            // Auto-retry after 5 s if the component is still mounted.
+            setTimeout(() => {
+                if (!_unsubItems && _initted) _startItemsListener();
+            }, 5000);
         }
     );
 }
 
 function _startPizzaSizesListener() {
-    if (_unsubPizzaSizes) { _unsubPizzaSizes(); }
+    if (_unsubPizzaSizes) { _unsubPizzaSizes(); _unsubPizzaSizes = null; }
     _unsubPizzaSizes = onSnapshot(
         doc(db, 'settings', 'pizza_sizes'),
         (snap) => {
@@ -371,7 +408,15 @@ function _startPizzaSizesListener() {
                 : { regular: true, medium: true, large: true };
             _render();
         },
-        (err) => console.error('[menu-mgmt] pizza sizes listener error:', err)
+        (err) => {
+            console.error('[menu-mgmt] pizza sizes listener error:', err);
+            // Mark as dropped — initMenuManagement() will restart on next open.
+            _unsubPizzaSizes = null;
+            // Auto-retry after 5 s.
+            setTimeout(() => {
+                if (!_unsubPizzaSizes && _initted) _startPizzaSizesListener();
+            }, 5000);
+        }
     );
 }
 
@@ -468,15 +513,22 @@ function _render() {
 
     _renderCategoryPills(catContainer);
 
-    const scrollTop    = itemContainer.scrollTop;
-    const showPizza    = (_activeCat === 'All' || _activeCat === 'Pizza');
-    const showOthers   = (_activeCat !== 'Pizza');
+    const scrollTop        = itemContainer.scrollTop;
+    const showPizza        = (_activeCat === 'All' || _activeCat === 'Pizza');
+    const showOthers       = (_activeCat !== 'Pizza');
     const filteredNonPizza = showOthers ? _getFilteredNonPizza() : [];
+    const pizzaVariants    = showPizza  ? _getPizzaVariants()    : [];
 
     let html = '';
 
     if (showPizza) {
+        // Size-level toggles (whole size on/off)
         html += _buildPizzaSizesHtml();
+        // Individual pizza variant toggles — lets operator mark a specific
+        // pizza (e.g. "Paneer Pizza (Large)") OOS independently of the size.
+        if (pizzaVariants.length > 0) {
+            html += _buildPizzaVariantsHtml(pizzaVariants);
+        }
     }
 
     if (showOthers && filteredNonPizza.length > 0) {
@@ -496,7 +548,7 @@ function _render() {
     itemContainer.querySelectorAll('input[data-size]').forEach(cb => {
         cb.addEventListener('change', () => _togglePizzaSize(cb.dataset.size));
     });
-    // Wire item toggle events
+    // Wire item toggle events (covers both non-pizza items AND pizza variants)
     itemContainer.querySelectorAll('input[data-id]').forEach(cb => {
         cb.addEventListener('change', () => _toggle(cb.dataset.id));
     });
@@ -506,11 +558,71 @@ function _render() {
 
 function _getFilteredNonPizza() {
     return _allItems.filter(item => {
-        if (_isPizzaVariant(item)) return false; // pizza variants shown via sizes section
+        if (_isPizzaVariant(item)) return false; // pizza variants shown in their own section
         const matchSearch = !_search || (item.name || '').toLowerCase().includes(_search);
         const matchCat    = _activeCat === 'All' || item.category === _activeCat;
         return matchSearch && matchCat;
     });
+}
+
+// Returns all pizza variant items that match the current search term.
+// These are shown with individual inStock toggles in the Pizza section so
+// the operator can mark a specific variant (e.g. "Paneer Pizza (Large)")
+// as out of stock independently of the whole-size toggle.
+function _getPizzaVariants() {
+    return _allItems.filter(item => {
+        if (!_isPizzaVariant(item)) return false;
+        return !_search || (item.name || '').toLowerCase().includes(_search);
+    });
+}
+
+// ── Pizza variants section builder ───────────────────────────────────────────
+
+// Renders individual pizza variant items (e.g. "Paneer Pizza (Large)") with
+// their own inStock toggle, below the size-level toggles.
+// This lets the operator mark a specific pizza OOS while keeping the size
+// available for all other pizzas.
+//
+// Customer Panel behaviour (no change needed there):
+//   _isItemOos() in the Customer Panel's menu.js already checks BOTH:
+//     1. item.inStock === false  ← set by this individual toggle
+//     2. _pizzaSizes[size] === false  ← set by the size toggle above
+//   So the customer panel treats a pizza as OOS if EITHER condition is true.
+function _buildPizzaVariantsHtml(variants) {
+    const _esc = (s = '') => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const offCount = variants.filter(i => i.inStock === false).length;
+    const stats    = offCount > 0
+        ? `${variants.length} variants · <span style="color:#ef4444;">${offCount} off</span>`
+        : `${variants.length} variants`;
+
+    const rows = variants.map(item => {
+        const isOn     = item.inStock !== false;
+        const isSaving = _toggling.has(item.id);
+        return `
+            <div class="mm-item ${isOn ? '' : 'mm-off'}">
+                <div class="mm-item-info">
+                    <div class="mm-item-name">
+                        ${_esc(item.name)}
+                        ${!isOn ? '<span class="mm-oos-badge">OFF</span>' : ''}
+                    </div>
+                    <div class="mm-item-meta mm-item-price">₹${item.price || 0}</div>
+                </div>
+                <label class="mm-toggle ${isSaving ? 'saving' : ''}"
+                       title="${isOn ? 'Turn off (out of stock)' : 'Turn on (available)'}">
+                    <input type="checkbox" ${isOn ? 'checked' : ''} data-id="${_esc(item.id)}" ${isSaving ? 'disabled' : ''}>
+                    <span class="mm-slider"></span>
+                </label>
+            </div>
+        `;
+    }).join('');
+
+    return `
+        <div class="mm-cat-header" style="margin-top:6px;">
+            <span>🍕 Individual Pizza Availability</span>
+            <span class="mm-cat-stats">${stats}</span>
+        </div>
+        ${rows}
+    `;
 }
 
 // ── Pizza sizes section builder ───────────────────────────────────────────────
