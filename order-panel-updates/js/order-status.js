@@ -18,28 +18,35 @@
  *   pending   → order placed by customer
  *   accepted  → operator opened in POS
  *   kot       → KOT printed (order is being prepared)
- *   completed → Bill & Settle or Save & Exit pressed (billing panel, 2026-07-28)
+ *   completed → Bill & Settle or Save & Exit pressed (billing panel)
  *   dismissed → operator dismissed the order
  *
- * HOW TO USE IN index.html / app.js:
- *   import { startOrderTracking, stopOrderTracking } from "./order-status.js";
+ * PUBLIC API (used by app.js):
+ *   initOrderStatus()   — start tracking + wire DOM rendering (called after login)
+ *   stopOrderStatus()   — stop tracking (called on logout)
  *
- *   // Start tracking when the customer is logged in:
- *   startOrderTracking(auth, db, {
- *     onActiveOrders: (orders) => renderActiveOrders(orders),
- *     onHistory:      (orders) => renderOrderHistory(orders),
- *   });
+ * LOWER-LEVEL API (available if you need custom rendering):
+ *   startOrderTracking(callbacks) — start listeners with your own render fns
+ *   stopOrderTracking()           — stop listeners
+ *   getStatusLabel(status)        — human-readable status string
+ *   getStatusColor(status)        — hex colour for status
  *
- *   // Stop tracking when the customer logs out:
- *   stopOrderTracking();
+ * HOW initOrderStatus INTEGRATES WITH app.js:
+ *   app.js calls initOrderStatus() with no args after the user logs in.
+ *   This function wires startOrderTracking with DOM callbacks that render
+ *   into #activeOrdersList / #activeOrdersSection and sync completed orders
+ *   into localStorage via saveOrderToHistory (history.js).
  *
  * REQUIRED Firestore rules (see firestore.rules in billing repo):
  *   • pending_table_orders read:  if isOrderOwner() || isOperator()
  *   • customer_order_history/{uid}/orders read: if isSameCustomer(uid)
  *
- * AI UPDATE — 2026-07-28
- * Added to fix: Order History not being written after billing panel completed orders.
- * Corresponding billing-panel change: js/cart.js → syncCustomerOrderCompletion()
+ * AI UPDATE — 2026-07-28 v2
+ * Added initOrderStatus / stopOrderStatus exports so app.js wiring works.
+ * These were missing from v1; app.js already imported them but they didn't exist,
+ * causing order tracking to silently never start.
+ * Also added: DOM render functions for active orders using .aos-* CSS classes,
+ * and Firestore→localStorage sync for order history via saveOrderToHistory.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -49,6 +56,7 @@ import {
   onSnapshot, orderBy,
 }                               from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { waitForAuthReady }     from "./auth.js";
+import { saveOrderToHistory }   from "./history.js";
 
 // ── Status display helpers ────────────────────────────────────────────────────
 
@@ -81,18 +89,49 @@ export function getStatusColor(status) {
 let _unsubActive  = null;
 let _unsubHistory = null;
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Public API (used by app.js) ───────────────────────────────────────────────
 
 /**
- * startOrderTracking(auth, db, callbacks)
+ * initOrderStatus()
+ *
+ * High-level entry point — called by app.js after the user logs in.
+ * Starts both Firestore listeners and wires them to the DOM.
+ *
+ * Active orders → rendered into #activeOrdersList; #activeOrdersSection shown/hidden.
+ * Completed orders → synced into localStorage via saveOrderToHistory (history.js),
+ *   which deduplicates by firestoreId so repeated snapshot fires are safe.
+ */
+export function initOrderStatus() {
+  startOrderTracking({
+    onActiveOrders: _renderActiveOrders,
+    onHistory:      _syncHistoryToLocalStorage,
+  });
+}
+
+/**
+ * stopOrderStatus()
+ *
+ * Called by app.js on logout. Detaches listeners and clears the active orders UI.
+ */
+export function stopOrderStatus() {
+  stopOrderTracking();
+  _renderActiveOrders([]);   // hide the section and clear the list
+}
+
+// ── Lower-level API ───────────────────────────────────────────────────────────
+
+/**
+ * startOrderTracking(callbacks)
  *
  * Starts two real-time Firestore listeners:
  *   1. Active orders  — pending_table_orders where customer.uid == current UID
  *                       and status is NOT completed/dismissed.
  *   2. Order history  — customer_order_history/{uid}/orders ordered by completedAt desc.
  *
- * Calls callbacks.onActiveOrders(orders[]) whenever active orders change.
- * Calls callbacks.onHistory(orders[])      whenever order history changes.
+ * callbacks.onActiveOrders(orders[]) — fired whenever active orders change.
+ * callbacks.onHistory(orders[])      — fired whenever order history changes.
+ * callbacks.onActiveOrdersError(err) — optional error handler.
+ * callbacks.onHistoryError(err)      — optional error handler.
  *
  * Each `orders` element shape:
  *   Active:  { id, tableId, status, statusLabel, statusColor, items[], total, createdAt }
@@ -110,10 +149,9 @@ export async function startOrderTracking(callbacks = {}) {
   }
 
   // ── Listener 1: Active orders ───────────────────────────────────────────────
-  // We query all docs where customer.uid matches, then filter in JS because
-  // Firestore array/map field queries require a composite index on nested fields.
-  // The result set is tiny (1-3 docs per customer at most) so client-side
-  // filtering is acceptable.
+  // Query all docs where customer.uid matches, then filter in JS because
+  // Firestore array/map field queries on nested fields require a composite index.
+  // Result set is tiny (1-3 docs per customer at most) — client-side filtering is fine.
   const activeQuery = query(
     collection(db, "pending_table_orders"),
     where("customer.uid", "==", uid),
@@ -194,4 +232,110 @@ export async function startOrderTracking(callbacks = {}) {
 export function stopOrderTracking() {
   if (_unsubActive)  { _unsubActive();  _unsubActive  = null; }
   if (_unsubHistory) { _unsubHistory(); _unsubHistory = null; }
+}
+
+// ── DOM rendering (used by initOrderStatus) ───────────────────────────────────
+
+const _fmt = (n) =>
+  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(n || 0);
+
+function _esc(s = "") {
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/**
+ * _renderActiveOrders(orders)
+ *
+ * Renders active order cards into #activeOrdersList.
+ * Shows #activeOrdersSection when there are orders; hides it when empty.
+ * Uses the .aos-* CSS classes already defined in css/style.css.
+ *
+ * Status → CSS modifier mapping (only classes that exist in style.css):
+ *   pending   → .aos-pending  (amber, .aos-dot-pend animated pulse)
+ *   accepted  → .aos-pending  (reuse amber — no .aos-accepted class in CSS)
+ *   kot       → .aos-preparing (green, .aos-dot-prep animated pulse)
+ *
+ * Items: rendered as <ul class="aos-items"> with .aos-item-name / .aos-item-qty per row.
+ */
+function _renderActiveOrders(orders) {
+  const section = document.getElementById("activeOrdersSection");
+  const list    = document.getElementById("activeOrdersList");
+  if (!section || !list) return;
+
+  if (!orders || orders.length === 0) {
+    section.classList.add("hidden");
+    list.innerHTML = "";
+    return;
+  }
+
+  section.classList.remove("hidden");
+
+  list.innerHTML = orders.map(order => {
+    const status      = (order.status || "pending").toLowerCase();
+    const statusLabel = order.statusLabel || getStatusLabel(status);
+    const itemCount   = (order.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
+
+    // Status row modifier — .aos-preparing for kot, .aos-pending for all others
+    const isPrepping  = status === "kot";
+    const statusMod   = isPrepping ? "aos-preparing" : "aos-pending";
+    const dotMod      = isPrepping ? "aos-dot-prep"  : "aos-dot-pend";
+
+    // Items list — show all items using the ul.aos-items / li pattern
+    const itemsHtml = (order.items || []).map(it => `
+      <li>
+        <span class="aos-item-name">${_esc(it.name || "")}</span>
+        <span class="aos-item-qty">×${it.quantity || 1} &nbsp; ${_fmt((it.price || 0) * (it.quantity || 1))}</span>
+      </li>`).join("");
+
+    return `
+      <div class="aos-card" data-order-id="${_esc(order.id)}">
+        <div class="aos-card-top">
+          <div class="aos-card-left">
+            <span class="aos-table-tag">${_esc(order.tableId || "—")}</span>
+            <span class="aos-item-count">${itemCount} item${itemCount !== 1 ? "s" : ""}</span>
+          </div>
+          <span class="aos-total">${_fmt(order.total)}</span>
+        </div>
+
+        <div class="aos-status ${statusMod}">
+          <span class="aos-dot ${dotMod}"></span>
+          <span class="aos-status-label">${_esc(statusLabel)}</span>
+        </div>
+
+        <ul class="aos-items">
+          ${itemsHtml}
+        </ul>
+      </div>`;
+  }).join("");
+}
+
+/**
+ * _syncHistoryToLocalStorage(orders)
+ *
+ * Syncs completed orders from Firestore into localStorage so the history
+ * drawer (history.js) shows them. saveOrderToHistory deduplicates by
+ * firestoreId — calling it for all orders on every snapshot is safe.
+ *
+ * Field mapping:
+ *   Firestore (order-status)  → history.js saveOrderToHistory
+ *   id                        → firestoreId  (deduplication key)
+ *   total                     → totalPrice   (history.js uses .totalPrice)
+ *   orderedAt                 → placedAt     (history.js uses .placedAt)
+ */
+function _syncHistoryToLocalStorage(orders) {
+  for (const order of (orders || [])) {
+    saveOrderToHistory({
+      firestoreId:  order.id,
+      orderId:      order.orderId || order.id,
+      tableId:      order.tableId,
+      items:        order.items,
+      totalPrice:   order.total,        // history.js reads .totalPrice
+      placedAt:     order.orderedAt || null,
+      completedAt:  order.completedAt,
+      completionReason: order.completionReason || "",
+      status:       "completed",
+    });
+  }
 }
