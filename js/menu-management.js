@@ -18,6 +18,22 @@
 //   ready a clear user-facing message is shown instead of a silent failure.
 // =====================
 
+// ===== AI UPDATE =====
+// Date: 2026-07-28 (v2)
+// Feature: Menu Management Toggle — Auth Wait Fix
+// Summary:
+// - Deeper root cause: index.html never calls signInAnonymously at all
+//   (admin.js is only loaded by admin/index.html, not by the main billing panel).
+//   The auth.currentUser guard added in v1 was correct but always fired "not
+//   signed in yet" because nobody on index.html ever triggered an auth session.
+// - This is now fixed in incoming-orders.js (which bootstraps anonymous auth
+//   for the billing panel).  With that fix in place, auth.currentUser will be
+//   set well before the user can open the Menu Management tab.
+// - Additional defensive fix here: _toggle() and _togglePizzaSize() now wait
+//   up to 5 s for auth instead of bailing immediately, so edge cases where the
+//   user somehow taps the toggle before auth resolves still recover gracefully.
+// =====================
+
 import { db, auth } from './firebase-config.js';
 import {
     collection,
@@ -26,6 +42,7 @@ import {
     updateDoc,
     setDoc
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let _allItems          = [];
@@ -358,6 +375,22 @@ function _startPizzaSizesListener() {
     );
 }
 
+// ── Auth helper ───────────────────────────────────────────────────────────────
+
+// Wait up to `timeoutMs` for auth.currentUser to become non-null.
+// Returns the user object if auth resolves in time, or null on timeout.
+// Needed because menu_items load from IndexedDB (no auth required for reads)
+// so the toggle UI appears before signInAnonymously() may have completed.
+function _waitForAuth(timeoutMs = 5000) {
+    if (auth.currentUser) return Promise.resolve(auth.currentUser);
+    return new Promise(resolve => {
+        const unsub = onAuthStateChanged(auth, (user) => {
+            if (user) { unsub(); resolve(user); }
+        });
+        setTimeout(() => { unsub(); resolve(null); }, timeoutMs);
+    });
+}
+
 // ── Toggles ───────────────────────────────────────────────────────────────────
 
 async function _toggle(id) {
@@ -367,11 +400,16 @@ async function _toggle(id) {
 
     // Guard: Firestore write rule requires isOperator() → request.auth != null.
     // Menu items may load from IndexedDB cache before signInAnonymously() resolves,
-    // making items visible while auth is still pending.  Block the write and show
-    // a clear message instead of a silent permission-denied failure.
+    // making items visible while auth is still pending.
+    // incoming-orders.js now bootstraps anonymous auth for the billing panel, so
+    // auth.currentUser should be set by the time the user reaches this toggle.
+    // If for any reason it is not, wait up to 5 s for auth rather than bailing.
     if (!auth.currentUser) {
-        _showToastError('Not signed in yet. Please wait a moment and try again.');
-        return;
+        const user = await _waitForAuth(5000);
+        if (!user) {
+            _showToastError('Could not sign in. Please reload the page and try again.');
+            return;
+        }
     }
 
     const wasOn = item.inStock !== false;
@@ -396,8 +434,11 @@ async function _togglePizzaSize(size) {
 
     // Same auth guard as _toggle() — writes need a signed-in anonymous operator.
     if (!auth.currentUser) {
-        _showToastError('Not signed in yet. Please wait a moment and try again.');
-        return;
+        const user = await _waitForAuth(5000);
+        if (!user) {
+            _showToastError('Could not sign in. Please reload the page and try again.');
+            return;
+        }
     }
 
     const wasOn = _pizzaSizes[size] !== false;

@@ -42,6 +42,7 @@
 - Bridge build for Order Panel (`order-panel-updates/js/auth.js` and `order.js`) — bypasses Cloud Functions
 - **[2026-07-28] Incoming Orders listener auth-race fix** — listener now starts only after `onAuthStateChanged` confirms a signed-in user, eliminating `permission-denied` on page load
 - **[2026-07-28] Menu Management toggle fix** — writes now guarded by `auth.currentUser` check; clear user message shown if auth not yet ready
+- **[2026-07-28 v2] Incoming Orders + Menu Management — Root Cause Fixed** — `index.html` never called `signInAnonymously` (only `admin/index.html` loads `admin.js` which does). `incoming-orders.js` now bootstraps anonymous auth for the billing panel; `menu-management.js` toggles now wait up to 5 s for auth before failing. See details below.
 
 ---
 
@@ -52,8 +53,9 @@
 | Previous | Admin PIN login broken (`auth/operation-not-allowed` blocked dashboard) | Decoupled login from Firebase Auth; auth runs in background |
 | Previous | PWA serving stale JS | Bumped `sw.js` cache version v7→v8 |
 | Previous | Order panel calling Cloud Functions (fails without billing) | Rewrote `auth.js` + `order.js` in `order-panel-updates/` to use direct Firestore |
-| 2026-07-28 | Incoming Orders not appearing in Billing Panel | Fixed auth race in `incoming-orders.js` — now waits for `onAuthStateChanged` |
-| 2026-07-28 | Menu Management toggle failing with "Could not update…" | Added `auth.currentUser` guard in `menu-management.js` before `updateDoc`/`setDoc` |
+| 2026-07-28 | Incoming Orders not appearing in Billing Panel (attempt 1) | Fixed auth race in `incoming-orders.js` — now waits for `onAuthStateChanged` |
+| 2026-07-28 | Menu Management toggle failing with "Could not update…" (attempt 1) | Added `auth.currentUser` guard in `menu-management.js` before `updateDoc`/`setDoc` |
+| 2026-07-28 | **Incoming Orders + Menu Toggles still broken after attempt 1** | **Root cause found: `index.html` never called `signInAnonymously` (only `admin/index.html` loads `admin.js`). `auth.currentUser` was always `null` on the billing panel. Fix: `incoming-orders.js` now calls `signInAnonymously` at module top-level; `menu-management.js` now waits up to 5 s for auth instead of failing immediately.** |
 
 ---
 
@@ -85,6 +87,8 @@ The rewritten bridge files have NOT been pushed to GitHub yet:
 | `js/incoming-orders.js` | Billing Panel | Imported `auth` + `onAuthStateChanged`; listener now starts after auth is confirmed |
 | `js/menu-management.js` | Billing Panel | Imported `auth`; added `auth.currentUser` guard before `updateDoc`/`setDoc` |
 | `AI_HANDOFF.md` | Billing Panel | Created this file |
+| **`js/incoming-orders.js` (v2)** | Billing Panel | **Root fix: added `signInAnonymously` import + call at module top-level; moved `onAuthStateChanged` to module top-level (outside DOMContentLoaded) so auth bootstraps immediately on `index.html` load** |
+| **`js/menu-management.js` (v2)** | Billing Panel | **Added `onAuthStateChanged` import + `_waitForAuth()` helper; toggles now wait up to 5 s for auth instead of immediately failing** |
 
 ---
 

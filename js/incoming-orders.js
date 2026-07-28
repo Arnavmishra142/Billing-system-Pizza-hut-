@@ -14,6 +14,23 @@
 // - visibilitychange path unchanged — still restarts listener on tab focus.
 // =====================
 
+// ===== AI UPDATE =====
+// Date: 2026-07-28 (v2)
+// Feature: Incoming Orders Listener — Auth Bootstrap Fix
+// Summary:
+// - Root cause identified: index.html never calls signInAnonymously.
+//   admin.js (which calls signInAnonymously) is only loaded by admin/index.html,
+//   NOT by index.html (the main billing panel).
+// - Because no one ever called signInAnonymously on index.html, auth.currentUser
+//   was always null, so onAuthStateChanged only ever fired with null, and
+//   startListening() was never invoked.
+// - Fix: this module now imports signInAnonymously and calls it immediately at
+//   module top-level (outside DOMContentLoaded) so auth is bootstrapped as soon
+//   as the billing panel loads.
+// - onAuthStateChanged registration is also moved to module top-level so it is
+//   registered as early as possible and cannot miss the initial auth state.
+// =====================
+
 import { db, auth } from './firebase-config.js';
 import {
     collection,
@@ -26,7 +43,7 @@ import {
     updateDoc,
     enableNetwork
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
 // ── Fix 3: Count how many times a phone number has ordered ───────────────────
 async function getCustomerOrderCount(phone) {
@@ -372,6 +389,44 @@ function startListening() {
     });
 }
 
+// ── Auth bootstrap ────────────────────────────────────────────────────────────
+// index.html (the main billing panel) does NOT load admin.js and therefore
+// never calls signInAnonymously on its own.  Without an anonymous session,
+// auth.currentUser is always null, onAuthStateChanged only ever fires with
+// null, and startListening() is never called — orders never appear.
+//
+// This module is now responsible for bootstrapping auth on the billing panel.
+// signInAnonymously is idempotent: Firebase returns the existing cached session
+// from IndexedDB instantly if one exists, or creates a new anonymous user once.
+//
+// onAuthStateChanged is registered HERE (module top-level, outside
+// DOMContentLoaded) so it is wired up immediately when the module loads and
+// cannot miss the initial auth-state notification from Firebase.
+
+let _authListenerFired = false;
+onAuthStateChanged(auth, (user) => {
+    if (user && !_authListenerFired) {
+        _authListenerFired = true;
+        startListening();
+    }
+    // If user becomes null (sign-out), cancel the listener to avoid leaks
+    if (!user && _unsubscribe) {
+        _unsubscribe();
+        _unsubscribe = null;
+        _authListenerFired = false;
+        setBadge(0);
+    }
+});
+
+// Kick off anonymous sign-in immediately so onAuthStateChanged gets a user.
+// auth.currentUser is synchronously available once IndexedDB cache is restored;
+// if it is already set we skip the call to avoid an extra round-trip.
+if (!auth.currentUser) {
+    signInAnonymously(auth).catch(err =>
+        console.warn('[incoming-orders] anonymous sign-in failed:', err.code)
+    );
+}
+
 // ── Wire up button & overlay ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
     if (btnOrders) {
@@ -380,32 +435,6 @@ document.addEventListener('DOMContentLoaded', () => {
         btnOrders.addEventListener('click', openDrawer);
     }
     if (overlay) overlay.addEventListener('click', closeDrawer);
-
-    // Wait for Firebase Auth to establish a user session before starting the
-    // Firestore listener.  The Firestore rule requires isOperator() which checks
-    // request.auth != null.  Starting the listener before signInAnonymously()
-    // completes causes an immediate permission-denied error and the feed never
-    // recovers until the 5-second retry fires — meaning orders placed right
-    // after login appear 5+ seconds late or not at all.
-    //
-    // onAuthStateChanged fires synchronously on the next microtask if Firebase
-    // already has a persisted anonymous session in IndexedDB (typical for a
-    // returning admin), or within ~1-2 s after signInAnonymously() resolves for
-    // a fresh session.  Either way the listener now starts as soon as auth is ready.
-    let _authListenerFired = false;
-    onAuthStateChanged(auth, (user) => {
-        if (user && !_authListenerFired) {
-            _authListenerFired = true;
-            startListening();
-        }
-        // If user becomes null (logout), cancel the listener so we don't leak
-        if (!user && _unsubscribe) {
-            _unsubscribe();
-            _unsubscribe = null;
-            _authListenerFired = false;
-            setBadge(0);
-        }
-    });
 
     // Re-establish the listener whenever the tab comes back into focus.
     // Browsers throttle/suspend WebSocket & long-poll connections in backgrounded
