@@ -1,6 +1,56 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28 (session 8)
+> Last updated: 2026-07-28 (session 9)
+
+---
+
+## Files Modified (2026-07-28 — session 9)
+
+| File | Repo | Change |
+|------|------|--------|
+| `server.js` | Billing Panel | **NEW** — Express server. Replaces `node build.js && npx serve`. Injects GROQ key at startup, exposes `POST /api/notify-order`, serves all static files. |
+| `js/incoming-orders.js` | Billing Panel | **v6** — Removed `order-notify.js` import, `triggerAlert`, `stopAlert`, `orders-open-drawer` listener. Added `notifyNewOrder(data)` that calls `POST /api/notify-order`. |
+| `js/order-notify.js` | Billing Panel | **DELETED** — entire browser notification/audio module removed. |
+| `sw.js` | Billing Panel | **v9→v10** — Removed `order-notify.js` and `notification.mp3` from STATIC_ASSETS. |
+| `package.json` | Billing Panel | Updated `main` to `server.js`, added `express` dependency, removed unused `build` script. |
+| `replit.md` | Billing Panel | Updated How to Run section; documented Express server and Pushover. |
+| `ARCHITECTURE_LOCK.md` | Billing Panel | Updated SW cache version; updated server section. |
+
+### What was removed (browser notification/audio system)
+
+- `js/order-notify.js` — entire file deleted (Audio element, `audio.loop`, `ended` fallback, autoplay-unlock listeners, Browser Notification API, `triggerAlert()`, `stopAlert()`)
+- `import { triggerAlert, stopAlert }` from `incoming-orders.js`
+- `stopAlert()` calls from "Open in POS" and "Dismiss" button handlers
+- `window.addEventListener('orders-open-drawer', ...)` listener
+- `sounds/notification.mp3` removed from SW STATIC_ASSETS (file still exists on disk but is no longer referenced or cached)
+
+### New Pushover notification flow
+
+1. A new customer order arrives — `onSnapshot` fires.
+2. `_initialLoadDone` guard ensures orders present at page load are silenced.
+3. `_notified` set ensures each order triggers a notification only once.
+4. `notifyNewOrder(data)` is called — fire-and-forget fetch to `POST /api/notify-order`.
+5. `server.js` receives the request, builds a dynamic message:
+   - `"New order for {tableId} — {customerName} ({N} items)"`
+   - Falls back to `"New order received for New Pizza Hut and Live Cake!"` if no data.
+6. `server.js` POSTs to `https://api.pushover.net/1/messages.json` with sound `notification`.
+7. Pushover delivers a push notification to the operator's phone.
+
+### Architecture change: static → Express (autoscale)
+
+The project was previously a pure static site (`npx serve`). Adding a server-side notification proxy required converting to an Express server. The deployment type in `.replit` has been changed from `static` to `autoscale`.
+
+**Important:** Autoscale deployments on Replit are not free forever (unlike Static deployments). The previous static deployment was free with no expiry. The owner should be aware of this hosting cost change before publishing.
+
+### Pushover credentials
+
+Stored directly in `server.js` (as supplied by the owner). Token: in `server.js`. These are low-risk operator credentials; rotate if the project is ever made public.
+
+### No Customer Panel changes required
+
+This change is entirely within the Billing Panel. No Firestore schema, collection names, or shared contracts were changed.
+
+---
 
 ---
 

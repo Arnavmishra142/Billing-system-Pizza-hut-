@@ -345,12 +345,11 @@ export function stopOrderStatus()   // Called by Customer Panel app.js on logout
 
 ### `sw.js` — Service Worker
 ```
-Current cache version: v9
+Current cache version: v10
 // If JS files are updated, bump the cache version string.
 // Failure to do so causes the browser to serve stale cached JS.
 // See memory: sw-stale-cache.md
-// STATIC_ASSETS includes: incoming-orders.js, order-notify.js, notification.mp3
-// These three must always be pre-cached together so they are invalidated as a unit.
+// order-notify.js and notification.mp3 removed in session 9 (Pushover migration).
 ```
 
 ### `build.js` — Build-time key injection

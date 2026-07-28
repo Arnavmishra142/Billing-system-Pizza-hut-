@@ -11,13 +11,18 @@ A browser-based POS and billing system for "New Pizza Hut & Live Cake". Built wi
 
 ## How to run
 
-This is a plain static site (no backend server). The workflow `Start application` runs:
+The workflow `Start application` runs:
 
 ```
-node build.js && npx serve . -l 5000
+node server.js
 ```
 
-`build.js` reads the `GROQ_API_KEY` secret and writes `admin/groq-key.generated.js` (git-ignored, regenerated on every run/publish) so the browser can call Groq directly. `npx serve` then serves the static files.
+`server.js` is an Express server that:
+1. Injects the `GROQ_API_KEY` secret into `admin/groq-key.generated.js` at startup (previously done by `build.js`).
+2. Exposes `POST /api/notify-order` — a server-side Pushover notification proxy.
+3. Serves all static project files from the root directory.
+
+`build.js` is no longer used and can be ignored.
 
 ## AI Chat (Smart AI Manager)
 
@@ -68,10 +73,19 @@ Change `available` → `inStock` in that line so it respects the same field this
 ```
 Only that one line in `js/menu.js` needs to change.
 
+## Pushover Notifications
+
+When a genuinely new customer order arrives in the Incoming Orders drawer, `js/incoming-orders.js` calls `POST /api/notify-order` on the Express server. The server forwards a push notification to the operator's phone via the [Pushover](https://pushover.net) API. Credentials are stored in `server.js`.
+
+Notifications are NOT triggered for:
+- Orders that already exist when the page first loads.
+- Firestore reconnects or listener restarts.
+
 ## Stack
 
 - HTML / CSS / Vanilla JS (ES modules via CDN)
 - Firebase JS SDK v10 (loaded via CDN)
+- Express.js (Node 20) — backend server + Pushover proxy
 - PWA-ready (manifest.json + service worker)
 
 ## User preferences

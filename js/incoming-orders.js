@@ -1,42 +1,22 @@
 // incoming-orders.js
 // Listens to Firestore `pending_table_orders` for new customer orders.
-// Shows badge on #btn-orders, a toast notification, and a looping audio alert.
+// Shows badge on #btn-orders and a toast notification.
+// New orders are reported to the backend via POST /api/notify-order,
+// which forwards a Pushover push notification to the operator's phone.
 
 // ===== AI UPDATE =====
-// Date: 2026-07-28 (v4)
-// Feature: Looping audio alert + browser notification for new incoming orders
+// Date: 2026-07-28 (v6)
+// Feature: Pushover push notification via backend — replaces browser audio/notification
 // Summary:
-// - Imported triggerAlert() and stopAlert() from js/order-notify.js.
-// - triggerAlert(tableId) called for every genuinely new order (inside the
-//   existing _notified.has() guard so it only fires once per order, not on
-//   every Firestore snapshot re-render).
-// - stopAlert() called at the top of openDrawer() so the sound stops the
-//   moment the admin opens the Incoming Orders drawer.
-// - Added window 'orders-open-drawer' listener: order-notify.js dispatches
-//   this event when the admin clicks the browser notification so the drawer
-//   opens and stopAlert() fires even when the tab is in the background.
-// - No changes to order logic, Firestore reads/writes, KOT, or billing flow.
-// =====================
-
-// ===== AI UPDATE =====
-// Date: 2026-07-28 (v5)
-// Root Cause 2 fix — stopAlert() moved to explicit acknowledgement actions:
-// - Removed stopAlert() from openDrawer(). Opening the drawer (via badge click,
-//   overlay, or any other UI action) no longer silences the alert.
-// - stopAlert() is now called only inside the "Open in POS" button handler and
-//   the "Dismiss" button handler — the two explicit acknowledgement actions.
-// - The browser notification onclick in order-notify.js already calls stopAlert()
-//   directly before dispatching 'orders-open-drawer', so notification clicks
-//   continue to silence the alert correctly.
-//
-// Root Cause 3 fix — existing orders load silently on page open:
-// - Added _initialLoadDone flag (false on module load, set to true after the
-//   first onSnapshot callback completes).
-// - On the very first snapshot, all pending order IDs are added to _notified
-//   silently (no toast, no triggerAlert). This prevents orders that already
-//   existed before the page opened from triggering the notification sound.
-// - Only orders that arrive in subsequent snapshots (genuinely new) trigger
-//   the toast and audio alert.
+// - Removed import of order-notify.js (triggerAlert / stopAlert).
+// - Removed all browser Notification API, audio looping, and autoplay-unlock logic.
+// - Added notifyNewOrder(data) — calls POST /api/notify-order on the Express
+//   server, which proxies to the Pushover API. Fire-and-forget; failures are
+//   logged but never disrupt the order flow.
+// - _initialLoadDone flag retained: existing orders on page load are silenced;
+//   only genuinely new orders trigger Pushover.
+// - stopAlert() calls removed from "Open in POS" and "Dismiss" handlers.
+// - 'orders-open-drawer' event listener removed (was for browser notification clicks).
 // =====================
 
 // ===== AI UPDATE =====
@@ -105,7 +85,6 @@ import {
     enableNetwork
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
-import { triggerAlert, stopAlert } from './order-notify.js';
 
 // ── Order-count cache: keyed by phone number ──────────────────────────────────
 // getCustomerOrderCount is called for every order on every renderDrawer() call.
@@ -142,12 +121,38 @@ const drawerList  = document.getElementById('ordersDrawerList');
 // Track order IDs we've already notified about so we don't re-toast on re-render
 const _notified = new Set();
 
-// AI UPDATE [2026-07-28] v5 — Root Cause 3 fix:
+// AI UPDATE [2026-07-28] v5 / v6:
 // On the very first onSnapshot callback, all currently-pending orders are loaded
-// into _notified silently (no toast, no audio alert). This prevents orders that
-// already existed before the page was opened from triggering the notification.
+// into _notified silently (no toast, no Pushover). This prevents orders that
+// already existed before the page was opened from triggering a notification.
 // Set to true after the first snapshot is processed.
 let _initialLoadDone = false;
+
+// ── Pushover notification via backend ─────────────────────────────────────────
+// AI UPDATE [2026-07-28] v6: Replaced browser audio/notification with Pushover.
+// Calls POST /api/notify-order on the local Express server (server.js), which
+// proxies to the Pushover API with the operator's credentials.
+// Fire-and-forget — a failure is logged but never disrupts the order flow.
+async function notifyNewOrder(data) {
+    const tableId      = data.tableId           || 'Unknown Table';
+    const customerName = data.customer?.name    || '';
+    const itemCount    = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
+
+    try {
+        const res = await fetch('/api/notify-order', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ tableId, customerName, itemCount })
+        });
+        if (res.ok) {
+            console.log('[incoming-orders] Pushover notification sent for:', tableId);
+        } else {
+            console.warn('[incoming-orders] Pushover endpoint returned', res.status);
+        }
+    } catch (err) {
+        console.warn('[incoming-orders] Pushover notification failed (non-critical):', err.message);
+    }
+}
 
 // ── Inject drawer + badge CSS immediately (not inside showToast) ──────────────
 (function injectDrawerCSS() {
@@ -278,10 +283,6 @@ function showToast(tableName, itemCount) {
 }
 
 // ── Drawer open / close ───────────────────────────────────────────────────────
-// AI UPDATE [2026-07-28] v5: stopAlert() removed from openDrawer().
-// The alert now stops ONLY when the admin explicitly acknowledges an order via
-// "Open in POS" or "Dismiss". Simply opening the drawer must not silence the
-// alert — the admin may have opened it to read the order without acting yet.
 function openDrawer()  {
     drawer && drawer.classList.add('open');
     overlay && overlay.classList.add('open');
@@ -345,10 +346,7 @@ function renderDrawer(orders) {
         `;
 
         // Accept → load items into POS cart then open the table
-        // AI UPDATE [2026-07-28] v5 — Root Cause 2 fix: stopAlert() called here
-        // (explicit acknowledgement) instead of in openDrawer().
         card.querySelector('.oc-btn-accept').addEventListener('click', async () => {
-            stopAlert();
             // ── Capture authoritative session identifiers from the order ──────────
             // These are stored as UI convenience only.  Settlement decisions in
             // cart.js use Firestore (customer_table_sessions) as the source of truth.
@@ -414,10 +412,7 @@ function renderDrawer(orders) {
         });
 
         // Dismiss → mark as dismissed
-        // AI UPDATE [2026-07-28] v5 — Root Cause 2 fix: stopAlert() called here
-        // (explicit acknowledgement) instead of in openDrawer().
         card.querySelector('.oc-btn-dismiss').addEventListener('click', async () => {
-            stopAlert();
             try {
                 await updateDoc(doc(db, 'pending_table_orders', id), { status: 'dismissed' });
             } catch(e) {}
@@ -480,9 +475,8 @@ function startListening() {
 
                 const itemCount = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
                 showToast(data.tableId || 'Unknown Table', itemCount || 1);
-                // triggerAlert is safe to call for every new order — only one audio
-                // loop ever runs; subsequent calls refresh the browser notification only.
-                triggerAlert(data.tableId || 'Unknown Table');
+                // AI UPDATE [2026-07-28] v6: Pushover push notification via backend.
+                notifyNewOrder(data);
             }
         });
 
@@ -547,11 +541,6 @@ document.addEventListener('DOMContentLoaded', () => {
         btnOrders.addEventListener('click', openDrawer);
     }
     if (overlay) overlay.addEventListener('click', closeDrawer);
-
-    // AI UPDATE [2026-07-28]: when the admin clicks the browser notification
-    // (fired from order-notify.js), open the drawer and stop the alert.
-    // stopAlert() is already called inside openDrawer() so no duplicate call needed.
-    window.addEventListener('orders-open-drawer', openDrawer);
 
     // Re-establish the Firestore network channel whenever the tab comes back
     // into focus (browsers throttle WebSocket connections in background tabs).

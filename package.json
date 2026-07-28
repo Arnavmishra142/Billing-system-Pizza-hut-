@@ -2,15 +2,17 @@
   "name": "workspace",
   "version": "1.0.0",
   "description": "",
-  "main": "build.js",
+  "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "node build.js",
-    "start": "node build.js && npx serve . -l 5000"
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1"
+  },
   "devDependencies": {
     "serve": "^14.2.6"
   }
