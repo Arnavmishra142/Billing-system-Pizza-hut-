@@ -1,6 +1,61 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28 (session 7)
+> Last updated: 2026-07-28 (session 8)
+
+---
+
+## Files Modified (2026-07-28 — session 8)
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/order-notify.js` | Billing Panel | **v3** — Added `ended` event fallback (Root Cause 4 fix). |
+| `js/incoming-orders.js` | Billing Panel | **v5** — Root Cause 2 + 3 fixes (see below). |
+| `sw.js` | Billing Panel | **v8→v9** — Added `incoming-orders.js`, `order-notify.js`, `notification.mp3` to STATIC_ASSETS (Root Cause 1 fix). |
+| `ARCHITECTURE_LOCK.md` | Billing Panel | Updated SW cache version to v9 and noted new STATIC_ASSETS. |
+
+### Root Cause 1 — Service Worker Cache (FIXED)
+
+`incoming-orders.js` and `order-notify.js` were absent from `STATIC_ASSETS` in `sw.js`. The stale-while-revalidate fetch handler still cached them, but without being in `STATIC_ASSETS` they were not invalidated as a unit when the cache version bumped. A new deploy could leave the browser running a stale `order-notify.js` alongside an updated `incoming-orders.js`.
+
+**Fix:** Added `js/incoming-orders.js`, `js/order-notify.js`, and `sounds/notification.mp3` to `STATIC_ASSETS`. Bumped cache version `v8 → v9` to immediately invalidate any stale copies of these files in existing installs.
+
+### Root Cause 2 — Incorrect stopAlert() Trigger (FIXED)
+
+`stopAlert()` was called inside `openDrawer()`, which fires whenever the drawer is opened by any means — badge click, overlay, browser notification, etc. This meant the alert sound was silenced by merely opening the drawer, before the admin had acknowledged the order.
+
+**Fix:** Removed `stopAlert()` from `openDrawer()`. Added `stopAlert()` to:
+- The **"Open in POS"** button click handler (explicit acknowledgement — admin accepts the order).
+- The **"Dismiss"** button click handler (explicit acknowledgement — admin dismisses the order).
+
+The browser notification `onclick` in `order-notify.js` already called `stopAlert()` directly, so that path was already correct and required no change.
+
+### Root Cause 3 — Existing Orders Trigger Notification on Page Load (FIXED)
+
+`_notified` started empty on every page load. When `onSnapshot` first fired, all currently-pending Firestore orders were treated as new, causing `triggerAlert()` to fire for orders that already existed before the page was opened.
+
+**Fix:** Added `_initialLoadDone` boolean flag (initialised `false` at module scope). In `startListening()`, `_initialLoadDone` is reset to `false` so each new listener session starts fresh. Inside the `onSnapshot` callback, orders seen in the **first** snapshot are added to `_notified` silently (no toast, no audio). `_initialLoadDone` is set to `true` after the first snapshot completes. All subsequent snapshots use the normal guard: any ID not yet in `_notified` is a genuinely new order and triggers the alert.
+
+### Root Cause 4 — Audio Loop Reliability (FIXED)
+
+`audio.loop = true` is not reliably honoured for short MP3 files in some Chrome versions — the track ends and the loop silently stops.
+
+**Fix:** Added an `ended` event listener on `_audio` in `order-notify.js`. If the track ends while `_alertActive` is still `true`, playback is restarted immediately (`_audio.currentTime = 0; _audio.play()`). This ensures the notification sound never stops unexpectedly while an order is unacknowledged.
+
+### How the notification system works (updated)
+
+1. **New order detected** — `startListening()`'s `onSnapshot` fires. The `_notified.has(id)` guard ensures the block runs only once per new order. `_initialLoadDone` must be `true` (orders from before the page loaded are silently skipped). `triggerAlert(tableId)` is called for genuinely new orders only.
+2. **`triggerAlert`** — requests notification permission (lazily), shows/replaces a browser `Notification` (`tag:'incoming-order'`), starts `notification.mp3` looping. If already active, only the browser notification is refreshed.
+3. **Alert stops** ONLY when the admin explicitly acknowledges an order:
+   - Clicks **"Open in POS"** → `stopAlert()` called, order marked `accepted` in Firestore, POS opens.
+   - Clicks **"Dismiss"** → `stopAlert()` called, order marked `dismissed` in Firestore.
+   - Clicks the **browser notification** → `stopAlert()` called directly in `order-notify.js` (notification `onclick`), drawer opens.
+4. **Opening the drawer alone** (badge click, overlay click) does NOT stop the alert.
+5. **Autoplay unlock** — first click/touch/keydown warms AudioContext. If an alert was already queued, the loop starts immediately.
+6. **Loop reliability** — `audio.loop = true` + `ended` event fallback both ensure continuous looping.
+
+### No Customer Panel changes required
+
+All four root causes were internal to the Billing Panel. No Firestore schema, collection names, or shared contracts were changed.
 
 ---
 

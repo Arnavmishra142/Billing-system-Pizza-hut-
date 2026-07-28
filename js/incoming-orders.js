@@ -19,6 +19,27 @@
 // =====================
 
 // ===== AI UPDATE =====
+// Date: 2026-07-28 (v5)
+// Root Cause 2 fix — stopAlert() moved to explicit acknowledgement actions:
+// - Removed stopAlert() from openDrawer(). Opening the drawer (via badge click,
+//   overlay, or any other UI action) no longer silences the alert.
+// - stopAlert() is now called only inside the "Open in POS" button handler and
+//   the "Dismiss" button handler — the two explicit acknowledgement actions.
+// - The browser notification onclick in order-notify.js already calls stopAlert()
+//   directly before dispatching 'orders-open-drawer', so notification clicks
+//   continue to silence the alert correctly.
+//
+// Root Cause 3 fix — existing orders load silently on page open:
+// - Added _initialLoadDone flag (false on module load, set to true after the
+//   first onSnapshot callback completes).
+// - On the very first snapshot, all pending order IDs are added to _notified
+//   silently (no toast, no triggerAlert). This prevents orders that already
+//   existed before the page opened from triggering the notification sound.
+// - Only orders that arrive in subsequent snapshots (genuinely new) trigger
+//   the toast and audio alert.
+// =====================
+
+// ===== AI UPDATE =====
 // Date: 2026-07-28
 // Feature: Incoming Orders Listener — Auth Race Fix
 // Summary:
@@ -120,6 +141,13 @@ const drawerList  = document.getElementById('ordersDrawerList');
 
 // Track order IDs we've already notified about so we don't re-toast on re-render
 const _notified = new Set();
+
+// AI UPDATE [2026-07-28] v5 — Root Cause 3 fix:
+// On the very first onSnapshot callback, all currently-pending orders are loaded
+// into _notified silently (no toast, no audio alert). This prevents orders that
+// already existed before the page was opened from triggering the notification.
+// Set to true after the first snapshot is processed.
+let _initialLoadDone = false;
 
 // ── Inject drawer + badge CSS immediately (not inside showToast) ──────────────
 (function injectDrawerCSS() {
@@ -250,8 +278,11 @@ function showToast(tableName, itemCount) {
 }
 
 // ── Drawer open / close ───────────────────────────────────────────────────────
+// AI UPDATE [2026-07-28] v5: stopAlert() removed from openDrawer().
+// The alert now stops ONLY when the admin explicitly acknowledges an order via
+// "Open in POS" or "Dismiss". Simply opening the drawer must not silence the
+// alert — the admin may have opened it to read the order without acting yet.
 function openDrawer()  {
-    stopAlert(); // AI UPDATE [2026-07-28]: stop looping alert when admin opens drawer
     drawer && drawer.classList.add('open');
     overlay && overlay.classList.add('open');
 }
@@ -314,7 +345,10 @@ function renderDrawer(orders) {
         `;
 
         // Accept → load items into POS cart then open the table
+        // AI UPDATE [2026-07-28] v5 — Root Cause 2 fix: stopAlert() called here
+        // (explicit acknowledgement) instead of in openDrawer().
         card.querySelector('.oc-btn-accept').addEventListener('click', async () => {
+            stopAlert();
             // ── Capture authoritative session identifiers from the order ──────────
             // These are stored as UI convenience only.  Settlement decisions in
             // cart.js use Firestore (customer_table_sessions) as the source of truth.
@@ -380,7 +414,10 @@ function renderDrawer(orders) {
         });
 
         // Dismiss → mark as dismissed
+        // AI UPDATE [2026-07-28] v5 — Root Cause 2 fix: stopAlert() called here
+        // (explicit acknowledgement) instead of in openDrawer().
         card.querySelector('.oc-btn-dismiss').addEventListener('click', async () => {
+            stopAlert();
             try {
                 await updateDoc(doc(db, 'pending_table_orders', id), { status: 'dismissed' });
             } catch(e) {}
@@ -410,6 +447,11 @@ function startListening() {
     // from Firestore rather than returning stale values from a previous session.
     _countCache.clear();
 
+    // AI UPDATE [2026-07-28] v5 — Root Cause 3 fix:
+    // Reset _initialLoadDone so the new listener's first snapshot is treated as
+    // a fresh initial load (existing orders loaded silently, not as new alerts).
+    _initialLoadDone = false;
+
     const q = query(
         collection(db, 'pending_table_orders'),
         orderBy('createdAt', 'desc')
@@ -426,17 +468,27 @@ function startListening() {
             const order = { id: docSnap.id, ...data };
             pending.push(order);
 
-            // Toast + alert only for truly new orders we haven't seen yet
             if (!_notified.has(docSnap.id)) {
                 _notified.add(docSnap.id);
+
+                // AI UPDATE [2026-07-28] v5 — Root Cause 3 fix:
+                // On the very first snapshot, orders already in Firestore are added
+                // to _notified silently (no toast, no audio) because they existed
+                // before this page session started. Only orders that arrive in a
+                // subsequent snapshot are genuinely new and deserve an alert.
+                if (!_initialLoadDone) return;
+
                 const itemCount = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
                 showToast(data.tableId || 'Unknown Table', itemCount || 1);
-                // AI UPDATE [2026-07-28]: trigger looping audio + browser notification.
                 // triggerAlert is safe to call for every new order — only one audio
                 // loop ever runs; subsequent calls refresh the browser notification only.
                 triggerAlert(data.tableId || 'Unknown Table');
             }
         });
+
+        // Mark the initial load complete AFTER processing the first snapshot.
+        // Any order IDs seen in this first pass are already in _notified (silently).
+        _initialLoadDone = true;
 
         _pendingOrders = pending;
         setBadge(pending.length);

@@ -4,9 +4,9 @@
 // ── What this module does ─────────────────────────────────────────────────────
 //  • Plays sounds/notification.mp3 in a continuous loop when a new order arrives.
 //  • Shows a browser Notification (if permission granted) with the table name.
-//  • The alert (sound + notification) stops ONLY when:
-//      1. The admin opens the Incoming Orders drawer, OR
-//      2. The admin clicks the browser notification.
+//  • The alert (sound + notification) stops ONLY when the admin explicitly
+//    acknowledges an order by clicking "Open in POS" or "Dismiss".
+//    Simply opening the drawer does NOT stop the alert.
 //  • Multiple simultaneous orders share ONE audio loop — no overlapping sounds.
 //  • Audio autoplay is unlocked on the admin's first interaction with the page.
 //
@@ -22,6 +22,10 @@
 // AI UPDATE [2026-07-28]: Created — looping audio + browser notification.
 // AI UPDATE [2026-07-28] v2: Fixed autoplay-unlock bug — _unlockAudio now resumes
 //   a pending alert instead of always pausing after play().
+// AI UPDATE [2026-07-28] v3: Root Cause 4 fix — added 'ended' event fallback.
+//   audio.loop = true is unreliable for very short MP3s in some Chrome versions.
+//   If the audio track ends while _alertActive is still true, restart playback
+//   immediately so the loop never silently stops mid-alert.
 
 // ── Audio element ─────────────────────────────────────────────────────────────
 const _audio   = new Audio('sounds/notification.mp3');
@@ -29,6 +33,20 @@ _audio.loop    = true;
 _audio.preload = 'auto';
 
 console.log('[order-notify] Audio element created — sounds/notification.mp3');
+
+// ── Root Cause 4 fix: 'ended' fallback for loop reliability ──────────────────
+// audio.loop = true is not reliably honoured for short MP3s in some Chrome
+// versions — the track ends and never restarts.  If the track ends while an
+// alert is still active, restart playback immediately.
+_audio.addEventListener('ended', () => {
+    if (_alertActive) {
+        console.log('[order-notify] audio ended unexpectedly while alert active — restarting loop');
+        _audio.currentTime = 0;
+        _audio.play().catch(err =>
+            console.warn('[order-notify] audio.play() failed on ended-restart:', err.name)
+        );
+    }
+});
 
 let _audioUnlocked  = false;  // true after first user gesture unlocks autoplay
 let _alertActive    = false;  // true while a pending alert exists (sound should loop)

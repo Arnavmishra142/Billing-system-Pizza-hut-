@@ -1,8 +1,17 @@
 // ============================================================
 //  POS Service Worker — Cache-first for static assets
-//  Version: 8 (bump this number whenever you deploy changes)
+//  Version: 9 (bump this number whenever you deploy changes)
 // ============================================================
-const CACHE_NAME = 'pos-static-v8';
+//
+// AI UPDATE [2026-07-28]: Bumped v8 → v9 and added incoming-orders.js +
+//   order-notify.js to STATIC_ASSETS so both files are pre-cached together
+//   and are always invalidated as a unit when the cache version increments.
+//   Root Cause 1 fix: previously order-notify.js was absent from STATIC_ASSETS,
+//   meaning a new deploy could leave the browser serving a stale cached copy of
+//   order-notify.js while the updated incoming-orders.js was already live,
+//   causing a version mismatch between the two tightly-coupled modules.
+//
+const CACHE_NAME = 'pos-static-v9';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
@@ -16,9 +25,12 @@ const STATIC_ASSETS = [
     '/js/tables.js',
     '/js/admin.js',
     '/js/expense.js',
+    '/js/incoming-orders.js',
+    '/js/order-notify.js',
     '/manifest.json',
     '/sounds/pop.sfx.mp3',
-    '/sounds/cash.sfx.mp3'
+    '/sounds/cash.sfx.mp3',
+    '/sounds/notification.mp3'
 ];
 
 // ── INSTALL: pre-cache all static assets ──────────────────
