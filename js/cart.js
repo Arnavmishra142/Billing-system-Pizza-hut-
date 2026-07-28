@@ -2,6 +2,136 @@ import { db, functions } from './firebase-config.js';
 import { doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, collection } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 
+// ===== AI UPDATE =====
+// Date: 2026-07-28
+// Feature: Customer Order History Sync — Order Completion
+// Summary:
+// When the operator presses "Bill & Settle" or "Save & Exit", if the current
+// table had an order from the Customer Panel (identified by the
+// activeCustomerUid_<table> key that incoming-orders.js writes to localStorage
+// when an order is accepted), this module:
+//   1. Marks all active pending_table_orders docs for that table as 'completed'
+//      → the customer's Active Orders view (which filters on status) updates in
+//      real time without a page refresh.
+//   2. Writes a completed-order record to:
+//        customer_order_history/{customerUid}/orders/ORDER_{timestamp}
+//      → the customer's Order History tab reads this subcollection.
+//   3. Clears the localStorage convenience-cache keys for that table so the
+//      next manual order on the same table starts clean.
+//
+// IMPORTANT — does NOT affect manual/walk-in orders:
+//   The sync is gated on activeCustomerUid_<table> being present in
+//   localStorage.  Manual bills (no Customer Panel order) never set that key,
+//   so syncCustomerOrderCompletion() returns immediately without any Firestore
+//   write.  All existing billing logic is untouched.
+//
+// Firestore collections written:
+//   - pending_table_orders/{orderId}  update  { status:'completed', completedAt }
+//   - customer_order_history/{uid}/orders/{orderId}  set  { full order record }
+//
+// Corresponding Firestore rules (see firestore.rules):
+//   - pending_table_orders update: 'completed' added to isAllowedStatusUpdate()
+//   - customer_order_history: operator can write, customer can read their own
+//
+// Customer Panel (Order- repo) changes needed:
+//   - Replace js/order-status.js with the version in order-panel-updates/
+//     (see that file for the full active-orders + history listener implementation)
+// =====================
+
+// ── Customer order completion sync (best-effort, non-blocking) ───────────────
+//
+// Called by both "Bill & Settle" and "Save & Exit" handlers after the sale is
+// saved.  Only has any effect when the table has an active Customer Panel order
+// (i.e. incoming-orders.js stored activeCustomerUid_<table> in localStorage
+// when the operator pressed "Open in POS").
+//
+// What it does when a Customer Panel order IS present:
+//   1. Queries pending_table_orders for all active docs on this table and marks
+//      each one status:'completed' — the customer's Active Orders view updates
+//      in real time because it listens to the same collection.
+//   2. Writes one completed-order record to
+//        customer_order_history/{customerUid}/orders/ORDER_{timestamp}
+//      so the customer's Order History tab can display it.
+//   3. Clears the localStorage convenience-cache keys for this table.
+//
+// What it does for manual/walk-in orders (NO Customer Panel order):
+//   Returns immediately without any Firestore write.  All existing billing
+//   logic is completely unaffected.
+// ─────────────────────────────────────────────────────────────────────────────
+async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, completionReason) {
+    const customerUid = localStorage.getItem(`activeCustomerUid_${tableName}`);
+    if (!customerUid) {
+        // Not a Customer Panel order — manual/walk-in bill, nothing to sync.
+        return;
+    }
+
+    try {
+        // ── Step 1: Find all still-active pending_table_orders for this table ──
+        const q = query(
+            collection(db, 'pending_table_orders'),
+            where('tableId', '==', tableName)
+        );
+        const snap = await getDocs(q);
+        const activeDocs = snap.docs.filter(d =>
+            ['pending', 'accepted', 'kot'].includes((d.data().status || '').toLowerCase())
+        );
+
+        // Grab customer name/phone from the first active doc for the history record.
+        let customerName  = '';
+        let customerPhone = '';
+        if (activeDocs.length > 0) {
+            const cust    = activeDocs[0].data().customer || {};
+            customerName  = cust.name  || '';
+            customerPhone = cust.phone || '';
+        }
+
+        // Mark every active order for this table as 'completed'.
+        // The customer panel listens to this collection filtered by UID + status,
+        // so these updates remove them from the Active Orders view in real time.
+        await Promise.all(
+            activeDocs.map(d =>
+                updateDoc(d.ref, {
+                    status:      'completed',
+                    completedAt: serverTimestamp(),
+                }).catch(e => console.warn('[OrderSync] status update failed:', e))
+            )
+        );
+
+        // ── Step 2: Write a permanent record to the customer's order history ───
+        if (cartSnapshot.length > 0) {
+            const historyId = `ORDER_${Date.now()}`;
+            await setDoc(
+                doc(db, 'customer_order_history', customerUid, 'orders', historyId),
+                {
+                    orderId:          historyId,
+                    tableId:          tableName,
+                    customerName,
+                    customerPhone,
+                    items: cartSnapshot.map(i => ({
+                        name:     i.name,
+                        price:    i.price,
+                        quantity: i.qty,
+                        subtotal: +(i.price * i.qty).toFixed(2),
+                    })),
+                    total:            +total.toFixed(2),
+                    completedAt:      serverTimestamp(),
+                    completionReason,          // 'bill_settle' | 'save_exit'
+                    orderedAt:        new Date().toISOString(),
+                }
+            );
+        }
+
+        // ── Step 3: Clear localStorage convenience cache for this table ────────
+        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId']
+            .forEach(key => localStorage.removeItem(`${key}_${tableName}`));
+
+        console.log(`[OrderSync] Order completion synced for table "${tableName}" (${completionReason})`);
+    } catch (err) {
+        // Non-fatal — billing is already done, this is just customer-panel sync.
+        console.warn('[OrderSync] Customer order history sync failed (non-fatal):', err.message || err);
+    }
+}
+
 // ── Customer table-lock release (best-effort, non-blocking) ──────────────────
 //
 // Calls the releaseTableLock Cloud Function to clean up any active customer
@@ -546,6 +676,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.saveToGhostHistory(orderId, total, cartSnapshot);
             }
 
+            // ── Sync completed order to Customer Panel (non-blocking) ────────
+            // Marks pending_table_orders as 'completed' and writes a record to
+            // customer_order_history so the customer's history tab updates.
+            // Only runs if this table had a Customer Panel order (no-op for
+            // manual/walk-in bills — see syncCustomerOrderCompletion above).
+            syncCustomerOrderCompletion(tableName, cartSnapshot, total, 'bill_settle');
+
             // ── Release customer table lock in background (non-blocking) ──────
             releaseTableLockInBackground(tableName, 'bill_settle');
         });
@@ -579,6 +716,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
                     window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot);
                 }
+            }
+
+            // ── Sync completed order to Customer Panel (non-blocking) ────────
+            // Same as Bill & Settle path above — marks pending_table_orders as
+            // 'completed' and writes customer_order_history entry.
+            // No-op for manual/walk-in orders (no activeCustomerUid in localStorage).
+            if (cartSnapshot.length > 0) {
+                syncCustomerOrderCompletion(tableName, cartSnapshot, total, 'save_exit');
             }
 
             // ── Release customer table lock in background (non-blocking) ──────

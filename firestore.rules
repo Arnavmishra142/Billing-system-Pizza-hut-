@@ -43,8 +43,10 @@ service cloud.firestore {
     }
 
     // Status values an operator is allowed to write on an order.
+    // 'completed' was added 2026-07-28: billing panel sets this when Bill & Settle
+    // or Save & Exit is pressed so the customer's Active Orders view updates.
     function isAllowedStatusUpdate() {
-      let allowed = ['accepted', 'dismissed', 'kot'];
+      let allowed = ['accepted', 'dismissed', 'kot', 'completed'];
       return request.resource.data.keys().hasAll(['status'])
           && allowed.hasAny([request.resource.data.status]);
     }
@@ -134,6 +136,24 @@ service cloud.firestore {
     // ── expenses / daily_expenses ─────────────────────────────────────────────
     match /expenses/{docId}       { allow read, write: if isOperator(); }
     match /daily_expenses/{docId} { allow read, write: if isOperator(); }
+
+    // ── customer_order_history ────────────────────────────────────────────────
+    // Written by the billing panel (operator) when Bill & Settle / Save & Exit
+    // completes an order that originated from the Customer Panel.
+    // Read by the owning customer to populate their Order History tab.
+    //
+    // Structure:
+    //   customer_order_history/{customerUid}/orders/{ORDER_timestamp}
+    //     orderId, tableId, customerName, customerPhone, items[], total,
+    //     completedAt (Timestamp), completionReason, orderedAt (ISO string)
+    //
+    // Added: 2026-07-28
+    match /customer_order_history/{uid}/orders/{orderId} {
+      // Operator (billing panel) writes the record on order completion.
+      allow write: if isOperator();
+      // Customer reads only their own history.
+      allow read:  if isSameCustomer(uid);
+    }
 
     // ── Catch-all ─────────────────────────────────────────────────────────────
     match /{document=**} {

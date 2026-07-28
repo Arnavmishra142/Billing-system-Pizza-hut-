@@ -43,6 +43,7 @@
 - **[2026-07-28] Incoming Orders listener auth-race fix** — listener now starts only after `onAuthStateChanged` confirms a signed-in user, eliminating `permission-denied` on page load
 - **[2026-07-28] Menu Management toggle fix** — writes now guarded by `auth.currentUser` check; clear user message shown if auth not yet ready
 - **[2026-07-28 v2] Incoming Orders + Menu Management — Root Cause Fixed** — `index.html` never called `signInAnonymously` (only `admin/index.html` loads `admin.js` which does). `incoming-orders.js` now bootstraps anonymous auth for the billing panel; `menu-management.js` toggles now wait up to 5 s for auth before failing. See details below.
+- **[2026-07-28 v3] Customer Order History Sync** — `js/cart.js` now writes completed orders to `customer_order_history/{uid}/orders/` and marks `pending_table_orders` as `status:'completed'` when Bill & Settle or Save & Exit is pressed for a Customer Panel order. Manual/walk-in orders are completely unaffected. See full details below.
 
 ---
 
@@ -56,24 +57,83 @@
 | 2026-07-28 | Incoming Orders not appearing in Billing Panel (attempt 1) | Fixed auth race in `incoming-orders.js` — now waits for `onAuthStateChanged` |
 | 2026-07-28 | Menu Management toggle failing with "Could not update…" (attempt 1) | Added `auth.currentUser` guard in `menu-management.js` before `updateDoc`/`setDoc` |
 | 2026-07-28 | **Incoming Orders + Menu Toggles still broken after attempt 1** | **Root cause found: `index.html` never called `signInAnonymously` (only `admin/index.html` loads `admin.js`). `auth.currentUser` was always `null` on the billing panel. Fix: `incoming-orders.js` now calls `signInAnonymously` at module top-level; `menu-management.js` now waits up to 5 s for auth instead of failing immediately.** |
+| 2026-07-28 | **Customer order history not updated after Bill & Settle / Save & Exit** | **`js/cart.js` now calls `syncCustomerOrderCompletion()` (fire-and-forget) after each completion event. It marks `pending_table_orders` docs as `status:'completed'` (removes from Active Orders in real time) and writes a full order record to `customer_order_history/{uid}/orders/ORDER_{ts}`. Manual/walk-in orders are unaffected (gate: `activeCustomerUid_<table>` localStorage key must exist).** |
+
+---
+
+## Order Completion Flow (added 2026-07-28) 🔄
+
+### How a Customer Panel order completes end-to-end:
+
+| Step | Actor | Action | Firestore write |
+|------|-------|--------|-----------------|
+| 1 | Customer | Places order via Customer Panel | `pending_table_orders` doc created, `status: 'pending'` |
+| 2 | Billing Panel | "Open in POS" button → `incoming-orders.js` | `status: 'accepted'` + stores `activeCustomerUid_<table>` in `localStorage` |
+| 3 | Billing Panel | KOT printed → `cart.js printKOT()` | `status: 'kot', kotAt: <Timestamp>` |
+| 4 | Billing Panel | **Bill & Settle** or **Save & Exit** | `status: 'completed', completedAt: <Timestamp>` on all active `pending_table_orders` docs for this table + new doc in `customer_order_history/{uid}/orders/ORDER_{ts}` |
+| 5 | Customer Panel | Real-time listener (`order-status.js`) | Active Orders view removes completed order; Order History tab shows new entry |
+
+### Key function: `syncCustomerOrderCompletion()` in `js/cart.js`
+- **Fire-and-forget**: billing workflow never waits on it
+- **Guard**: only runs when `activeCustomerUid_<table>` is in `localStorage` (set by `incoming-orders.js` on order accept)
+- **Manual order safety**: walk-in / manual orders never set that localStorage key → function returns immediately, zero Firestore writes
+- **What it writes**:
+  1. `updateDoc` on all `pending_table_orders` where `tableId == table` and status in `[pending, accepted, kot]` → `{ status: 'completed', completedAt: serverTimestamp() }`
+  2. `setDoc` on `customer_order_history/{customerUid}/orders/ORDER_{timestamp}` → `{ orderId, tableId, customerName, customerPhone, items[], total, completedAt, orderedAt, completionReason }`
+  3. Removes `activeOrderDocId_*`, `activeCustomerUid_*`, `activeSessionId_*`, `activeLockId_*` from `localStorage`
+
+### Customer Order History record shape:
+```json
+{
+  "orderId": "ORDER_1722196800000",
+  "tableId": "Table 3",
+  "customerName": "Ramesh",
+  "customerPhone": "+919876543210",
+  "items": [{ "name": "...", "price": 0, "quantity": 1, "subtotal": 0 }],
+  "total": 0,
+  "completedAt": "<ServerTimestamp>",
+  "completionReason": "bill_settle | save_exit",
+  "orderedAt": "2026-07-28T10:00:00.000Z"
+}
+```
 
 ---
 
 ## Features Pending / Known Issues ⚠️
 
 ### CRITICAL — Order Panel (teamdovolve-hue/Order-) Not Updated
-The rewritten bridge files have NOT been pushed to GitHub yet:
-- `order-panel-updates/js/auth.js` → must replace `js/auth.js` in the Order- repo
-- `order-panel-updates/js/order.js` → must replace `js/order.js` in the Order- repo
+Three files must be pushed to the Order Panel GitHub repo for the full flow to work end-to-end:
+- `order-panel-updates/js/auth.js` → replace `js/auth.js` in Order- repo
+- `order-panel-updates/js/order.js` → replace `js/order.js` in Order- repo
+- **`order-panel-updates/js/order-status.js`** → replace `js/order-status.js` in Order- repo *(added 2026-07-28 — provides Active Orders + Order History real-time listeners)*
 
 **Until these are pushed, the Netlify-hosted Order Panel still calls Cloud Functions and shows "Login service error: internal".** The `customer.html` in this repo works correctly.
 
 ### How to push:
 1. Go to https://github.com/teamdovolve-hue/Order-/edit/main/js/auth.js → paste content of `order-panel-updates/js/auth.js` → Commit
 2. Go to https://github.com/teamdovolve-hue/Order-/edit/main/js/order.js → paste content of `order-panel-updates/js/order.js` → Commit
+3. Go to https://github.com/teamdovolve-hue/Order-/edit/main/js/order-status.js → paste content of `order-panel-updates/js/order-status.js` → Commit
+
+### Order Panel index.html wiring needed (for order-status.js):
+After pushing `order-status.js` to the Order Panel, the index.html of that repo must call:
+```javascript
+import { startOrderTracking } from "./order-status.js";
+
+// After the customer logs in (in auth.js onAuthReady callback):
+startOrderTracking({
+  onActiveOrders: (orders) => renderActiveOrders(orders),
+  onHistory:      (orders) => renderOrderHistory(orders),
+});
+```
+Where `renderActiveOrders` and `renderOrderHistory` are functions that update the UI. Each `orders` element has the shape documented in `order-panel-updates/js/order-status.js`.
+
+### Firestore rules must be deployed:
+Run: `firebase deploy --only firestore:rules`
+The rules file (`firestore.rules`) now includes:
+- `'completed'` added to `isAllowedStatusUpdate()` — required for billing panel to mark orders complete
+- `customer_order_history/{uid}/orders/{orderId}` — operator write, customer read
 
 ### Other pending items:
-- `order-status.js` in Order Panel reads `customer_table_sessions` — in bridge mode this collection is never written (no Cloud Functions), so order tracking tab shows nothing
 - `GROQ_API_KEY` secret not set → AI chat in `admin/chat.ai.html` won't work
 - OTP / Fast2SMS DLT approval pending — when approved, restore `customerAuth` Cloud Function path (marked with "BRIDGE" comments in code, no DB migration needed)
 - Firebase billing not enabled → still on Spark plan → Cloud Functions not deployable
@@ -89,6 +149,9 @@ The rewritten bridge files have NOT been pushed to GitHub yet:
 | `AI_HANDOFF.md` | Billing Panel | Created this file |
 | **`js/incoming-orders.js` (v2)** | Billing Panel | **Root fix: added `signInAnonymously` import + call at module top-level; moved `onAuthStateChanged` to module top-level (outside DOMContentLoaded) so auth bootstraps immediately on `index.html` load** |
 | **`js/menu-management.js` (v2)** | Billing Panel | **Added `onAuthStateChanged` import + `_waitForAuth()` helper; toggles now wait up to 5 s for auth instead of immediately failing** |
+| **`js/cart.js` (v3)** | Billing Panel | **Added `syncCustomerOrderCompletion()` at module top-level; called fire-and-forget from Bill & Settle and Save & Exit. Marks `pending_table_orders` docs as `completed`; writes `customer_order_history/{uid}/orders/` entry. No-op for manual orders.** |
+| **`firestore.rules` (v3)** | Billing Panel | **Added `'completed'` to `isAllowedStatusUpdate()`; added `customer_order_history/{uid}/orders/{orderId}` rule (operator write, customer read own).** |
+| **`order-panel-updates/js/order-status.js`** | Billing Panel (staging) | **New file: real-time listeners for Active Orders (`pending_table_orders` by UID) and Order History (`customer_order_history/{uid}/orders`). Must replace `js/order-status.js` in teamdovolve-hue/Order- repo.** |
 
 ---
 
