@@ -130,6 +130,7 @@ let _initialLoadDone = false;
 
 // ── Pushover notification via backend ─────────────────────────────────────────
 // AI UPDATE [2026-07-28] v6: Replaced browser audio/notification with Pushover.
+// AI UPDATE [2026-07-28] v7: Added temporary debug logs to trace notification chain.
 // Calls POST /api/notify-order on the local Express server (server.js), which
 // proxies to the Pushover API with the operator's credentials.
 // Fire-and-forget — a failure is logged but never disrupts the order flow.
@@ -138,19 +139,32 @@ async function notifyNewOrder(data) {
     const customerName = data.customer?.name    || '';
     const itemCount    = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
 
+    // [DEBUG] Step 3 — POST request starting
+    console.log('[notify-debug] Step 3: POST /api/notify-order starting', { tableId, customerName, itemCount });
+
     try {
         const res = await fetch('/api/notify-order', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({ tableId, customerName, itemCount })
         });
+
+        // [DEBUG] Step 4 — POST request completed
+        console.log('[notify-debug] Step 4: POST /api/notify-order completed — HTTP status:', res.status);
+
+        let body;
+        try { body = await res.clone().json(); } catch(_) { body = await res.text(); }
+        // [DEBUG] Step 5 — Backend response body
+        console.log('[notify-debug] Step 5: Backend response body:', body);
+
         if (res.ok) {
-            console.log('[incoming-orders] Pushover notification sent for:', tableId);
+            console.log('[notify-debug] ✅ Pushover notification delivered for:', tableId);
         } else {
-            console.warn('[incoming-orders] Pushover endpoint returned', res.status);
+            console.warn('[notify-debug] ❌ Pushover endpoint returned non-OK status:', res.status, body);
         }
     } catch (err) {
-        console.warn('[incoming-orders] Pushover notification failed (non-critical):', err.message);
+        // [DEBUG] Step 6 — Network/thrown error
+        console.error('[notify-debug] ❌ Step 6: fetch threw an error:', err.name, err.message, err);
     }
 }
 
@@ -471,11 +485,22 @@ function startListening() {
                 // to _notified silently (no toast, no audio) because they existed
                 // before this page session started. Only orders that arrive in a
                 // subsequent snapshot are genuinely new and deserve an alert.
-                if (!_initialLoadDone) return;
+                if (!_initialLoadDone) {
+                    // [DEBUG] Step 1 — order seen on initial load, silenced
+                    console.log('[notify-debug] Step 1: Initial load — order silenced (pre-existing):', docSnap.id, data.tableId);
+                    return;
+                }
+
+                // [DEBUG] Step 1 — genuinely new order detected
+                console.log('[notify-debug] Step 1: New order detected:', docSnap.id, data.tableId, data.customer?.name);
 
                 const itemCount = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
                 showToast(data.tableId || 'Unknown Table', itemCount || 1);
+
+                // [DEBUG] Step 2 — calling notifyNewOrder
+                console.log('[notify-debug] Step 2: Calling notifyNewOrder() for:', data.tableId);
                 // AI UPDATE [2026-07-28] v6: Pushover push notification via backend.
+                // AI UPDATE [2026-07-28] v7: Debug logs added.
                 notifyNewOrder(data);
             }
         });

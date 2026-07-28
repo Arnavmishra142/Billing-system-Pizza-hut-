@@ -1,6 +1,49 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28 (session 9)
+> Last updated: 2026-07-28 (session 10)
+
+---
+
+## Files Modified (2026-07-28 — session 10)
+
+| File | Repo | Change |
+|------|------|--------|
+| `.replit` | Billing Panel | **Root Cause 1 fix** — `deploymentTarget` changed from `"static"` to `"autoscale"`. Removed `build = ["node", "build.js"]` and `publicDir = "."`. Added `run = ["node", "server.js"]`. Previously the deployed site served only static files and the Express server never ran, so `POST /api/notify-order` always returned 404. |
+| `js/incoming-orders.js` | Billing Panel | **Root Cause 2** — Added temporary step-by-step debug logs (v7). Logs added at: Step 1 (new order detected in onSnapshot), Step 2 (notifyNewOrder called), Step 3 (POST request starting, with payload), Step 4 (POST completed, HTTP status), Step 5 (backend response body), Step 6 (fetch error if thrown). Also installed `node_modules` via `npm install` (was missing after import). |
+
+### Root Cause 1 — Deployment Configuration (FIXED)
+
+**Problem:** `.replit` had `deploymentTarget = "static"` with `build = ["node", "build.js"]` and `publicDir = "."`. When deployed, Replit served only the static files in the root directory — the Express server (`server.js`) was never started. Any request to `POST /api/notify-order` returned 404 Not Found because no backend was running.
+
+**Fix:** Changed `deploymentTarget = "autoscale"` and set `run = ["node", "server.js"]`. The development workflow (`node server.js` on port 5000) was already correct and unchanged. Only the deployment section needed updating.
+
+**Impact on cost:** Autoscale deployments are NOT free forever, unlike the previous Static deployment. The owner should be aware of this hosting cost change before publishing. (Previously documented in session 9 notes.)
+
+### Root Cause 2 — Debug Logs Added (TEMPORARY)
+
+**Purpose:** Verify the complete client-side notification chain so the exact failure point is visible in browser console logs.
+
+**Log chain:**
+```
+[notify-debug] Step 1: New order detected: <docId> <tableId> <customerName>
+[notify-debug] Step 2: Calling notifyNewOrder() for: <tableId>
+[notify-debug] Step 3: POST /api/notify-order starting {tableId, customerName, itemCount}
+[notify-debug] Step 4: POST /api/notify-order completed — HTTP status: 200
+[notify-debug] Step 5: Backend response body: {ok: true}
+[notify-debug] ✅ Pushover notification delivered for: <tableId>
+```
+
+If Step 1 does NOT appear → `_initialLoadDone` is false (order is being silenced as pre-existing). Reload the page and place a new order.
+If Step 1 appears but Step 2 does NOT → logic error in the snapshot callback.
+If Step 3 appears but Step 4 returns 404 → deployment not yet updated (old static deployment).
+If Step 4 returns 200 but Step 5 shows `{ok: false}` → Pushover API error (check credentials).
+If Step 6 appears → network error reaching the backend.
+
+**These logs are temporary and should be removed once the notification chain is confirmed working end-to-end.**
+
+### No Customer Panel changes required
+
+This change is entirely within the Billing Panel deployment configuration and client-side debug instrumentation. No Firestore schema, collection names, or shared contracts were changed.
 
 ---
 
