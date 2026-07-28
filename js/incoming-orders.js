@@ -5,21 +5,33 @@
 // which forwards a Pushover push notification to the operator's phone.
 
 // ===== AI UPDATE =====
-// Date: 2026-07-28 (v8)
-// Bug fix: Only first Pushover notification fired — subsequent orders silenced
-// Root cause:
-//   startListening() reset _initialLoadDone = false on every listener restart
-//   (triggered by Firestore error retries, network blips, etc.) but did NOT
-//   clear the _notified Set.  If a genuinely new order arrived in the FIRST
-//   snapshot of the restarted listener, it would be:
+// Date: 2026-07-28 (v9)
+// Bug fix: Only first Pushover notification fired — subsequent orders silenced.
+//
+// Root cause (v8 diagnosis was partially wrong):
+//   The _initialLoadDone flag is reset to false on EVERY call to startListening()
+//   (including Firestore error retries and network reconnects).  If a genuinely
+//   new order arrived in the FIRST snapshot of a restarted listener, the flow was:
 //     _notified.has(newId) = false  →  _notified.add(newId)
-//     _initialLoadDone = false      →  return  (silenced as "pre-existing")
-//   This caused every order placed during or just after a listener restart to be
-//   dropped silently.  Clearing _notified in startListening() fixes this:
-//   existing pending orders are silenced by _initialLoadDone=false (correct);
-//   orders arriving after the first snapshot are correctly notified.
-// Fix: added _notified.clear() inside startListening() — see line below.
-// Enhanced debug logs: startListening() calls, snapshot state, skipped-order path.
+//     _initialLoadDone = false      →  return  ← silenced as "pre-existing" ❌
+//   The v8 "fix" (_notified.clear()) actually made this worse: it removed the
+//   dedup protection for already-seen orders without fixing the silencing.
+//
+// Fix (v9):
+//   1. Replace _initialLoadDone as the notification guard with a TIMESTAMP
+//      comparison.  _sessionStartedAt = Date.now() is recorded each time
+//      startListening() runs.  An order is "genuinely new" if its Firestore
+//      createdAt server timestamp is AFTER (_sessionStartedAt - 10 seconds).
+//      This is immune to listener restarts: pre-existing orders always have
+//      older timestamps; orders placed AFTER the listener (re)started are newer.
+//   2. _notified is NO LONGER cleared on restart.  It accumulates all order IDs
+//      seen this page session, providing lifetime dedup protection.  This prevents
+//      re-notification when the listener restarts and sees already-processed orders.
+//   3. acceptedOrderIds_<table> localStorage key added to the "Open in POS"
+//      handler to track which specific orders were imported.  syncCustomerOrder
+//      Completion() uses this key to mark ONLY those orders as 'completed',
+//      leaving other pending cards for the same table untouched.
+//      (Issue 2 fix — see also js/cart.js)
 // =====================
 
 // ===== AI UPDATE =====
@@ -136,15 +148,20 @@ const drawer      = document.getElementById('ordersDrawer');
 const overlay     = document.getElementById('ordersOverlay');
 const drawerList  = document.getElementById('ordersDrawerList');
 
-// Track order IDs we've already notified about so we don't re-toast on re-render
+// Track order IDs we've already notified about so we don't re-toast on re-render.
+// Never cleared on listener restart (v9 fix) — persists for the page lifetime to
+// prevent re-notification of orders already processed this session.
 const _notified = new Set();
 
-// AI UPDATE [2026-07-28] v5 / v6:
-// On the very first onSnapshot callback, all currently-pending orders are loaded
-// into _notified silently (no toast, no Pushover). This prevents orders that
-// already existed before the page was opened from triggering a notification.
-// Set to true after the first snapshot is processed.
+// AI UPDATE [2026-07-28] v5/v6: initial-load guard — see v9 comment above.
+// _initialLoadDone is kept for the debug log readout but is NO LONGER the
+// primary notification guard.  _sessionStartedAt (below) has replaced it.
 let _initialLoadDone = false;
+
+// AI UPDATE [2026-07-28] v9: timestamp-based notification guard.
+// Recorded each time startListening() runs.  Only orders whose Firestore
+// createdAt timestamp is newer than (_sessionStartedAt − 10 s) are notified.
+let _sessionStartedAt = 0;
 
 // ── Pushover notification via backend ─────────────────────────────────────────
 // AI UPDATE [2026-07-28] v6: Replaced browser audio/notification with Pushover.
@@ -433,6 +450,20 @@ function renderDrawer(orders) {
                 if (customerUid)       localStorage.setItem(`activeCustomerUid_${tableName}`,  customerUid);
                 if (customerSessionId) localStorage.setItem(`activeSessionId_${tableName}`,    customerSessionId);
                 if (tableLockId)       localStorage.setItem(`activeLockId_${tableName}`,       tableLockId);
+
+                // AI UPDATE [2026-07-28] v9 — Issue 2 fix:
+                // Track the specific order IDs imported via "Open in POS" so that
+                // syncCustomerOrderCompletion() marks ONLY those orders as 'completed'
+                // at Bill & Settle / Save & Exit time.
+                // Without this, sync marked ALL pending/active orders for the table as
+                // 'completed', silently consuming any other unreviewed pending card.
+                // Accumulate into an array so multiple orders can be imported before
+                // the operator bills (the normal multi-order merge flow).
+                const _prevAccepted = JSON.parse(
+                    localStorage.getItem(`acceptedOrderIds_${tableName}`) || '[]'
+                );
+                if (!_prevAccepted.includes(id)) _prevAccepted.push(id);
+                localStorage.setItem(`acceptedOrderIds_${tableName}`, JSON.stringify(_prevAccepted));
             } catch(e) { console.warn('Could not update order status:', e); }
 
             closeDrawer();
@@ -482,22 +513,21 @@ function startListening() {
     // from Firestore rather than returning stale values from a previous session.
     _countCache.clear();
 
-    // AI UPDATE [2026-07-28] v5 — Root Cause 3 fix:
-    // Reset _initialLoadDone so the new listener's first snapshot is treated as
-    // a fresh initial load (existing orders loaded silently, not as new alerts).
+    // AI UPDATE [2026-07-28] v9 — timestamp-based guard replaces _initialLoadDone:
+    // Record the moment this listener (re)started.  The snapshot handler uses this
+    // to distinguish pre-existing orders (createdAt ≤ threshold) from genuinely
+    // new ones (createdAt > threshold).  A 10-second buffer covers normal
+    // client/server clock drift without silencing orders placed during a restart.
+    _sessionStartedAt = Date.now();
+
+    // Keep _initialLoadDone for debug-log readout only.
     _initialLoadDone = false;
 
-    // AI UPDATE [2026-07-28] v8 — Bug fix (only first notification fired):
-    // _notified must be cleared whenever the listener (re)starts.
-    // Without this, if startListening() is called again after a Firestore error
-    // retry, _notified retains IDs from the previous session while
-    // _initialLoadDone is reset to false.  A genuinely new order whose ID is
-    // not yet in _notified but arrives in the FIRST snapshot of the restarted
-    // listener would be: _notified.add(id) → _initialLoadDone=false → silenced.
-    // Clearing _notified ensures that path cannot happen: existing pending orders
-    // are correctly silenced by _initialLoadDone=false in the first snapshot,
-    // and new orders arriving afterwards are correctly notified.
-    _notified.clear();
+    // IMPORTANT (v9): _notified is NOT cleared here.
+    // Clearing it was the v8 approach but did not fully fix the silencing bug.
+    // Keeping _notified across restarts prevents re-notification of any order
+    // already seen this page session.  New orders (not in _notified AND with a
+    // recent createdAt timestamp) are correctly notified by the timestamp guard.
 
     const q = query(
         collection(db, 'pending_table_orders'),
@@ -527,14 +557,25 @@ function startListening() {
             if (!_notified.has(docSnap.id)) {
                 _notified.add(docSnap.id);
 
-                // AI UPDATE [2026-07-28] v5 — Root Cause 3 fix:
-                // On the very first snapshot, orders already in Firestore are added
-                // to _notified silently (no toast, no audio) because they existed
-                // before this page session started. Only orders that arrive in a
-                // subsequent snapshot are genuinely new and deserve an alert.
-                if (!_initialLoadDone) {
-                    // [DEBUG] Step 1 — order seen on initial load, silenced
-                    console.log('[notify-debug] Step 1: SILENCED (initial load, pre-existing):', docSnap.id, data.tableId);
+                // AI UPDATE [2026-07-28] v9 — timestamp-based guard:
+                // Notify only if this order was created AFTER this listener session
+                // started (minus a 10-second buffer for client/server clock drift).
+                // Pre-existing orders always have older createdAt values and are
+                // silenced regardless of whether the listener was just restarted.
+                // This replaces the fragile _initialLoadDone approach (v5-v8) which
+                // silenced ALL orders in the first snapshot of a restarted listener,
+                // including genuinely new ones placed during the restart window.
+                const createdAtMs = data.createdAt?.toMillis?.() ?? 0;
+                const CLOCK_DRIFT_MS = 10_000; // 10-second client/server buffer
+                const isGenuinelyNew = createdAtMs > (_sessionStartedAt - CLOCK_DRIFT_MS);
+
+                if (!isGenuinelyNew) {
+                    // [DEBUG] Pre-existing order — silenced by timestamp comparison
+                    console.log(
+                        '[notify-debug] Step 1: SILENCED (pre-existing, createdAt before session start):',
+                        docSnap.id, data.tableId,
+                        `createdAt=${createdAtMs} threshold=${_sessionStartedAt - CLOCK_DRIFT_MS}`
+                    );
                     return;
                 }
 
@@ -548,17 +589,15 @@ function startListening() {
                 console.log('[notify-debug] Step 2: Calling notifyNewOrder() for:', data.tableId);
                 // AI UPDATE [2026-07-28] v6: Pushover push notification via backend.
                 // AI UPDATE [2026-07-28] v7: Debug logs added.
-                // AI UPDATE [2026-07-28] v8: _notified cleared on restart (bug fix).
+                // AI UPDATE [2026-07-28] v9: timestamp guard replaces _initialLoadDone.
                 notifyNewOrder(data);
             } else {
-                // [DEBUG] Order already notified — this is the DEDUP path (correct skip)
-                // If you see a genuinely NEW order here, _notified was not cleared on restart.
+                // [DEBUG] Order already notified — correct DEDUP skip.
                 console.log('[notify-debug] DEDUP skip (already notified):', docSnap.id, data.tableId);
             }
         });
 
-        // Mark the initial load complete AFTER processing the first snapshot.
-        // Any order IDs seen in this first pass are already in _notified (silently).
+        // _initialLoadDone is kept for the debug log readout only (no longer guards notifications).
         _initialLoadDone = true;
 
         _pendingOrders = pending;

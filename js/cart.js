@@ -38,6 +38,29 @@ import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebas
 //     (see that file for the full active-orders + history listener implementation)
 // =====================
 
+// ===== AI UPDATE =====
+// Date: 2026-07-28 (v2)
+// Bug fix: Issue 2 — Two pending cards from same table; accepting one caused the other to disappear.
+//
+// Root cause:
+//   syncCustomerOrderCompletion queried ALL pending/active orders for the table
+//   (where('tableId', '==', tableName)) and marked EVERY active one as 'completed'.
+//   When the operator accepted Card A and then billed it, the sync function also
+//   marked Card B (still pending, never imported) as 'completed' — removing it
+//   from the incoming-orders drawer permanently.
+//
+// Fix:
+//   incoming-orders.js v9 now writes the specific Firestore document IDs that
+//   were imported via "Open in POS" to localStorage key:
+//     acceptedOrderIds_<tableName>  (JSON array, accumulates across multiple accepts)
+//   This function now reads that list and marks ONLY those specific orders as
+//   'completed'.  Other pending cards for the same table are left untouched so
+//   the operator can process them independently.
+//   Fallback: if the key is absent (manual/walk-in billing, or pre-fix sessions),
+//   the original behavior (mark all active docs) is preserved for safety.
+//   acceptedOrderIds_<tableName> is cleared in Step 3 alongside other keys.
+// =====================
+
 // ── Customer order completion sync (best-effort, non-blocking) ───────────────
 //
 // Called by both "Bill & Settle" and "Save & Exit" handlers after the sale is
@@ -46,13 +69,14 @@ import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebas
 // when the operator pressed "Open in POS").
 //
 // What it does when a Customer Panel order IS present:
-//   1. Queries pending_table_orders for all active docs on this table and marks
-//      each one status:'completed' — the customer's Active Orders view updates
-//      in real time because it listens to the same collection.
-//   2. Writes one completed-order record to
+//   1. Queries pending_table_orders for all active docs on this table.
+//   2. Marks ONLY the specific orders imported via "Open in POS" as 'completed'
+//      (tracked in acceptedOrderIds_<table>; falls back to all active docs if
+//      the key is absent so manual billing is unaffected).
+//   3. Writes one completed-order record to
 //        customer_order_history/{customerUid}/orders/ORDER_{timestamp}
 //      so the customer's Order History tab can display it.
-//   3. Clears the localStorage convenience-cache keys for this table.
+//   4. Clears the localStorage convenience-cache keys for this table.
 //
 // What it does for manual/walk-in orders (NO Customer Panel order):
 //   Returns immediately without any Firestore write.  All existing billing
@@ -75,12 +99,27 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
             ['pending', 'accepted', 'kot'].includes((d.data().status || '').toLowerCase())
         );
 
-        // Recover customerUid from Firestore if localStorage missed it
-        if (!customerUid && activeDocs.length > 0) {
-            customerUid = activeDocs[0].data().customer?.uid || '';
+        // AI UPDATE [2026-07-28] v2 — Issue 2 fix:
+        // Only complete the specific orders imported via "Open in POS".
+        // incoming-orders.js writes the accepted IDs to acceptedOrderIds_<table>.
+        // Fallback: if the key is absent, complete all active docs (original behavior
+        // — safe for manual/walk-in billing where no tracking key is written).
+        const _acceptedIds = JSON.parse(
+            localStorage.getItem(`acceptedOrderIds_${tableName}`) || '[]'
+        );
+        const docsToComplete = _acceptedIds.length > 0
+            ? activeDocs.filter(d => _acceptedIds.includes(d.id))
+            : activeDocs;
+
+        // Recover customerUid from the imported orders first; fall back to any active doc.
+        if (!customerUid && docsToComplete.length > 0) {
+            customerUid = docsToComplete[0].data().customer?.uid || '';
             if (customerUid) {
                 console.log(`[OrderSync] Recovered customerUid from Firestore for table "${tableName}"`);
             }
+        }
+        if (!customerUid && activeDocs.length > 0) {
+            customerUid = activeDocs[0].data().customer?.uid || '';
         }
 
         if (!customerUid) {
@@ -88,25 +127,34 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
             return;
         }
 
-        // Grab customer name/phone from the first active doc for the history record.
+        // Grab customer name/phone from the specific imported docs for the history record.
+        const _firstDoc = docsToComplete.length > 0 ? docsToComplete[0]
+                        : activeDocs.length > 0      ? activeDocs[0]
+                        : null;
         let customerName  = '';
         let customerPhone = '';
-        if (activeDocs.length > 0) {
-            const cust    = activeDocs[0].data().customer || {};
+        if (_firstDoc) {
+            const cust    = _firstDoc.data().customer || {};
             customerName  = cust.name  || '';
             customerPhone = cust.phone || '';
         }
 
-        // Mark every active order for this table as 'completed'.
+        // Mark ONLY the imported orders as 'completed'.
+        // Other pending cards for the same table are left untouched.
         // The customer panel listens to this collection filtered by UID + status,
         // so these updates remove them from the Active Orders view in real time.
         await Promise.all(
-            activeDocs.map(d =>
+            docsToComplete.map(d =>
                 updateDoc(d.ref, {
                     status:      'completed',
                     completedAt: serverTimestamp(),
                 }).catch(e => console.warn('[OrderSync] status update failed:', e))
             )
+        );
+
+        console.log(
+            `[OrderSync] Marked ${docsToComplete.length} order(s) completed for table "${tableName}"`,
+            `(tracked: ${_acceptedIds.length}, active total: ${activeDocs.length})`
         );
 
         // ── Step 2: Write a permanent record to the customer's order history ───
@@ -134,7 +182,8 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
         }
 
         // ── Step 3: Clear localStorage convenience cache for this table ────────
-        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId']
+        // acceptedOrderIds added to the clear list (v2 / Issue 2 fix).
+        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
             .forEach(key => localStorage.removeItem(`${key}_${tableName}`));
 
         console.log(`[OrderSync] Order completion synced for table "${tableName}" (${completionReason})`);

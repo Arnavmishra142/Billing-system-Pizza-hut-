@@ -1,6 +1,69 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28 (session 10)
+> Last updated: 2026-07-28 (session 12)
+
+---
+
+## Files Modified (2026-07-28 — session 12)
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/incoming-orders.js` | Billing Panel | **v9** — Two fixes: (1) Issue 1: replaced fragile `_initialLoadDone` guard with timestamp-based notification filtering (`_sessionStartedAt`); removed `_notified.clear()` on restart. (2) Issue 2: "Open in POS" now accumulates imported order IDs into `acceptedOrderIds_<table>` localStorage key. |
+| `js/cart.js` | Billing Panel | **v2** — Issue 2 fix: `syncCustomerOrderCompletion()` now reads `acceptedOrderIds_<table>` and marks ONLY those specific orders as `'completed'`. Fallback to all-active behavior when key is absent (preserves manual billing). Adds `acceptedOrderIds` to the cleanup list. |
+| `sw.js` | Billing Panel | **v10→v11** — Bumped cache version to invalidate stale copies of updated JS files. |
+
+### Root Cause — Issue 1: Only First Pushover Notification Fired (FIXED)
+
+**The bug**: `_initialLoadDone` was used as the notification guard. It was reset to `false` every time `startListening()` was called (triggered by Firestore error retries, network reconnects, etc.). If a genuinely new order arrived in the **first snapshot** of a restarted listener:
+```
+startListening() restarts:
+  _initialLoadDone = false   ← reset
+  _notified.clear()          ← v8 "fix" cleared dedup set too
+
+First snapshot of restarted listener contains Order B (new, pending):
+  _notified.has(B) = false  →  _notified.add(B)
+  _initialLoadDone = false  →  return  ← SILENCED as "pre-existing" ❌
+
+_initialLoadDone = true after first snapshot
+
+Order C arrives later → notified ✅  (but Order B was lost)
+```
+The v8 `_notified.clear()` fix removed dedup protection without fixing the silencing bug.
+
+**The fix (v9)**: Two changes:
+1. **Replace `_initialLoadDone` with `_sessionStartedAt`**: `startListening()` now records `_sessionStartedAt = Date.now()`. In the snapshot handler, a new order is notified only if `order.createdAt.toMillis() > (_sessionStartedAt - 10_000)`. Pre-existing orders always have older timestamps; orders placed after the listener (re)started are newer. The 10-second buffer covers normal client/server clock drift.
+2. **Never clear `_notified`**: The set accumulates all seen IDs for the page lifetime. This prevents re-notification when the listener restarts and sees previously-processed orders.
+
+**Why `_initialLoadDone` was fragile**: It only distinguished "before/after first snapshot" within a single listener session. On restart, the distinction was lost. The timestamp comparison is session-independent — it works correctly regardless of how many times the listener restarts.
+
+### Root Cause — Issue 2: Accepting One Pending Card Causes Another to Disappear (FIXED)
+
+**The bug**: `syncCustomerOrderCompletion()` in `js/cart.js` (called at Bill & Settle / Save & Exit) queried ALL pending/active orders for the table:
+```javascript
+const q = query(
+    collection(db, 'pending_table_orders'),
+    where('tableId', '==', tableName)
+);
+const activeDocs = snap.docs.filter(d =>
+    ['pending', 'accepted', 'kot'].includes(d.data().status)
+);
+// Then marked ALL activeDocs as 'completed' ← the bug
+```
+When Card A was accepted and the operator billed it, this function found both Card A (accepted) **and Card B (still pending)** as "active" for the table and marked BOTH as `'completed'`. Card B was lost from the incoming orders drawer.
+
+**The fix**: Two-part change:
+1. **`incoming-orders.js` v9**: The "Open in POS" handler now accumulates imported order IDs in localStorage:
+   ```
+   acceptedOrderIds_Table 7 = JSON array of Firestore doc IDs imported via "Open in POS"
+   ```
+   Multiple accepts before billing accumulate into the array (supporting the normal multi-order merge flow).
+2. **`cart.js` v2**: `syncCustomerOrderCompletion()` reads `acceptedOrderIds_<table>` and marks ONLY those specific Firestore documents as `'completed'`. Other pending orders for the same table remain `'pending'` and continue to appear in the incoming orders drawer.
+   - **Fallback**: if the key is absent (manual/walk-in billing, page refresh without re-accepting), falls back to the original behavior (mark all active docs). This preserves all existing workflows.
+   - `acceptedOrderIds_<table>` is cleared in the cleanup step alongside the other session keys.
+
+### No Customer Panel changes required
+
+Both bugs were entirely within the Billing Panel's client-side logic. No Firestore schema, collection names, shared status values, or cross-repo contracts were changed.
 
 ---
 

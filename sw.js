@@ -1,14 +1,20 @@
 // ============================================================
 //  POS Service Worker — Cache-first for static assets
-//  Version: 10 (bump this number whenever you deploy changes)
+//  Version: 11 (bump this number whenever you deploy changes)
 // ============================================================
+//
+// AI UPDATE [2026-07-28] session 12: Bumped v10 → v11.
+//   js/incoming-orders.js v9 — Issue 1 fix (timestamp-based notification guard)
+//                             + Issue 2 fix (acceptedOrderIds tracking).
+//   js/cart.js v2            — Issue 2 fix (syncCustomerOrderCompletion only
+//                             marks specifically-imported orders as completed).
 //
 // AI UPDATE [2026-07-28] session 9: Bumped v9 → v10.
 //   Removed js/order-notify.js and sounds/notification.mp3 from STATIC_ASSETS —
 //   the browser notification/audio system has been replaced by server-side
 //   Pushover notifications. These files no longer exist in the project.
 //
-const CACHE_NAME = 'pos-static-v10';
+const CACHE_NAME = 'pos-static-v11';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
