@@ -110,7 +110,7 @@
         @keyframes bounce { 0%{transform:scale(0)} 60%{transform:scale(1.2)} 100%{transform:scale(1)} }
         .success-title { font-size: 1.6rem; font-weight: 800; color: #10b981; margin-bottom: 10px; }
         .success-sub { color: #6b7280; font-size: 0.95rem; line-height: 1.6; }
-        .success-table { 
+        .success-table {
             margin-top: 20px; background: #13161f;
             border: 1px solid #1f2937; border-radius: 12px;
             padding: 12px 20px; color: #38bdf8; font-weight: 700;
@@ -134,27 +134,222 @@
         .empty-menu { text-align: center; padding: 60px 20px; color: #4b5563; font-size: 0.95rem; }
 
         /* ── OUT OF STOCK ── */
-        .item-card.oos {
-            opacity: 0.55;
-        }
-        /* Hide qty controls but keep the card scrollable/visible */
+        .item-card.oos { opacity: 0.55; }
         .item-card.oos .qty-ctrl { display: none; }
         .item-card.oos .qty-btn  { pointer-events: none; }
         .oos-label {
             font-size: 0.72rem; font-weight: 700;
-            color: #ef4444;
-            background: rgba(239,68,68,0.12);
+            color: #ef4444; background: rgba(239,68,68,0.12);
             border: 1px solid rgba(239,68,68,0.25);
             border-radius: 5px; padding: 2px 8px;
             margin-top: 4px; display: inline-block;
         }
+
+        /* ═══════════════════════════════════════════════════
+           AUTH MODALS — Phone login / Register flow
+           Three screens: phone → name → confirm
+           All slide up as a bottom sheet, full-screen on mobile.
+           ═══════════════════════════════════════════════════ */
+
+        .auth-overlay {
+            position: fixed; inset: 0; z-index: 500;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(4px);
+            display: flex; align-items: flex-end;
+            /* Hidden by default; JS adds .auth-open to show */
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.25s ease;
+        }
+        .auth-overlay.auth-open {
+            opacity: 1; pointer-events: all;
+        }
+
+        .auth-sheet {
+            width: 100%; max-height: 92dvh;
+            background: #13161f;
+            border-radius: 24px 24px 0 0;
+            padding: 28px 24px 40px;
+            border-top: 1px solid #1f2937;
+            overflow-y: auto;
+            transform: translateY(60px);
+            transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+        }
+        .auth-overlay.auth-open .auth-sheet {
+            transform: translateY(0);
+        }
+
+        /* drag handle */
+        .auth-sheet::before {
+            content: '';
+            display: block;
+            width: 40px; height: 4px;
+            background: #374151; border-radius: 2px;
+            margin: 0 auto 24px;
+        }
+
+        .auth-logo {
+            font-size: 2.4rem; text-align: center; margin-bottom: 12px;
+        }
+        .auth-sheet h2 {
+            font-size: 1.4rem; font-weight: 800; color: #f1f5f9;
+            text-align: center; margin-bottom: 6px;
+        }
+        .auth-sheet .auth-sub {
+            font-size: 0.9rem; color: #6b7280; text-align: center;
+            margin-bottom: 24px; line-height: 1.5;
+        }
+
+        /* phone input row */
+        .phone-input-row {
+            display: flex; align-items: center;
+            background: #1a1d2e; border: 1.5px solid #374151;
+            border-radius: 14px; overflow: hidden;
+            margin-bottom: 16px;
+            transition: border-color 0.2s;
+        }
+        .phone-input-row:focus-within { border-color: #f97316; }
+        .phone-prefix {
+            padding: 0 12px 0 16px;
+            font-size: 1rem; font-weight: 700; color: #f97316;
+            border-right: 1px solid #374151;
+            height: 52px; display: flex; align-items: center;
+            flex-shrink: 0;
+        }
+        .phone-input-row input {
+            flex: 1; background: transparent; border: none; outline: none;
+            color: #f1f5f9; font-size: 1.1rem; font-weight: 600;
+            padding: 0 16px; height: 52px; letter-spacing: 1px;
+        }
+        .phone-input-row input::placeholder { color: #4b5563; font-weight: 400; letter-spacing: 0; }
+
+        /* generic text input */
+        .auth-input {
+            width: 100%; background: #1a1d2e;
+            border: 1.5px solid #374151; border-radius: 14px;
+            color: #f1f5f9; font-size: 1rem; font-weight: 600;
+            padding: 14px 16px; outline: none; margin-bottom: 16px;
+            transition: border-color 0.2s;
+        }
+        .auth-input:focus { border-color: #f97316; }
+        .auth-input::placeholder { color: #4b5563; font-weight: 400; }
+
+        /* primary CTA button */
+        .auth-btn-primary {
+            width: 100%; padding: 15px;
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            color: white; border: none; border-radius: 14px;
+            font-size: 1rem; font-weight: 800; cursor: pointer;
+            transition: opacity 0.15s, transform 0.1s;
+            margin-bottom: 12px;
+        }
+        .auth-btn-primary:active { transform: scale(0.98); opacity: 0.9; }
+        .auth-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+        /* secondary button */
+        .auth-btn-secondary {
+            width: 100%; padding: 14px;
+            background: transparent; color: #9ca3af;
+            border: 1.5px solid #374151; border-radius: 14px;
+            font-size: 0.95rem; font-weight: 600; cursor: pointer;
+            transition: border-color 0.2s, color 0.2s;
+        }
+        .auth-btn-secondary:active { border-color: #f97316; color: #f97316; }
+
+        /* back link */
+        .auth-back-link {
+            display: inline-flex; align-items: center; gap: 6px;
+            color: #6b7280; font-size: 0.85rem; font-weight: 600;
+            background: none; border: none; cursor: pointer;
+            margin-bottom: 20px; padding: 0;
+        }
+        .auth-back-link:hover { color: #f97316; }
+
+        /* hint text */
+        .auth-hint {
+            text-align: center; font-size: 0.78rem; color: #4b5563;
+            margin-top: 8px; line-height: 1.5;
+        }
+
+        /* ── CONFIRM SCREEN ── */
+        .confirm-detail-card {
+            background: #0d1017; border: 1px solid #1f2937;
+            border-radius: 14px; padding: 16px 18px;
+            margin-bottom: 16px;
+        }
+        .confirm-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 0;
+        }
+        .confirm-row + .confirm-row { border-top: 1px solid #1f2937; }
+        .confirm-row .label { font-size: 0.8rem; color: #6b7280; font-weight: 500; }
+        .confirm-row .value { font-size: 0.95rem; font-weight: 700; color: #f1f5f9; }
+
+        /* ── RED WARNING BOX ── */
+        .warning-box {
+            background: rgba(239,68,68,0.08);
+            border: 1px solid rgba(239,68,68,0.3);
+            border-radius: 12px; padding: 14px 16px;
+            margin-bottom: 20px;
+            font-size: 0.83rem; color: #fca5a5;
+            line-height: 1.6;
+        }
+        .warning-box strong {
+            display: block; margin-bottom: 4px;
+            font-size: 0.85rem; color: #ef4444;
+        }
+
+        /* ── CONFIRM BUTTON ROW ── */
+        .confirm-btn-row {
+            display: flex; gap: 10px;
+        }
+        .confirm-btn-row .auth-btn-secondary { margin-bottom: 0; flex: 1; }
+        .confirm-btn-row .auth-btn-primary   { margin-bottom: 0; flex: 2; }
+
+        /* ── LOADING STATE inside auth sheet ── */
+        .auth-spinner {
+            width: 22px; height: 22px;
+            border: 2.5px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            display: inline-block; vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        /* ── LOGGED-IN BADGE in header ── */
+        .cust-header .session-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            margin-left: 8px;
+            background: rgba(16,185,129,0.12);
+            border: 1px solid rgba(16,185,129,0.25);
+            color: #10b981; font-size: 0.75rem; font-weight: 600;
+            padding: 2px 8px; border-radius: 20px;
+            cursor: pointer;
+        }
+        .cust-header .session-badge:hover { border-color: #10b981; }
+
+        /* ── ERROR message ── */
+        .auth-error {
+            background: rgba(239,68,68,0.1);
+            border: 1px solid rgba(239,68,68,0.3);
+            border-radius: 10px; padding: 10px 14px;
+            font-size: 0.83rem; color: #fca5a5;
+            margin-bottom: 14px; text-align: center;
+            display: none;
+        }
+        .auth-error.show { display: block; }
     </style>
 </head>
 <body>
 
 <div class="cust-header">
     <h1>🍕 New Pizza Hut & Live Cake</h1>
-    <div class="table-badge">You are at: <span id="tableLabel">Loading…</span></div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <div class="table-badge">You are at: <span id="tableLabel">Loading…</span></div>
+        <span id="sessionBadge" class="session-badge" style="display:none" title="Tap to switch account">
+            <span id="sessionName"></span> ✓
+        </span>
+    </div>
 </div>
 
 <div class="cat-tabs" id="catTabs"></div>
@@ -184,54 +379,513 @@
     <button class="order-again-btn" onclick="location.reload()">Order More Items</button>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════
+     AUTH SCREEN 1 — Phone Number
+     ═══════════════════════════════════════════════════════════ -->
+<div class="auth-overlay" id="phoneOverlay">
+    <div class="auth-sheet">
+        <div class="auth-logo">🍕</div>
+        <h2>Welcome!</h2>
+        <p class="auth-sub">Enter your mobile number to place your order</p>
+
+        <div class="auth-error" id="phoneError"></div>
+
+        <div class="phone-input-row">
+            <span class="phone-prefix">+91</span>
+            <input type="tel" id="phoneInput"
+                   maxlength="10" placeholder="9876543210"
+                   inputmode="numeric" autocomplete="tel">
+        </div>
+
+        <button class="auth-btn-primary" id="phoneContinueBtn">Continue →</button>
+        <p class="auth-hint">Your number is only used to link your orders</p>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     AUTH SCREEN 2 — Name (new customers only)
+     ═══════════════════════════════════════════════════════════ -->
+<div class="auth-overlay" id="nameOverlay">
+    <div class="auth-sheet">
+        <button class="auth-back-link" id="nameBackBtn">← Change number</button>
+        <div class="auth-logo">👋</div>
+        <h2>New here?</h2>
+        <p class="auth-sub">We couldn't find this number. What's your name?</p>
+
+        <div class="auth-error" id="nameError"></div>
+
+        <input type="text" class="auth-input" id="nameInput"
+               maxlength="40" placeholder="Your name"
+               autocomplete="name">
+
+        <button class="auth-btn-primary" id="nameContinueBtn">Continue →</button>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     AUTH SCREEN 3 — Confirm details (new customers only)
+     ═══════════════════════════════════════════════════════════ -->
+<div class="auth-overlay" id="confirmOverlay">
+    <div class="auth-sheet">
+        <div class="auth-logo">✔️</div>
+        <h2>Confirm Your Details</h2>
+        <p class="auth-sub">Please review before creating your account</p>
+
+        <div class="confirm-detail-card">
+            <div class="confirm-row">
+                <span class="label">Name</span>
+                <span class="value" id="confirmNameVal">—</span>
+            </div>
+            <div class="confirm-row">
+                <span class="label">Mobile</span>
+                <span class="value" id="confirmPhoneVal">—</span>
+            </div>
+        </div>
+
+        <div class="warning-box">
+            <strong>⚠️ Please read before continuing</strong>
+            Please check your name and phone number carefully before creating your account.
+            These details will be linked to your future orders.
+            If you enter the wrong phone number, you may not be able to access your account
+            once phone verification becomes mandatory.
+        </div>
+
+        <div class="auth-error" id="confirmError"></div>
+
+        <div class="confirm-btn-row">
+            <button class="auth-btn-secondary" id="confirmBackBtn">Change Details</button>
+            <button class="auth-btn-primary" id="confirmCreateBtn">Create Account</button>
+        </div>
+    </div>
+</div>
+
 <script type="module">
-import { initializeApp }    from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
 import {
-    getFirestore,
-    collection, doc, onSnapshot, query, orderBy
+    getFirestore, collection, doc,
+    getDoc, setDoc, addDoc,
+    onSnapshot, query, orderBy,
+    serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { getAuth, signInAnonymously }
     from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
-import { getFunctions, httpsCallable }
-    from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 
-// ── Firebase init ──────────────────────────────────────────
+// ── Firebase init ───────────────────────────────────────────────────────────
 const app = initializeApp({
-    apiKey: "AIzaSyBLzGd0DlItKShk0eJoQR4CjRx1sP3-o-w",
-    authDomain: "billing-system-f8531.firebaseapp.com",
-    projectId: "billing-system-f8531",
-    storageBucket: "billing-system-f8531.firebasestorage.app",
+    apiKey:            "AIzaSyBLzGd0DlItKShk0eJoQR4CjRx1sP3-o-w",
+    authDomain:        "billing-system-f8531.firebaseapp.com",
+    projectId:         "billing-system-f8531",
+    storageBucket:     "billing-system-f8531.firebasestorage.app",
     messagingSenderId: "921228841270",
-    appId: "1:921228841270:web:9013d59b3ef96dda40e397"
+    appId:             "1:921228841270:web:9013d59b3ef96dda40e397"
 });
-const db        = getFirestore(app);
-const auth      = getAuth(app);
-// Region must match Cloud Function deployment region
-const fnClient  = getFunctions(app, 'asia-south1');
+const db   = getFirestore(app);
+const auth = getAuth(app);
 
-// ── Anonymous Auth — gives each customer a server-issued UID ─────────────
-// signInAnonymously is idempotent: if the browser already has an anonymous
-// session the SDK returns the existing user without creating a new one.
+// ── Anonymous Auth (needed for Firestore write rules) ───────────────────────
+// Every customer gets an anonymous Firebase UID. This is free, always-on, and
+// gives each device a server-issued identity without any Cloud Function.
 let _authReady = false;
-signInAnonymously(auth)
+await signInAnonymously(auth)
     .then(() => { _authReady = true; })
     .catch(err => console.warn('[Auth] anonymous sign-in failed:', err));
 
-// ── Table from URL ─────────────────────────────────────────
+// ── Table from URL ──────────────────────────────────────────────────────────
 const params    = new URLSearchParams(location.search);
 const rawTable  = params.get('table');
 const tableName = rawTable ? decodeURIComponent(rawTable) : 'Unknown Table';
 document.getElementById('tableLabel').textContent = tableName;
 document.title = `Order — ${tableName}`;
 
-// ── State ──────────────────────────────────────────────────
-let cart         = {};   // { itemId: qty }
-let menuMap      = {};   // { itemId: {name, price, category, inStock} }
+// ── Cart & menu state ───────────────────────────────────────────────────────
+let cart          = {};
+let menuMap       = {};
 let allCategories = [];
-let pizzaSizes   = { regular: true, medium: true, large: true }; // from settings/pizza_sizes
-let _lastByCat   = {};   // last rendered byCat — used to re-render on size change
+let pizzaSizes    = { regular: true, medium: true, large: true };
+let _lastByCat    = {};
 
-// ── Pizza helpers ───────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════
+// CUSTOMER SESSION
+//
+// Stored in sessionStorage so a page reload within the same tab keeps the
+// customer logged in without re-entering their number. Intentionally NOT
+// localStorage — a new visit (fresh tab / cleared storage) should always
+// prompt again so the right person is identified at a shared device.
+//
+// Structure: { phone, name, uid, phoneVerified }
+//
+// phoneVerified is always false in this bridge build.
+// When Fast2SMS DLT is approved and OTP is enabled:
+//   1. Set REQUIRE_PHONE_VERIFICATION = true (server-side in Cloud Function)
+//   2. Customers with phoneVerified: false are prompted to verify on next order
+//   3. After OTP success: write phoneVerified: true to Firestore
+//   4. No DB migration needed — field is already present on every document
+// ════════════════════════════════════════════════════════════════════════════
+const SESSION_KEY = 'cust_session_v1';
+
+let customerSession = null;
+
+function loadSession() {
+    try {
+        const raw = sessionStorage.getItem(SESSION_KEY);
+        if (raw) customerSession = JSON.parse(raw);
+    } catch (_) {}
+    refreshSessionBadge();
+}
+
+function saveSession(s) {
+    customerSession = s;
+    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch (_) {}
+    refreshSessionBadge();
+}
+
+function clearSession() {
+    customerSession = null;
+    try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
+    refreshSessionBadge();
+}
+
+function refreshSessionBadge() {
+    const badge = document.getElementById('sessionBadge');
+    const nameEl = document.getElementById('sessionName');
+    if (customerSession) {
+        nameEl.textContent = customerSession.name;
+        badge.style.display = 'inline-flex';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+// Tapping the session badge lets the customer switch accounts
+document.getElementById('sessionBadge').addEventListener('click', () => {
+    if (confirm(`Switch account?\n\nCurrently: ${customerSession?.name} (${customerSession?.phone})`)) {
+        clearSession();
+        // Clear cart too so we don't place an order on behalf of the wrong person
+        cart = {};
+        Object.keys(menuMap).forEach(id => {
+            const el = document.getElementById('qty-' + id);
+            if (el) el.textContent = '0';
+            const card = document.getElementById('card-' + id);
+            if (card) card.classList.remove('in-cart');
+        });
+        updateCartBar();
+    }
+});
+
+loadSession();
+
+// ════════════════════════════════════════════════════════════════════════════
+// PHONE NUMBER NORMALISER
+// Accepts: 10-digit local, +91XXXXXXXXXX, 91XXXXXXXXXX, 0XXXXXXXXXX
+// ════════════════════════════════════════════════════════════════════════════
+function normalizePhone(raw = '') {
+    let s = raw.trim().replace(/[\s\-().]/g, '');
+    if (s.startsWith('00'))        s = '+' + s.slice(2);
+    if (/^0\d{10}$/.test(s))      s = '+91' + s.slice(1);
+    if (/^\d{10}$/.test(s))       s = '+91' + s;
+    if (/^91\d{10}$/.test(s))     s = '+' + s;
+    if (!/^\+91\d{10}$/.test(s))  return null;
+    return s;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// AUTH MODAL HELPERS
+// ════════════════════════════════════════════════════════════════════════════
+function openOverlay(id) {
+    document.getElementById(id).classList.add('auth-open');
+}
+function closeOverlay(id) {
+    document.getElementById(id).classList.remove('auth-open');
+}
+function showError(elId, msg) {
+    const el = document.getElementById(elId);
+    el.textContent = msg;
+    el.classList.add('show');
+}
+function clearError(elId) {
+    const el = document.getElementById(elId);
+    el.textContent = '';
+    el.classList.remove('show');
+}
+function setLoading(btn, loading, defaultText) {
+    btn.disabled = loading;
+    btn.innerHTML = loading
+        ? '<span class="auth-spinner"></span>Please wait…'
+        : defaultText;
+}
+
+// ── State shared between the three auth screens ─────────────────────────────
+let _pendingPhone = ''; // normalised phone after screen 1
+let _pendingName  = ''; // name after screen 2
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCREEN 1 — Phone input
+// ════════════════════════════════════════════════════════════════════════════
+function showPhoneScreen() {
+    clearError('phoneError');
+    document.getElementById('phoneInput').value = '';
+    openOverlay('phoneOverlay');
+    setTimeout(() => document.getElementById('phoneInput').focus(), 350);
+}
+
+document.getElementById('phoneInput').addEventListener('input', (e) => {
+    // Allow digits only
+    e.target.value = e.target.value.replace(/\D/g, '');
+});
+
+document.getElementById('phoneInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('phoneContinueBtn').click();
+});
+
+document.getElementById('phoneContinueBtn').addEventListener('click', async () => {
+    clearError('phoneError');
+    const raw = document.getElementById('phoneInput').value;
+    const phone = normalizePhone(raw);
+    if (!phone) {
+        showError('phoneError', 'Please enter a valid 10-digit mobile number.');
+        return;
+    }
+
+    const btn = document.getElementById('phoneContinueBtn');
+    setLoading(btn, true, 'Continue →');
+
+    try {
+        // Ensure we have a Firebase Auth UID before reading Firestore
+        if (!_authReady) {
+            await signInAnonymously(auth);
+            _authReady = true;
+        }
+
+        const snap = await getDoc(doc(db, 'customers', phone));
+
+        if (snap.exists()) {
+            // ── Returning customer — log in directly ──────────────────────
+            const profile = snap.data();
+            saveSession({
+                phone:         profile.phone || phone,
+                name:          profile.name  || 'Customer',
+                uid:           auth.currentUser?.uid || '',
+                phoneVerified: profile.phoneVerified || false,
+            });
+            closeOverlay('phoneOverlay');
+            // Proceed to place order with items already in cart
+            await placeOrder();
+
+        } else {
+            // ── New customer — collect name next ──────────────────────────
+            _pendingPhone = phone;
+            closeOverlay('phoneOverlay');
+            showNameScreen();
+        }
+    } catch (err) {
+        console.error('[Phone lookup]', err);
+        showError('phoneError', 'Could not check your number. Please check your connection.');
+    } finally {
+        setLoading(btn, false, 'Continue →');
+    }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCREEN 2 — Name input (new customers only)
+// ════════════════════════════════════════════════════════════════════════════
+function showNameScreen() {
+    clearError('nameError');
+    document.getElementById('nameInput').value = '';
+    openOverlay('nameOverlay');
+    setTimeout(() => document.getElementById('nameInput').focus(), 350);
+}
+
+document.getElementById('nameBackBtn').addEventListener('click', () => {
+    closeOverlay('nameOverlay');
+    showPhoneScreen();
+});
+
+document.getElementById('nameInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('nameContinueBtn').click();
+});
+
+document.getElementById('nameContinueBtn').addEventListener('click', () => {
+    clearError('nameError');
+    const name = document.getElementById('nameInput').value.trim();
+    if (!name) {
+        showError('nameError', 'Please enter your name.');
+        return;
+    }
+    if (name.length < 2) {
+        showError('nameError', 'Name must be at least 2 characters.');
+        return;
+    }
+    _pendingName = name;
+    closeOverlay('nameOverlay');
+    showConfirmScreen();
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCREEN 3 — Confirm details (new customers only)
+// ════════════════════════════════════════════════════════════════════════════
+function showConfirmScreen() {
+    clearError('confirmError');
+    document.getElementById('confirmNameVal').textContent  = _pendingName;
+    document.getElementById('confirmPhoneVal').textContent = _pendingPhone;
+    openOverlay('confirmOverlay');
+}
+
+// "Change Details" → go back to phone screen to start over
+document.getElementById('confirmBackBtn').addEventListener('click', () => {
+    closeOverlay('confirmOverlay');
+    showPhoneScreen();
+});
+
+// "Create Account" → write to Firestore then place the order
+document.getElementById('confirmCreateBtn').addEventListener('click', async () => {
+    clearError('confirmError');
+    const btn = document.getElementById('confirmCreateBtn');
+    setLoading(btn, true, 'Create Account');
+
+    try {
+        if (!_authReady) {
+            await signInAnonymously(auth);
+            _authReady = true;
+        }
+
+        const uid = auth.currentUser?.uid || '';
+        const now = serverTimestamp();
+
+        // ── Write customer profile ────────────────────────────────────────
+        // phoneVerified: false — ready for OTP gate when DLT is approved.
+        // DO NOT change this to true here; verification must go through OTP.
+        await setDoc(doc(db, 'customers', _pendingPhone), {
+            phone:         _pendingPhone,
+            name:          _pendingName,
+            authUid:       uid,
+            phoneVerified: false,     // ← OTP bridge: always false until verified
+            createdAt:     now,
+            updatedAt:     now,
+            lastLoginAt:   now,
+        });
+
+        saveSession({
+            phone:         _pendingPhone,
+            name:          _pendingName,
+            uid,
+            phoneVerified: false,
+        });
+
+        closeOverlay('confirmOverlay');
+        await placeOrder();
+
+    } catch (err) {
+        console.error('[Create account]', err);
+        showError('confirmError',
+            err.code === 'permission-denied'
+                ? 'Permission denied — please ask staff for help.'
+                : 'Account creation failed. Please check your connection.'
+        );
+    } finally {
+        setLoading(btn, false, 'Create Account');
+    }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// PLACE ORDER
+//
+// Bridge build: writes directly to Firestore pending_table_orders.
+// No Cloud Function dependency — works on free Firebase plan.
+//
+// When Cloud Functions are restored (billing added):
+//   1. Uncomment the httpsCallable block below
+//   2. Remove the direct Firestore write block
+//   3. No customer data / Firestore rule changes needed
+// ════════════════════════════════════════════════════════════════════════════
+async function placeOrder() {
+    const totalItems = Object.values(cart).reduce((s, q) => s + q, 0);
+    if (totalItems === 0) return;
+
+    const btn = document.getElementById('placeOrderBtn');
+    btn.textContent = 'Sending…';
+    btn.disabled = true;
+
+    const items = Object.entries(cart).map(([id, qty]) => ({
+        itemId:   id,
+        name:     menuMap[id].name,
+        price:    menuMap[id].price,
+        quantity: qty,
+    }));
+    const totalPrice = items.reduce((s, i) => s + i.price * i.quantity, 0);
+
+    try {
+        if (!_authReady) {
+            await signInAnonymously(auth);
+            _authReady = true;
+        }
+
+        // ── BRIDGE: direct Firestore write (no Cloud Function) ────────────
+        // Requires Firestore rule: allow create on pending_table_orders
+        // if request.auth != null && request.resource.data.customer.uid == request.auth.uid
+        //
+        // TO RESTORE Cloud Function path:
+        //   const { getFunctions, httpsCallable } = await import(...)
+        //   const createOrder = httpsCallable(getFunctions(app,'asia-south1'), 'createCustomerOrder')
+        //   const result = await createOrder({ requestedTableId: tableName, items })
+        //   const assignedTable = result.data.tableId || tableName
+        await addDoc(collection(db, 'pending_table_orders'), {
+            tableId:    tableName,
+            customer: {
+                uid:   auth.currentUser?.uid || '',
+                name:  customerSession?.name  || '',
+                phone: customerSession?.phone || '',
+            },
+            status:     'pending',
+            items,
+            totalPrice,
+            createdAt:  serverTimestamp(),
+        });
+
+        // Update lastLoginAt (non-critical — don't block order on failure)
+        if (customerSession?.phone) {
+            setDoc(
+                doc(db, 'customers', customerSession.phone),
+                { lastLoginAt: serverTimestamp() },
+                { merge: true }
+            ).catch(() => {});
+        }
+
+        // Success
+        cart = {};
+        document.getElementById('successTableLabel').textContent = `📍 ${tableName}`;
+        document.getElementById('successScreen').classList.add('show');
+
+    } catch (err) {
+        console.error('[PlaceOrder]', err);
+        btn.textContent = 'Place Order →';
+        btn.disabled = false;
+        const msg =
+            err.code === 'permission-denied'
+                ? 'Permission denied. Please ask staff for assistance.'
+                : 'Order failed. Please check your connection and try again.';
+        alert(msg);
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PLACE ORDER BUTTON — intercept to run auth first if needed
+// ════════════════════════════════════════════════════════════════════════════
+document.getElementById('placeOrderBtn').addEventListener('click', async () => {
+    const totalItems = Object.values(cart).reduce((s, q) => s + q, 0);
+    if (totalItems === 0) return;
+
+    if (!customerSession) {
+        // Customer hasn't identified themselves yet — start auth flow
+        showPhoneScreen();
+    } else {
+        // Already logged in — place order immediately
+        await placeOrder();
+    }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// MENU LOADING & RENDERING (unchanged from original)
+// ════════════════════════════════════════════════════════════════════════════
 function isPizzaVariant(item) {
     return (item.category || '').toLowerCase() === 'pizza' &&
         /\(\s*(regular|medium|large)\s*\)/i.test(item.name || '');
@@ -243,11 +897,7 @@ function getPizzaSize(item) {
     return null;
 }
 
-// ── Real-time listeners ─────────────────────────────────────
-// 1. Menu items — re-renders whenever any item changes
-// 2. Pizza sizes — re-renders whenever admin toggles a size in/out
 function loadMenu() {
-    // ── Menu items listener ──
     const q = query(collection(db, 'menu_items'), orderBy('category'));
     onSnapshot(q, (snap) => {
         const byCat = {};
@@ -259,8 +909,8 @@ function loadMenu() {
             if (!byCat[cat]) byCat[cat] = [];
             byCat[cat].push(item);
         });
-        _lastByCat      = byCat;
-        allCategories   = Object.keys(byCat).sort();
+        _lastByCat    = byCat;
+        allCategories = Object.keys(byCat).sort();
         renderCatTabs(allCategories);
         renderMenu(byCat);
         restoreCartCounts();
@@ -269,8 +919,6 @@ function loadMenu() {
             `<div class="empty-menu">⚠️ Menu load failed.<br>Please check your connection.</div>`;
     });
 
-    // ── Pizza sizes listener ──
-    // When admin toggles Regular/Medium/Large, re-render to show/hide OOS badge
     onSnapshot(doc(db, 'settings', 'pizza_sizes'), (snap) => {
         pizzaSizes = snap.exists()
             ? { regular: true, medium: true, large: true, ...snap.data() }
@@ -284,7 +932,6 @@ function loadMenu() {
 
 function renderCatTabs(cats) {
     const tabs = document.getElementById('catTabs');
-    // Preserve the active tab
     const activeCat = tabs.querySelector('.cat-tab.active')?.textContent || '';
     tabs.innerHTML = '';
     cats.forEach((cat, i) => {
@@ -304,13 +951,12 @@ function renderCatTabs(cats) {
 
 function renderMenu(byCat) {
     const container = document.getElementById('menuContainer');
-    // Preserve scroll position so re-renders don't jump
-    const scrollY = window.scrollY;
+    const scrollY   = window.scrollY;
     container.innerHTML = '';
     Object.entries(byCat).sort(([a],[b]) => a.localeCompare(b)).forEach(([cat, items]) => {
         const section = document.createElement('div');
         section.className = 'menu-section';
-        section.id = 'sec-' + cat;
+        section.id        = 'sec-' + cat;
         section.innerHTML = `<div class="section-title">${cat}</div><div class="items-list" id="list-${cat}"></div>`;
         container.appendChild(section);
         const list = section.querySelector('.items-list');
@@ -320,18 +966,16 @@ function renderMenu(byCat) {
 }
 
 function buildItemCard(item) {
-    // Pizza variants: availability is controlled by size, not individual inStock
     let isAvailable;
     if (isPizzaVariant(item)) {
         const size = getPizzaSize(item);
         isAvailable = size ? pizzaSizes[size] !== false : item.inStock !== false;
     } else {
-        isAvailable = item.inStock !== false; // undefined/true = available
+        isAvailable = item.inStock !== false;
     }
-
     const card = document.createElement('div');
     card.className = 'item-card' + (isAvailable ? '' : ' oos');
-    card.id = 'card-' + item.id;
+    card.id        = 'card-' + item.id;
     card.innerHTML = `
         <div class="item-info">
             <div class="item-name">${esc(item.name)}</div>
@@ -346,16 +990,15 @@ function buildItemCard(item) {
         </div>` : ''}
     `;
     if (isAvailable) {
-        card.querySelector('.qty-plus').addEventListener('click', () => changeQty(item.id, 1));
+        card.querySelector('.qty-plus').addEventListener('click',  () => changeQty(item.id,  1));
         card.querySelector('.qty-minus').addEventListener('click', () => changeQty(item.id, -1));
     }
     return card;
 }
 
-/** Restore cart quantity labels after a menu re-render. */
 function restoreCartCounts() {
     Object.entries(cart).forEach(([id, qty]) => {
-        const el = document.getElementById('qty-' + id);
+        const el   = document.getElementById('qty-' + id);
         if (el) el.textContent = qty;
         const card = document.getElementById('card-' + id);
         if (card) card.classList.toggle('in-cart', qty > 0);
@@ -369,7 +1012,7 @@ function esc(s = '') {
 
 function changeQty(id, delta) {
     const current = cart[id] || 0;
-    const newQty = Math.max(0, current + delta);
+    const newQty  = Math.max(0, current + delta);
     if (newQty === 0) delete cart[id]; else cart[id] = newQty;
     document.getElementById('qty-' + id).textContent = newQty;
     const card = document.getElementById('card-' + id);
@@ -378,73 +1021,17 @@ function changeQty(id, delta) {
 }
 
 function updateCartBar() {
-    const bar = document.getElementById('cartBar');
-    const totalItems = Object.values(cart).reduce((s,q) => s+q, 0);
-    const totalPrice = Object.entries(cart).reduce((s,[id,qty]) => s + (menuMap[id]?.price||0)*qty, 0);
+    const bar        = document.getElementById('cartBar');
+    const totalItems = Object.values(cart).reduce((s, q) => s + q, 0);
+    const totalPrice = Object.entries(cart).reduce((s, [id, qty]) => s + (menuMap[id]?.price || 0) * qty, 0);
     if (totalItems === 0) {
         bar.classList.remove('visible');
     } else {
         bar.classList.add('visible');
-        document.getElementById('cartBarItems').textContent = `${totalItems} item${totalItems>1?'s':''}`;
+        document.getElementById('cartBarItems').textContent = `${totalItems} item${totalItems > 1 ? 's' : ''}`;
         document.getElementById('cartBarTotal').textContent = `₹${totalPrice}`;
     }
 }
-
-// ── Place Order ────────────────────────────────────────────
-// Orders are created via the createCustomerOrder Cloud Function, NOT by
-// writing directly to pending_table_orders.  The function:
-//   1. Validates the anonymous Firebase Auth UID (server-issued, unforgeable)
-//   2. Acquires or reuses the table lock atomically
-//   3. Returns the authoritative tableId (may differ from URL if lock exists)
-document.getElementById('placeOrderBtn').addEventListener('click', async () => {
-    const totalItems = Object.values(cart).reduce((s,q) => s+q, 0);
-    if (totalItems === 0) return;
-
-    const btn = document.getElementById('placeOrderBtn');
-    btn.textContent = 'Sending…';
-    btn.disabled = true;
-
-    const items = Object.entries(cart).map(([id, qty]) => ({
-        itemId:   id,
-        name:     menuMap[id].name,
-        price:    menuMap[id].price,
-        quantity: qty
-    }));
-
-    try {
-        // Ensure anonymous auth is ready before calling the function
-        if (!_authReady) {
-            await signInAnonymously(auth);
-            _authReady = true;
-        }
-
-        const createOrder = httpsCallable(fnClient, 'createCustomerOrder');
-        const result = await createOrder({
-            requestedTableId: tableName,   // may be overridden by an existing lock
-            customer:         {},          // name/phone not collected on this panel
-            items
-        });
-
-        // Use the server-returned tableId as the authoritative assigned table
-        const assignedTable = result.data.tableId || tableName;
-
-        // Show success screen
-        cart = {};
-        document.getElementById('successTableLabel').textContent = `📍 ${assignedTable}`;
-        const successScreen = document.getElementById('successScreen');
-        successScreen.classList.add('show');
-    } catch(e) {
-        console.error('[PlaceOrder] failed:', e);
-        btn.textContent = 'Place Order →';
-        btn.disabled = false;
-        const msg = e.code === 'functions/already-exists'
-            ? 'This table is currently occupied. Please wait or choose another.'
-            : e.code === 'functions/not-found'
-            ? 'Table not found. Please scan the QR code again.'
-            : 'Order failed. Please check your connection and try again.';
-        alert(msg);
-    }
-});
 
 loadMenu();
 </script>

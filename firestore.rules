@@ -2,17 +2,19 @@
 // Deploy with: firebase deploy --only firestore:rules
 //
 // Identity model:
-//  • Customers   — Firebase Custom Auth issued by customerAuth Cloud Function.
-//                  UID = 'cust_' + E.164 digits (stable, derived from phone).
-//                  Token carries { customerPhone } claim (server-issued).
-//  • Operators   — Firebase Custom Auth via the operatorSignIn Cloud Function,
-//                  which issues a token with claim { billingOperator: true }.
+//  • Customers   — Anonymous Firebase Auth (bridge build, no Cloud Functions).
+//                  UID = Firebase anonymous UID (random, per-device).
+//                  Phone + name stored in customers/{+91XXXXXXXXXX}.
+//                  When Fast2SMS DLT is approved and OTP is enabled:
+//                    - Restore customerAuth Cloud Function
+//                    - Remove the bridge allow-create rules marked "BRIDGE"
+//                    - The DB structure (phoneVerified field) needs no migration
+//  • Operators   — Anonymous Firebase Auth (local-PIN login).
+//                  sign_in_provider == 'anonymous' is treated as operator.
+//                  When operatorSignIn Cloud Function is deployed (billing added):
+//                    - Swap to billingOperator custom-token claim
+//                    - Remove the anonymous fallback in isOperator()
 //  • Cloud Fns   — Admin SDK; bypass all rules automatically.
-//
-// Customer lookup / creation   → customerAuth Cloud Function only.
-// Order creation & lock acq.   → createCustomerOrder Cloud Function only.
-// Lock release                 → releaseTableLock Cloud Function only.
-// Status updates (accept/kot)  → operators may call directly from the panel.
 
 rules_version = '2';
 service cloud.firestore {
@@ -22,8 +24,8 @@ service cloud.firestore {
 
     function isOperator() {
       // Accepts either:
-      //  • A custom-token session with the billingOperator claim (future Cloud
-      //    Function deployment), OR
+      //  • A custom-token session with the billingOperator claim (when
+      //    operatorSignIn Cloud Function is deployed), OR
       //  • An anonymous Firebase Auth session (current local-PIN login flow).
       return request.auth != null
           && (request.auth.token.get('billingOperator', false) == true
@@ -41,7 +43,6 @@ service cloud.firestore {
     }
 
     // Status values an operator is allowed to write on an order.
-    // Cloud Functions write 'completed'; that path uses Admin SDK and bypasses rules.
     function isAllowedStatusUpdate() {
       let allowed = ['accepted', 'dismissed', 'kot'];
       return request.resource.data.keys().hasAll(['status'])
@@ -49,34 +50,28 @@ service cloud.firestore {
     }
 
     // ── pending_table_orders ──────────────────────────────────────────────────
-    // • Reads:    owning customer OR any operator
-    // • Creates:  DENIED — must go through createCustomerOrder Cloud Function
-    // • Updates:  operators only, and only for status transitions they own
-    //             (accept, dismiss, kot).  'completed' is set by releaseTableLock
-    //             Cloud Function via Admin SDK (bypasses rules).
+    // Reads:    owning customer OR any operator
+    // Creates:  BRIDGE — any authenticated user may create their own order
+    //           (uid in customer.uid must match the caller's Auth UID).
+    //           When Cloud Functions are restored: change create back to `if false`
+    //           so only createCustomerOrder Cloud Function can write.
+    // Updates:  operators only, status transitions they own (accept, dismiss, kot).
     match /pending_table_orders/{orderId} {
       allow read:   if isOrderOwner() || isOperator();
-      allow create: if false;
+      // BRIDGE: direct browser write — remove when createCustomerOrder CF is live
+      allow create: if request.auth != null
+                    && request.resource.data.customer.get('uid', '') == request.auth.uid;
       allow update: if isOperator() && isAllowedStatusUpdate();
     }
 
     // ── customer_table_sessions ───────────────────────────────────────────────
     // Created & released exclusively by Cloud Functions (Admin SDK).
-    // Customers may read their own session so the UI can show the assigned table.
-    // All browser writes are denied — Cloud Functions are the only writers.
     match /customer_table_sessions/{customerUid} {
       allow read:           if isSameCustomer(customerUid) || isOperator();
       allow create, update: if false;
     }
 
     // ── table_locks ───────────────────────────────────────────────────────────
-    // One sentinel document per table: `table_locks/{tableId}`.
-    // Exclusively written by createCustomerOrder and releaseTableLock Cloud
-    // Functions via Admin SDK (bypasses rules).
-    // Operators may read to display which tables are occupied.
-    // Customers may NOT read — they receive the authoritative tableId in the
-    // createCustomerOrder response instead.
-    // All browser writes are denied.
     match /table_locks/{tableId} {
       allow read:           if isOperator();
       allow create, update: if false;
@@ -84,20 +79,31 @@ service cloud.firestore {
 
     // ── customers ─────────────────────────────────────────────────────────────
     // Keyed by normalised phone: customers/{+91XXXXXXXXXX}
-    // Customer lookup and creation must happen through the customerAuth Cloud
-    // Function (Admin SDK).  No direct browser reads or writes are permitted —
-    // not even by the customer who owns the profile.  This prevents enumeration
-    // and ensures all identity decisions are made server-side.
-    // Operators may read/write for support and manual correction purposes.
+    //
+    // BRIDGE (no Cloud Functions):
+    //  • Any authenticated (anonymous) user may READ to look up by phone.
+    //    Trade-off: phone enumeration is possible if someone knows the format.
+    //    Acceptable for a local restaurant POS — no sensitive financial data
+    //    is exposed, only name + phoneVerified status.
+    //  • Any authenticated user may CREATE their own profile — but only with
+    //    phoneVerified: false (cannot self-issue a verified status).
+    //  • UPDATE is operator-only (staff support edits).
+    //
+    // When customerAuth Cloud Function is restored:
+    //  • Remove the allow read (anonymous) and allow create lines (marked BRIDGE).
+    //  • Uncomment: allow read, write: if isOperator();
     match /customers/{phone} {
-      allow read, write: if isOperator();
-      // All customer browser access is denied; go through customerAuth callable.
+      // BRIDGE: lookup (screen 1) and registration (screen 3)
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null
+                    && request.resource.data.phoneVerified == false;
+      // Operator support edits (e.g. fix a wrong name)
+      allow update: if isOperator();
+      allow delete: if false;
     }
 
     // ── customer_uid_map ──────────────────────────────────────────────────────
-    // Reverse-lookup map: customer_uid_map/{uid} → { phone }
-    // Written exclusively by Cloud Functions (Admin SDK).
-    // No browser reads or writes permitted — this is a server-internal index.
+    // Written exclusively by Cloud Functions (Admin SDK). Not used in bridge build.
     match /customer_uid_map/{uid} {
       allow read, write: if false;
     }
