@@ -3,7 +3,22 @@
 // Pizza availability is managed by size (Regular / Medium / Large) via
 // settings/pizza_sizes. All other items are toggled individually via inStock.
 
-import { db } from './firebase-config.js';
+// ===== AI UPDATE =====
+// Date: 2026-07-28
+// Feature: Menu Management Toggle — Auth Guard Fix
+// Summary:
+// - Toggle was failing with "Could not update <item>" on every tap.
+// - Root cause: menu items are served from IndexedDB offline cache (reads work
+//   without auth), but updateDoc/setDoc writes always hit the Firestore server
+//   which returns permission-denied when auth.currentUser is null.
+// - auth.currentUser is null because signInAnonymously() in admin.js is async
+//   and may not have resolved by the time the user opens Menu Management.
+// - Fix: imported auth from firebase-config; _toggle() and _togglePizzaSize()
+//   now check auth.currentUser before attempting a write.  If auth is not yet
+//   ready a clear user-facing message is shown instead of a silent failure.
+// =====================
+
+import { db, auth } from './firebase-config.js';
 import {
     collection,
     onSnapshot,
@@ -350,6 +365,15 @@ async function _toggle(id) {
     const item = _allItems.find(i => i.id === id);
     if (!item) return;
 
+    // Guard: Firestore write rule requires isOperator() → request.auth != null.
+    // Menu items may load from IndexedDB cache before signInAnonymously() resolves,
+    // making items visible while auth is still pending.  Block the write and show
+    // a clear message instead of a silent permission-denied failure.
+    if (!auth.currentUser) {
+        _showToastError('Not signed in yet. Please wait a moment and try again.');
+        return;
+    }
+
     const wasOn = item.inStock !== false;
     item.inStock = !wasOn;
     _toggling.add(id);
@@ -361,7 +385,7 @@ async function _toggle(id) {
         console.error('[menu-mgmt] item toggle failed:', e);
         item.inStock = wasOn;
         _render();
-        _showToastError(`Could not update "${item.name}". Try again.`);
+        _showToastError(`Could not update "${item.name}". Please try again.`);
     } finally {
         _toggling.delete(id);
     }
@@ -369,6 +393,12 @@ async function _toggle(id) {
 
 async function _togglePizzaSize(size) {
     if (_pizzaSizeSaving.has(size)) return;
+
+    // Same auth guard as _toggle() — writes need a signed-in anonymous operator.
+    if (!auth.currentUser) {
+        _showToastError('Not signed in yet. Please wait a moment and try again.');
+        return;
+    }
 
     const wasOn = _pizzaSizes[size] !== false;
     _pizzaSizes[size] = !wasOn;
@@ -382,7 +412,7 @@ async function _togglePizzaSize(size) {
         console.error('[menu-mgmt] pizza size toggle failed:', e);
         _pizzaSizes[size] = wasOn;
         _render();
-        _showToastError(`Could not update ${size} size. Try again.`);
+        _showToastError(`Could not update ${size} size. Please try again.`);
     } finally {
         _pizzaSizeSaving.delete(size);
     }

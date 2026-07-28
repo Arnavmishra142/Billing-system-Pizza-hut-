@@ -2,7 +2,19 @@
 // Listens to Firestore `pending_table_orders` for new customer orders.
 // Shows badge on #btn-orders and a toast notification — NO SOUND.
 
-import { db } from './firebase-config.js';
+// ===== AI UPDATE =====
+// Date: 2026-07-28
+// Feature: Incoming Orders Listener — Auth Race Fix
+// Summary:
+// - Listener previously started immediately on DOMContentLoaded, before the
+//   admin had entered their PIN and before signInAnonymously() completed.
+// - Firestore returned permission-denied (isOperator() needs request.auth != null).
+// - Fix: imported auth + onAuthStateChanged; startListening() is now triggered
+//   by the first non-null auth state rather than by DOMContentLoaded directly.
+// - visibilitychange path unchanged — still restarts listener on tab focus.
+// =====================
+
+import { db, auth } from './firebase-config.js';
 import {
     collection,
     onSnapshot,
@@ -14,6 +26,7 @@ import {
     updateDoc,
     enableNetwork
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
 // ── Fix 3: Count how many times a phone number has ordered ───────────────────
 async function getCustomerOrderCount(phone) {
@@ -368,14 +381,38 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (overlay) overlay.addEventListener('click', closeDrawer);
 
-    startListening();
+    // Wait for Firebase Auth to establish a user session before starting the
+    // Firestore listener.  The Firestore rule requires isOperator() which checks
+    // request.auth != null.  Starting the listener before signInAnonymously()
+    // completes causes an immediate permission-denied error and the feed never
+    // recovers until the 5-second retry fires — meaning orders placed right
+    // after login appear 5+ seconds late or not at all.
+    //
+    // onAuthStateChanged fires synchronously on the next microtask if Firebase
+    // already has a persisted anonymous session in IndexedDB (typical for a
+    // returning admin), or within ~1-2 s after signInAnonymously() resolves for
+    // a fresh session.  Either way the listener now starts as soon as auth is ready.
+    let _authListenerFired = false;
+    onAuthStateChanged(auth, (user) => {
+        if (user && !_authListenerFired) {
+            _authListenerFired = true;
+            startListening();
+        }
+        // If user becomes null (logout), cancel the listener so we don't leak
+        if (!user && _unsubscribe) {
+            _unsubscribe();
+            _unsubscribe = null;
+            _authListenerFired = false;
+            setBadge(0);
+        }
+    });
 
     // Re-establish the listener whenever the tab comes back into focus.
     // Browsers throttle/suspend WebSocket & long-poll connections in backgrounded
     // tabs, which silently kills the Firestore onSnapshot feed. Calling
     // enableNetwork + restarting the listener brings it back immediately.
     document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
+        if (document.visibilityState === 'visible' && auth.currentUser) {
             enableNetwork(db)
                 .then(startListening)
                 .catch(() => startListening()); // start even if enableNetwork fails
