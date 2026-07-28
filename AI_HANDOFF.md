@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28 (session 2)
+> Last updated: 2026-07-28 (session 3)
 
 ---
 
@@ -31,6 +31,32 @@
 - `daily_expenses` — expense tracking
 - `tables` — table state
 - `customer_order_history/{uid}/orders` — completed order records, written by billing panel, read by Customer Panel
+
+---
+
+## Features Completed ✅ (session 3 — Bug Fixes Only)
+
+### Bugs Fixed in `js/admin.js`
+
+- **Login Session Persistence** — Admin was prompted for PIN on every browser close/reopen.
+  - **Root cause:** `sessionStorage` was used for `operatorLoggedIn`; it is tab-scoped and cleared whenever the browser or tab closes.
+  - **Fix:** Changed all three `sessionStorage` references to `localStorage`. Session now persists until the admin explicitly logs out or clears browser data. Security unchanged — PIN still required on first login.
+
+- **Menu tab: listener torn down on every switch** — Opening the Menu tab always showed "Loading menu…" then a stale-cache flash, then the live data — a two-step flicker on every visit.
+  - **Root cause:** `loadMenuData()` always called `_menuUnsub()` then created a brand-new `onSnapshot`, even when the existing listener was healthy.
+  - **Fix:** `loadMenuData()` now checks `_menuUnsub`; if the listener is alive it calls `renderMenuCards()` instantly from the in-memory `allMenuItems` array. The listener is only (re)created on first call or after it drops due to an error.
+
+- **Menu tab: `deleteMenuItem()` and `saveItemBtn` triggered unnecessary listener recreation**
+  - **Root cause:** Both handlers called `loadMenuData()` after a Firestore write. Since the live `onSnapshot` already fires automatically on any write, this tore down and recreated the listener for no reason, causing the two-step flicker described above.
+  - **Fix:** Both handlers no longer call `loadMenuData()`. The existing listener handles the update automatically.
+
+- **Sales data: full Firestore server fetch on every tab switch** — Switching away from and back to the Sales tab always triggered a round-trip `getDocsFromServer`, even seconds after the previous fetch.
+  - **Root cause:** `fetchAllSales()` unconditionally called `getDocsFromServer()` on every invocation with no throttle.
+  - **Fix:** Added `_salesServerFetchedAt` timestamp. The server fetch is skipped if it ran within the last 30 seconds. The IndexedDB cache read still happens every call for instant local data. The Refresh (↻) button resets `_salesServerFetchedAt = 0` to force an immediate server fetch.
+
+- **Expense listener: torn down on every filter change and every tab switch** — Switching expense filters (Today / 7 Days / 30 Days) or switching away and back to the Expense tab always cancelled and recreated the Firestore listener.
+  - **Root cause:** Filtering was done inside the `onSnapshot` closure, so the filter was baked into the listener — changing it required a new one.
+  - **Fix:** Filtering is now done in `_renderExpensesFromDocs()` which reads from the module-level `_expenseAllDocs` array. `loadAdminExpenses()` updates the filter variables and re-renders instantly from cached docs without touching the live listener. The Refresh button explicitly passes `forceRefresh=true` to recreate the listener and force a server sync. `deleteExpense()` no longer calls `loadAdminExpenses()` — the live listener handles it.
 
 ---
 
@@ -182,6 +208,13 @@ Until these rules are deployed:
 - `customer_order_history` writes will be denied → Order History tab stays empty
 
 ---
+
+## Files Modified (2026-07-28 — session 3)
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/admin.js` | Billing Panel | **Login:** `sessionStorage` → `localStorage` for `operatorLoggedIn` (3 occurrences) — session now persists across browser restarts. **Menu:** `loadMenuData()` preserves live `onSnapshot` on repeated tab switches; `deleteMenuItem()` and `saveItemBtn` no longer call `loadMenuData()`. **Sales:** `fetchAllSales()` throttles server fetch to 30 s via `_salesServerFetchedAt`; Refresh button resets throttle. **Expenses:** refactored to `_expenseAllDocs` + `_renderExpensesFromDocs()`; listener preserved across filter changes; `deleteExpense()` no longer recreates listener. |
+| `AI_HANDOFF.md` | Billing Panel | Updated with session 3 state, root-cause documentation, bugs fixed |
 
 ## Files Modified (2026-07-28 — session 2)
 

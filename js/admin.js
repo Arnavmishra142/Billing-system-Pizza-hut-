@@ -7,14 +7,25 @@ import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/fireba
 import { onAuthStateChanged, signInAnonymously, signOut }
     from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
+// ===== AI UPDATE =====
+// Date: 2026-07-28 (session 3)
+// Bug: Login session was lost on every browser/tab close.
+// Root cause: operatorLoggedIn was stored in sessionStorage, which is
+//   scoped to a single tab and cleared when the tab or browser is closed.
+//   Every reopening of the Admin panel required re-entering the PIN.
+// Fix: Changed all three sessionStorage references to localStorage so the
+//   session persists until the admin explicitly taps "Logout" or clears
+//   browser data. Security is unchanged — the PIN is still required on
+//   first login; only the persistence boundary is widened.
+// =====================
+
 // ==========================================
 // LOGIN & SESSION
 // ==========================================
 // PIN is checked locally (instant, no network).
 // On success, Firebase Auth anonymous sign-in is used so Firestore rules
 // that require request.auth != null continue to work.
-// Session is also persisted in sessionStorage so a page refresh within the
-// same tab doesn't require re-entry of the PIN.
+// Session persists in localStorage until explicit logout or data clear.
 
 const ADMIN_PIN = '1414';
 
@@ -23,9 +34,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') document.getElementById('loginBtn').click();
     });
 
-    // Restore session on page reload (same tab)
-    if (sessionStorage.getItem('operatorLoggedIn') === 'true') {
-        // Show dashboard immediately — PIN was already verified this session.
+    // Restore session across browser restarts — localStorage persists until
+    // the admin explicitly logs out or the user clears browser data.
+    if (localStorage.getItem('operatorLoggedIn') === 'true') {
+        // Show dashboard immediately — PIN was already verified previously.
         // Re-establish Firebase Auth in the background for Firestore rules.
         showDashboard();
         onAuthStateChanged(auth, (user) => {
@@ -63,7 +75,7 @@ document.getElementById('loginBtn').addEventListener('click', async () => {
     // proved identity; auth/operation-not-allowed just means Anonymous Auth
     // isn't enabled in the Firebase console, which is a Firebase config issue,
     // not a wrong-password issue.
-    sessionStorage.setItem('operatorLoggedIn', 'true');
+    localStorage.setItem('operatorLoggedIn', 'true');
     showDashboard();
     loginBtn.disabled = false;
     loginBtn.textContent = 'Unlock Dashboard';
@@ -74,7 +86,7 @@ document.getElementById('loginBtn').addEventListener('click', async () => {
 });
 
 document.getElementById('logoutBtn').addEventListener('click', async () => {
-    sessionStorage.removeItem('operatorLoggedIn');
+    localStorage.removeItem('operatorLoggedIn');
     await signOut(auth).catch(() => {});
     location.reload();
 });
@@ -120,10 +132,26 @@ window.switchSalesSubtab = function(which) {
 // ==========================================
 // SALES DATA
 // ==========================================
-let allSales = [];
 
-async function fetchAllSales() {
-    // Cache-first for speed
+// ===== AI UPDATE =====
+// Date: 2026-07-28 (session 3)
+// Bug: Sales data triggered a full Firestore server round-trip on every tab
+//   switch to the Sales section (switchTab calls loadSalesData unconditionally).
+// Root cause: fetchAllSales always called both getDocsFromCache AND
+//   getDocsFromServer regardless of how recently the server was last queried.
+//   With rapid tab switching, this meant multiple overlapping server fetches
+//   with no benefit.
+// Fix: Added a 30-second throttle on the server fetch via _salesServerFetchedAt.
+//   The IndexedDB cache read still happens every call for instant local data;
+//   the server fetch is skipped if it ran within the last 30 seconds.
+//   The Refresh button always forces a fresh server fetch (resets the timestamp).
+// =====================
+
+let allSales = [];
+let _salesServerFetchedAt = 0; // timestamp of last successful server fetch
+
+async function fetchAllSales(forceServer = false) {
+    // Cache-first: read from IndexedDB immediately for instant display
     try {
         const snap = await getDocsFromCache(collection(db, "sales_history"));
         if (!snap.empty) {
@@ -132,12 +160,17 @@ async function fetchAllSales() {
         }
     } catch (e) {}
 
-    // Then update from server
-    try {
-        const snap = await getDocsFromServer(collection(db, "sales_history"));
-        allSales = [];
-        snap.forEach(d => { allSales.push({ ...d.data(), id: d.id }); });
-    } catch (e) { console.error("Sales fetch error:", e); }
+    // Server fetch — throttled to 30 s to avoid hammering Firestore on every
+    // tab switch. The Refresh button passes forceServer=true to bypass this.
+    const now = Date.now();
+    if (forceServer || now - _salesServerFetchedAt > 30000) {
+        try {
+            const snap = await getDocsFromServer(collection(db, "sales_history"));
+            allSales = [];
+            snap.forEach(d => { allSales.push({ ...d.data(), id: d.id }); });
+            _salesServerFetchedAt = now;
+        } catch (e) { console.error("Sales fetch error:", e); }
+    }
 }
 
 window.loadSalesData = async function(filterType, filterValue) {
@@ -271,6 +304,8 @@ document.getElementById('customDateSearch').addEventListener('change', (e) => {
 });
 document.getElementById('refreshBtn').addEventListener('click', async (e) => {
     e.target.textContent = '⏳'; e.target.disabled = true;
+    // Force a fresh server fetch by resetting the throttle timestamp
+    _salesServerFetchedAt = 0;
     const active     = document.querySelector('#salesSection .filter-pill.active');
     const customDate = document.getElementById('customDateSearch').value;
     if (customDate) await loadSalesData('date', customDate);
@@ -281,6 +316,32 @@ document.getElementById('refreshBtn').addEventListener('click', async (e) => {
 // ==========================================
 // MENU MANAGEMENT
 // ==========================================
+
+// ===== AI UPDATE =====
+// Date: 2026-07-28 (session 3)
+// Bugs fixed in this section:
+//
+// Bug A — Menu listener torn down on every tab switch:
+//   loadMenuData() previously always called _menuUnsub() then created a new
+//   onSnapshot. Switching to the Menu tab always caused "Loading menu…" flash,
+//   then IndexedDB stale-cache snapshot, then server snapshot — a noticeable
+//   two-step update visible to the user.
+//   Fix: loadMenuData() now checks if _menuUnsub is already alive. If it is,
+//   just re-render from the in-memory allMenuItems array (instant, no network).
+//   The listener is only created on the first call or after it drops.
+//
+// Bug B — deleteMenuItem() unnecessarily recreated the listener:
+//   After deleteDoc(), the live onSnapshot fires automatically with the updated
+//   collection. Calling loadMenuData() on top of that tore down the listener
+//   and recreated it — causing a double-update flash.
+//   Fix: deleteMenuItem() no longer calls loadMenuData(). The listener handles it.
+//
+// Bug C — saveItemBtn handler unnecessarily recreated the listener:
+//   Same issue as Bug B — adding or editing an item triggers the live listener
+//   automatically. The explicit loadMenuData() call was redundant.
+//   Fix: saveItemBtn handler no longer calls loadMenuData().
+// =====================
+
 const itemModal        = document.getElementById('itemModal');
 const imagePreview     = document.getElementById('imagePreview');
 const itemImageInput   = document.getElementById('itemImageInput');
@@ -294,13 +355,19 @@ let _menuUnsub = null;
 
 window.loadMenuData = function() {
     const grid = document.getElementById('menuCardGrid');
+
+    // If the listener is already alive, just re-render from the in-memory
+    // cache — instant, no network round-trip, no loading flash.
+    if (_menuUnsub) {
+        renderMenuCards();
+        return;
+    }
+
+    // First call (or listener dropped after an error): show loading and
+    // create a fresh listener. Wake the Firestore network channel first in
+    // case the PWA suspended it while the tab was in the background.
     grid.innerHTML = '<div class="loading-state">Loading menu... ☁️</div>';
 
-    // Cancel previous listener before starting fresh
-    if (_menuUnsub) { _menuUnsub(); _menuUnsub = null; }
-
-    // Wake network then attach live listener — fires from cache instantly,
-    // then again from server automatically (handles PWA reconnection)
     enableNetwork(db).catch(() => {}).finally(() => {
         _menuUnsub = onSnapshot(
             collection(db, "menu_items"),
@@ -317,6 +384,8 @@ window.loadMenuData = function() {
             },
             (err) => {
                 console.error("Menu listener error:", err);
+                // Mark listener as dropped so next call to loadMenuData() restarts it
+                _menuUnsub = null;
                 if (grid.innerHTML.includes('Loading')) {
                     grid.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load menu. Check internet.</div>';
                 }
@@ -371,7 +440,9 @@ window.toggleStock = async function(id, status) {
 window.deleteMenuItem = async function(id) {
     if (!confirm("Delete this item permanently?")) return;
     await deleteDoc(doc(db, "menu_items", id));
-    loadMenuData();
+    // The live onSnapshot listener fires automatically after the delete —
+    // no need to call loadMenuData() here; doing so would unnecessarily
+    // tear down the listener and recreate it.
 };
 
 function populateCategoryDropdown(selectedCat = null) {
@@ -477,7 +548,9 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
             });
         }
         closeModal();
-        loadMenuData();
+        // The live onSnapshot listener fires automatically after addDoc/updateDoc —
+        // no need to call loadMenuData() here; doing so would tear down the
+        // listener and recreate it unnecessarily.
     } catch (e) {
         console.error(e);
         alert("Save failed! Check internet.");
@@ -490,72 +563,136 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
 // ==========================================
 // EXPENSES
 // ==========================================
-// Holds the active expense listener so we can cancel it before starting a new one
-let _expenseUnsub = null;
 
-window.loadAdminExpenses = function(filterType, filterValue, btnContext) {
-    if (btnContext) {
-        document.querySelectorAll('#expenseSection .filter-pill').forEach(b => b.classList.remove('active'));
-        btnContext.classList.add('active');
-    }
+// ===== AI UPDATE =====
+// Date: 2026-07-28 (session 3)
+// Bugs fixed in this section:
+//
+// Bug A — Expense listener torn down on every filter change and every tab switch:
+//   loadAdminExpenses() always called _expenseUnsub() then created a new
+//   onSnapshot, even when switching filter from "Today" → "7 Days" or just
+//   switching away and back to the Expense tab.  Each recreation caused a brief
+//   loading flash and a Firestore network reconnect.
+//   Root cause: filtering was done inside the onSnapshot closure, so the filter
+//   was baked in — changing it required a new listener.
+//   Fix: filtering is now done in _renderExpensesFromDocs() which reads from the
+//   module-level _expenseAllDocs array.  loadAdminExpenses() updates the filter
+//   variables and calls _renderExpensesFromDocs() instantly from the cached docs
+//   without touching the live listener.  The listener is only created on the
+//   first call or when explicitly force-refreshed.
+//
+// Bug B — deleteExpense() unnecessarily recreated the listener:
+//   After deleteDoc(), the live onSnapshot fires automatically with the updated
+//   collection.  Calling loadAdminExpenses() on top of that tore down and
+//   recreated the listener for no reason.
+//   Fix: deleteExpense() no longer calls loadAdminExpenses().
+//
+// Bug C — Refresh button didn't actually force a fresh network fetch:
+//   loadAdminExpenses() (with the old code) did cancel/recreate the listener,
+//   but it was indistinguishable from a filter change.  With the new cached-docs
+//   approach, the Refresh button now explicitly tears down the listener and
+//   recreates it so a forced server sync is guaranteed.
+// =====================
 
+// All expense docs from the last Firestore snapshot (unfiltered).
+// Filtering is done client-side in _renderExpensesFromDocs() so we can
+// switch filters instantly without touching the live listener.
+let _expenseUnsub    = null;
+let _expenseAllDocs  = [];       // cached raw docs from last onSnapshot
+let _expFilterType   = 'days';
+let _expFilterValue  = 1;
+
+// Render the expense list from the cached _expenseAllDocs using the current filter.
+// Called both from the onSnapshot callback and from loadAdminExpenses() when the
+// filter changes with the listener already alive.
+function _renderExpensesFromDocs() {
     const listEl = document.getElementById('expenseCardList');
-    listEl.innerHTML = '<div class="loading-state">Loading... ☁️</div>';
-    document.getElementById('totalExpenseBox').textContent = '₹0';
+    if (!listEl) return;
 
-    // Cancel any previous listener before starting a fresh one
+    const now = new Date();
+    let filtered = [];
+    _expenseAllDocs.forEach(exp => {
+        const expDate = new Date(exp.timestamp);
+        const diff    = Math.ceil(Math.abs(now - expDate) / 864e5);
+        if (_expFilterType === 'days') {
+            if (_expFilterValue === 1 && expDate.toDateString() === now.toDateString()) filtered.push(exp);
+            else if (_expFilterValue !== 1 && diff <= _expFilterValue) filtered.push(exp);
+        } else if (_expFilterType === 'date') {
+            if (expDate.toDateString() === new Date(_expFilterValue).toDateString()) filtered.push(exp);
+        }
+    });
+    filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
+    document.getElementById('totalExpenseBox').textContent = `₹${total.toFixed(0)}`;
+
+    if (!filtered.length) {
+        listEl.innerHTML = '<div class="empty-state">No expenses found. 🎉</div>';
+        return;
+    }
+    listEl.innerHTML = filtered.map(exp => {
+        const timeStr = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
+        return `
+        <div class="expense-card">
+            <div class="exp-left">
+                <div class="exp-note">${exp.note}</div>
+                <div class="exp-time">${timeStr}</div>
+            </div>
+            <div class="exp-right">
+                <div class="exp-amount">₹${exp.amount}</div>
+                <button class="exp-del-btn" onclick="deleteExpense('${exp.id}')">🗑</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// Start (or restart) the Firestore onSnapshot listener for expenses.
+// This is extracted so the Refresh button can force a fresh connection.
+function _startExpenseListener() {
     if (_expenseUnsub) { _expenseUnsub(); _expenseUnsub = null; }
+    const listEl = document.getElementById('expenseCardList');
 
-    // Wake Firestore network in case PWA suspended it, then attach live listener.
-    // onSnapshot fires immediately from IndexedDB cache, then again whenever
-    // the server sends fresh data — no manual refresh needed.
     enableNetwork(db).catch(() => {}).finally(() => {
         _expenseUnsub = onSnapshot(
             collection(db, "daily_expenses"),
             (snap) => {
-                const now = new Date();
-                let filtered = [];
-                snap.forEach(d => {
-                    const exp     = { ...d.data(), id: d.id };
-                    const expDate = new Date(exp.timestamp);
-                    const diff    = Math.ceil(Math.abs(now - expDate) / 864e5);
-                    if (filterType === 'days') {
-                        if (filterValue === 1 && expDate.toDateString() === now.toDateString()) filtered.push(exp);
-                        else if (filterValue !== 1 && diff <= filterValue) filtered.push(exp);
-                    } else if (filterType === 'date') {
-                        if (expDate.toDateString() === new Date(filterValue).toDateString()) filtered.push(exp);
-                    }
-                });
-                filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                const total = filtered.reduce((s, e) => s + Number(e.amount), 0);
-                document.getElementById('totalExpenseBox').textContent = `₹${total.toFixed(0)}`;
-                if (!filtered.length) {
-                    listEl.innerHTML = '<div class="empty-state">No expenses found. 🎉</div>';
-                    return;
-                }
-                listEl.innerHTML = filtered.map(exp => {
-                    const timeStr = new Date(exp.timestamp).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' });
-                    return `
-                    <div class="expense-card">
-                        <div class="exp-left">
-                            <div class="exp-note">${exp.note}</div>
-                            <div class="exp-time">${timeStr}</div>
-                        </div>
-                        <div class="exp-right">
-                            <div class="exp-amount">₹${exp.amount}</div>
-                            <button class="exp-del-btn" onclick="deleteExpense('${exp.id}')">🗑</button>
-                        </div>
-                    </div>`;
-                }).join('');
+                _expenseAllDocs = [];
+                snap.forEach(d => _expenseAllDocs.push({ ...d.data(), id: d.id }));
+                _renderExpensesFromDocs();
             },
             (err) => {
                 console.error("Expense listener error:", err);
-                if (listEl.innerHTML.includes('Loading')) {
+                _expenseUnsub = null; // Mark dropped so next call recreates it
+                if (listEl && listEl.innerHTML.includes('Loading')) {
                     listEl.innerHTML = '<div class="empty-state" style="color:#f85149;">Failed to load. Check internet.</div>';
                 }
             }
         );
     });
+}
+
+window.loadAdminExpenses = function(filterType, filterValue, btnContext, forceRefresh = false) {
+    if (btnContext) {
+        document.querySelectorAll('#expenseSection .filter-pill').forEach(b => b.classList.remove('active'));
+        btnContext.classList.add('active');
+    }
+
+    // Update the current filter
+    _expFilterType  = filterType;
+    _expFilterValue = filterValue;
+
+    if (_expenseUnsub && !forceRefresh) {
+        // Listener is alive — re-render instantly from the cached docs using the
+        // updated filter.  No network round-trip, no loading flash.
+        _renderExpensesFromDocs();
+        return;
+    }
+
+    // First call, listener dropped, or explicit force-refresh — start fresh.
+    const listEl = document.getElementById('expenseCardList');
+    listEl.innerHTML = '<div class="loading-state">Loading... ☁️</div>';
+    document.getElementById('totalExpenseBox').textContent = '₹0';
+    _startExpenseListener();
 };
 
 document.getElementById('expenseDateSearch').addEventListener('change', (e) => {
@@ -569,9 +706,10 @@ document.getElementById('refreshExpenseBtn').addEventListener('click', (e) => {
     e.target.textContent = '⏳'; e.target.disabled = true;
     const active  = document.querySelector('#expenseSection .filter-pill.active');
     const dateVal = document.getElementById('expenseDateSearch').value;
-    if (dateVal) loadAdminExpenses('date', dateVal, null);
-    else loadAdminExpenses('days', parseInt(active?.dataset.val || '1'), active);
-    // Reset button after listener is set up (onSnapshot is not awaitable)
+    // forceRefresh=true: tear down the listener and reconnect for a guaranteed
+    // server sync (same visible behaviour as before, now explicit).
+    if (dateVal) loadAdminExpenses('date', dateVal, null, true);
+    else loadAdminExpenses('days', parseInt(active?.dataset.val || '1'), active, true);
     setTimeout(() => { e.target.textContent = '↻'; e.target.disabled = false; }, 1500);
 });
 
@@ -579,9 +717,8 @@ window.deleteExpense = async function(id) {
     if (!confirm("Delete this expense?")) return;
     try {
         await deleteDoc(doc(db, "daily_expenses", id));
-        const active  = document.querySelector('#expenseSection .filter-pill.active');
-        const dateVal = document.getElementById('expenseDateSearch').value;
-        if (dateVal) loadAdminExpenses('date', dateVal, null);
-        else loadAdminExpenses('days', parseInt(active?.dataset.val || '1'), active);
+        // The live onSnapshot fires automatically after the delete — no need to
+        // call loadAdminExpenses() here; doing so would tear down and recreate
+        // the listener unnecessarily.
     } catch (e) { alert("Delete failed. Check internet."); }
 };
