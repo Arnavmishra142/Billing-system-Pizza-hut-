@@ -114,18 +114,9 @@ Three files must be pushed to the Order Panel GitHub repo for the full flow to w
 2. Go to https://github.com/teamdovolve-hue/Order-/edit/main/js/order.js → paste content of `order-panel-updates/js/order.js` → Commit
 3. Go to https://github.com/teamdovolve-hue/Order-/edit/main/js/order-status.js → paste content of `order-panel-updates/js/order-status.js` → Commit
 
-### Order Panel index.html wiring needed (for order-status.js):
-After pushing `order-status.js` to the Order Panel, the index.html of that repo must call:
-```javascript
-import { startOrderTracking } from "./order-status.js";
-
-// After the customer logs in (in auth.js onAuthReady callback):
-startOrderTracking({
-  onActiveOrders: (orders) => renderActiveOrders(orders),
-  onHistory:      (orders) => renderOrderHistory(orders),
-});
-```
-Where `renderActiveOrders` and `renderOrderHistory` are functions that update the UI. Each `orders` element has the shape documented in `order-panel-updates/js/order-status.js`.
+### Order Panel index.html wiring — COMPLETED BY USER
+The user has wired `order-status.js` into the Order Panel's `index.html` manually.
+See the implementation notes below for exactly what was added (for future reference).
 
 ### Firestore rules must be deployed:
 Run: `firebase deploy --only firestore:rules`
