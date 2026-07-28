@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28 (session 6)
+> Last updated: 2026-07-28 (session 7)
 
 ---
 
@@ -31,6 +31,32 @@
 - `daily_expenses` — expense tracking
 - `tables` — table state
 - `customer_order_history/{uid}/orders` — completed order records, written by billing panel, read by Customer Panel
+
+---
+
+## Files Modified (2026-07-28 — session 7)
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/order-notify.js` | Billing Panel | **Bug fix (v2)** — rewrote `_unlockAudio()` to check `_alertActive` before deciding whether to pause. When a pending alert exists, it now plays WITHOUT pausing (resuming the queued alert). Added `_pendingTableId` variable to track the waiting table. Added console.log checkpoints at every step of the chain for diagnosability. |
+
+### Root cause — why notification sound was not playing
+
+**The failure chain (step-by-step):**
+
+1. `signInAnonymously()` runs at **module load time** in `incoming-orders.js` — no user gesture needed. Firebase returns a cached anonymous session from IndexedDB almost immediately.
+2. `onAuthStateChanged` fires → `startListening()` → Firestore `onSnapshot` fires → finds existing pending order(s) → `triggerAlert('Table X')` called.
+3. Inside `triggerAlert`: `_alertActive = true`, `_audio.currentTime = 0`, `_audio.play()` → **FAILS** — browser autoplay policy blocks play because no user gesture has occurred yet. Error is caught and logged; `_alertActive` stays `true`.
+4. Admin clicks a PIN digit (first gesture on the page) → `_unlockAudio()` fires → **old code:** `_audio.play().then(() => { _audio.pause(); _audio.currentTime = 0; })` → plays and **immediately pauses and resets** — audio goes silent.
+5. `_alertActive` is still `true` but the audio is paused. Nothing ever restarts it.
+
+**The fix:** `_unlockAudio()` now checks `_alertActive` before deciding what to do after play:
+- If `_alertActive === true` (pending alert): play WITHOUT pausing — the loop starts immediately.
+- If `_alertActive === false` (no pending alert): play then pause (AudioContext warmup only).
+
+Additionally, `triggerAlert()` now has an explicit early-return path when `_audioUnlocked` is false, logging the queued state clearly. The audio will start when `_unlockAudio()` fires on the next gesture.
+
+**No Customer Panel changes required.** The bug was entirely in the Billing Panel's audio unlock logic.
 
 ---
 
