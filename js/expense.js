@@ -1,8 +1,51 @@
-import { db } from './firebase-config.js';
+// ===== AI UPDATE =====
+// Date: 2026-07-28
+// Feature: Expense Save — Auth Fix
+// Root cause: expense.html is a standalone page that never called signInAnonymously().
+//   Firestore rule `allow write: if isOperator()` requires request.auth != null.
+//   Without a Firebase auth session every addDoc / updateDoc / deleteDoc returned
+//   permission-denied. The optimistic UI hid the failure so saves appeared to work
+//   locally but nothing was written to Firestore.
+// Fix:
+//   • Import auth + signInAnonymously + onAuthStateChanged from Firebase Auth.
+//   • Call signInAnonymously() immediately at module top-level (idempotent — returns
+//     the existing cached anonymous session from IndexedDB if one exists).
+//   • _waitForAuth() awaits the first non-null auth state before any write attempt.
+//   • All three write paths (add, update, delete) call _waitForAuth() first.
+// =====================
+
+import { db, auth } from './firebase-config.js';
 import {
     collection, addDoc, deleteDoc, doc, updateDoc,
     getDocsFromCache, getDocsFromServer
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import {
+    onAuthStateChanged, signInAnonymously
+} from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+
+// ── Auth bootstrap ────────────────────────────────────────────────────────────
+// expense.html does not load incoming-orders.js (which normally boots auth on
+// the billing panel). We must call signInAnonymously here so the operator has
+// an anonymous Firebase session before any Firestore write is attempted.
+// signInAnonymously is idempotent: Firebase returns the existing IndexedDB-cached
+// session instantly if one already exists.
+if (!auth.currentUser) {
+    signInAnonymously(auth).catch(err =>
+        console.warn('[expense] anonymous sign-in failed:', err.code)
+    );
+}
+
+// Wait up to 6 s for auth.currentUser to become non-null, then return the user.
+// Returns null on timeout (shows an error to the operator instead of a silent fail).
+function _waitForAuth(timeoutMs = 6000) {
+    if (auth.currentUser) return Promise.resolve(auth.currentUser);
+    return new Promise(resolve => {
+        const unsub = onAuthStateChanged(auth, user => {
+            if (user) { unsub(); resolve(user); }
+        });
+        setTimeout(() => { unsub(); resolve(null); }, timeoutMs);
+    });
+}
 
 let allExpenses = [];
 
@@ -151,7 +194,15 @@ async function loadExpenseData() {
         }
     } catch (e) { /* No cache yet — that's fine */ }
 
-    // Phase 2: live server fetch
+    // Phase 2: live server fetch — wait for auth first (server reads require isOperator())
+    const user = await _waitForAuth();
+    if (!user) {
+        console.warn('[expense] auth timed out — skipping server fetch');
+        if (!cached || cached.length === 0) {
+            listEl.innerHTML = '<div style="color:red;text-align:center;">Sign-in nahi hua. Page reload karo.</div>';
+        }
+        return;
+    }
     try {
         const serverSnap = await getDocsFromServer(collection(db, "daily_expenses"));
         const { expenses, uniqueNotes } = processExpenseSnapshot(serverSnap);
@@ -179,6 +230,14 @@ async function deleteExpense(expId) {
     saveExpensesToLS(allExpenses);
 
     if (expId.startsWith('temp_')) return;
+
+    // Auth guard — Firestore write requires a signed-in operator.
+    const user = await _waitForAuth();
+    if (!user) {
+        alert("Sign-in nahi hua. Page reload karo aur phir try karo.");
+        await loadExpenseData();
+        return;
+    }
 
     try {
         await deleteDoc(doc(db, "daily_expenses", expId));
@@ -219,6 +278,13 @@ document.getElementById('saveExpenseBtn').addEventListener('click', async () => 
 
         // Persist to Firestore (update fields, keep original timestamp)
         if (!oldExp.id.startsWith('temp_')) {
+            // Auth guard — write requires a signed-in operator.
+            const user = await _waitForAuth();
+            if (!user) {
+                alert("Sign-in nahi hua. Page reload karo aur phir try karo.");
+                await loadExpenseData();
+                return;
+            }
             try {
                 await updateDoc(doc(db, "daily_expenses", oldExp.id), {
                     amount: Number(amount),
@@ -234,6 +300,20 @@ document.getElementById('saveExpenseBtn').addEventListener('click', async () => 
     }
 
     // ══ ADD MODE ══
+    // Auth guard — addDoc requires a signed-in operator.
+    // Check early (before optimistic UI) so we can show an error immediately
+    // if auth never resolves, rather than showing a save that then gets rolled back.
+    btn.disabled  = true;
+    btn.innerText = "Saving...";
+
+    const user = await _waitForAuth();
+    if (!user) {
+        btn.disabled  = false;
+        btn.innerText = "Save Expense";
+        alert("Sign-in nahi hua. Page reload karo aur phir try karo.");
+        return;
+    }
+
     const timestamp = new Date().toISOString();
 
     // Step 1: optimistic UI
@@ -246,9 +326,6 @@ document.getElementById('saveExpenseBtn').addEventListener('click', async () => 
     noteEl.value   = '';
 
     // Step 2: persist in background
-    btn.disabled  = true;
-    btn.innerText = "Saving...";
-
     try {
         const docRef = await addDoc(collection(db, "daily_expenses"), {
             amount: Number(amount),

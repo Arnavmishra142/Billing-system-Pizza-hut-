@@ -34,6 +34,10 @@
 
 ---
 
+## Features Completed ✅ (session 3 additions)
+
+- **Expense Save — Auth Fix** — `expense.html` is a standalone page that never called `signInAnonymously()`. Every `addDoc`/`updateDoc`/`deleteDoc` returned `permission-denied` silently (optimistic UI hid it). Fix: `js/expense.js` now imports `signInAnonymously` + `onAuthStateChanged`, bootstraps anonymous auth at module top-level, and gates all three write paths (add / update / delete) + the server-side read (`getDocsFromServer`) behind `_waitForAuth()` — same pattern used by `incoming-orders.js` and `menu-management.js`.
+
 ## Features Completed ✅ (session 2 additions)
 
 - **Menu Management — Individual pizza variant toggles** — Pizza variant items (e.g. "Paneer Pizza (Large)") now have their own `inStock` toggle in a dedicated "Individual Pizza Availability" section, independently of the whole-size toggle. Previously they were permanently excluded from the list.
