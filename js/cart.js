@@ -59,14 +59,13 @@ import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebas
 //   logic is completely unaffected.
 // ─────────────────────────────────────────────────────────────────────────────
 async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, completionReason) {
-    const customerUid = localStorage.getItem(`activeCustomerUid_${tableName}`);
-    if (!customerUid) {
-        // Not a Customer Panel order — manual/walk-in bill, nothing to sync.
-        return;
-    }
+    // ── Step 1: Find all still-active pending_table_orders for this table ──
+    // Do this first so we can also recover the customerUid from Firestore
+    // if localStorage doesn't have it (e.g. after a page refresh, or if the
+    // operator opened the table directly without clicking "Open in POS").
+    let customerUid = localStorage.getItem(`activeCustomerUid_${tableName}`);
 
     try {
-        // ── Step 1: Find all still-active pending_table_orders for this table ──
         const q = query(
             collection(db, 'pending_table_orders'),
             where('tableId', '==', tableName)
@@ -75,6 +74,19 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
         const activeDocs = snap.docs.filter(d =>
             ['pending', 'accepted', 'kot'].includes((d.data().status || '').toLowerCase())
         );
+
+        // Recover customerUid from Firestore if localStorage missed it
+        if (!customerUid && activeDocs.length > 0) {
+            customerUid = activeDocs[0].data().customer?.uid || '';
+            if (customerUid) {
+                console.log(`[OrderSync] Recovered customerUid from Firestore for table "${tableName}"`);
+            }
+        }
+
+        if (!customerUid) {
+            // No Customer Panel UID anywhere — manual/walk-in bill, nothing to sync.
+            return;
+        }
 
         // Grab customer name/phone from the first active doc for the history record.
         let customerName  = '';

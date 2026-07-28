@@ -206,13 +206,12 @@ export async function startOrderTracking(callbacks = {}) {
   }
 
   // ── Listener 1: Active orders ───────────────────────────────────────────────
-  // Query all docs where customer.uid matches, then filter in JS because
-  // Firestore array/map field queries on nested fields require a composite index.
-  // Result set is tiny (1-3 docs per customer at most) — client-side filtering is fine.
+  // NOTE: No orderBy here — combining where("customer.uid") with orderBy("createdAt")
+  // requires a Firestore composite index that is not guaranteed to exist.
+  // Sorting is done client-side below instead; result set is tiny (1-3 docs max).
   const activeQuery = query(
     collection(db, "pending_table_orders"),
-    where("customer.uid", "==", uid),
-    orderBy("createdAt", "desc")
+    where("customer.uid", "==", uid)
   );
 
   _unsubActive = onSnapshot(
@@ -220,7 +219,13 @@ export async function startOrderTracking(callbacks = {}) {
     (snap) => {
       const active = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(o => !["completed", "dismissed"].includes((o.status || "").toLowerCase()));
+        .filter(o => !["completed", "dismissed"].includes((o.status || "").toLowerCase()))
+        // Sort newest-first client-side (avoids composite index on customer.uid + createdAt)
+        .sort((a, b) => {
+          const tA = a.createdAt?.seconds ?? 0;
+          const tB = b.createdAt?.seconds ?? 0;
+          return tB - tA;
+        });
 
       const mapped = active.map(o => ({
         id:          o.id,

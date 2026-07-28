@@ -38,6 +38,10 @@
 
 - **Expense Save — Auth Fix** — `expense.html` is a standalone page that never called `signInAnonymously()`. Every `addDoc`/`updateDoc`/`deleteDoc` returned `permission-denied` silently (optimistic UI hid it). Fix: `js/expense.js` now imports `signInAnonymously` + `onAuthStateChanged`, bootstraps anonymous auth at module top-level, and gates all three write paths (add / update / delete) + the server-side read (`getDocsFromServer`) behind `_waitForAuth()` — same pattern used by `incoming-orders.js` and `menu-management.js`.
 
+- **Order Status + History — Two Bug Fixes**
+  - **Bug 1 (Customer Panel `order-status.js`)**: The active-orders query combined `where("customer.uid", "==", uid)` with `orderBy("createdAt", "desc")`. Firestore requires a composite index for this combination — without it the `onSnapshot` fires an error immediately and no orders ever show. Fix: removed `orderBy` from the query; sort is now done client-side (`.sort()` on the mapped array). No index needed.
+  - **Bug 2 (`js/cart.js` `syncCustomerOrderCompletion`)**: History sync was 100% gated on `localStorage.getItem("activeCustomerUid_<table>")`, set only when operator clicks "Open in POS". If the page was refreshed after that click, or the operator opened the table a different way, the key was missing and the function returned immediately without writing anything. Fix: the function now queries `pending_table_orders` first regardless, and if localStorage is empty it recovers the UID directly from `activeDocs[0].data().customer?.uid`.
+
 ## Features Completed ✅ (session 2 additions)
 
 - **Menu Management — Individual pizza variant toggles** — Pizza variant items (e.g. "Paneer Pizza (Large)") now have their own `inStock` toggle in a dedicated "Individual Pizza Availability" section, independently of the whole-size toggle. Previously they were permanently excluded from the list.
