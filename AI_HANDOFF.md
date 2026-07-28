@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28 (session 3)
+> Last updated: 2026-07-28 (session 4)
 
 ---
 
@@ -31,6 +31,14 @@
 - `daily_expenses` — expense tracking
 - `tables` — table state
 - `customer_order_history/{uid}/orders` — completed order records, written by billing panel, read by Customer Panel
+
+---
+
+## Files Modified (2026-07-28 — session 4)
+
+| File | Repo | Change |
+|------|------|--------|
+| `customer.html` | Billing Panel | **Phone input UX:** Added `name="tel"` attribute (required for browser autofill field identification) and changed `autocomplete="tel"` → `autocomplete="tel-national"` (correct value when a static `+91` prefix is already displayed — `tel` would autofill the full international number including country code into the 10-digit field). No JS, auth, or layout changes. |
 
 ---
 
