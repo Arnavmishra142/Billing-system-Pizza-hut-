@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28 (session 4)
+> Last updated: 2026-07-28 (session 5)
 
 ---
 
@@ -31,6 +31,16 @@
 - `daily_expenses` — expense tracking
 - `tables` — table state
 - `customer_order_history/{uid}/orders` — completed order records, written by billing panel, read by Customer Panel
+
+---
+
+## Files Modified (2026-07-28 — session 5)
+
+| File | Repo | Change |
+|------|------|--------|
+| `firestore.rules` | Billing Panel | **`customer_order_history` write rule:** Changed `allow write: if isOperator()` → `allow write: if isOperator() \|\| isSameCustomer(uid)`. Customers can now write only their own order history (`request.auth.uid == uid`). `isOperator()` is preserved because `syncCustomerOrderCompletion()` in `js/cart.js` writes from the billing panel's own anonymous auth session (whose UID differs from the customer's UID) — removing it would break order completion. |
+
+> ⚠️ **Deployment required:** `firestore.rules` has been updated but not yet deployed. Run `firebase deploy --only firestore:rules` for this change to take effect. Until deployed, customer order history writes will continue to fail with permission-denied.
 
 ---
 

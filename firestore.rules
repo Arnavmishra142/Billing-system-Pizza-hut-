@@ -149,8 +149,14 @@ service cloud.firestore {
     //
     // Added: 2026-07-28
     match /customer_order_history/{uid}/orders/{orderId} {
-      // Operator (billing panel) writes the record on order completion.
-      allow write: if isOperator();
+      // AI UPDATE [2026-07-28]: Write now allows both isOperator() AND isSameCustomer(uid).
+      // isSameCustomer(uid) added so authenticated customers can write only their own
+      // history (request.auth.uid must equal the {uid} path segment — no cross-customer
+      // writes possible). isOperator() is preserved because syncCustomerOrderCompletion()
+      // in js/cart.js writes from the billing panel's own anonymous auth session whose
+      // UID differs from the customer's UID; removing isOperator() would deny that write
+      // and break the order completion flow entirely.
+      allow write: if isOperator() || isSameCustomer(uid);
       // Customer reads only their own history.
       allow read:  if isSameCustomer(uid);
     }
