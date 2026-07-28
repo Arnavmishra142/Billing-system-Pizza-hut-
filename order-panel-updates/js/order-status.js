@@ -47,6 +47,22 @@
  * causing order tracking to silently never start.
  * Also added: DOM render functions for active orders using .aos-* CSS classes,
  * and Firestore→localStorage sync for order history via saveOrderToHistory.
+ *
+ * AI UPDATE — 2026-07-28 v3 — KOT Timer
+ * Root cause: startOrderTracking never forwarded `kotAt` from Firestore into the
+ * mapped order objects passed to onActiveOrders callbacks.  _renderActiveOrders
+ * therefore had no timestamp to display, so customers saw "Preparing 🍕" with no
+ * elapsed time and no live counter.
+ *
+ * Fix:
+ *   1. `kotAt` is now included in every mapped active-order object.
+ *   2. _renderActiveOrders computes elapsed minutes from kotAt on every render
+ *      and shows "Preparing 🍕 • X min" for kot-status cards.
+ *   3. A module-level setInterval (_timerInterval, 30 s cadence) patches the
+ *      elapsed-time label directly in the DOM on pre-existing cards via
+ *      data-kot-at timestamps — no Firestore round-trips, no full re-render.
+ *      The interval starts when the first preparing order appears and is
+ *      stopped when there are no more preparing orders or on logout.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -88,6 +104,47 @@ export function getStatusColor(status) {
 
 let _unsubActive  = null;
 let _unsubHistory = null;
+
+// ── Preparing-timer state ──────────────────────────────────────────────────────
+// A single 30-second interval that updates the elapsed-minutes label on any
+// .aos-card[data-kot-at] elements in the DOM.  Only runs while at least one
+// order is in "kot" (Preparing) status; automatically stopped otherwise.
+let _timerInterval = null;
+
+// Convert a Firestore Timestamp (or plain {seconds,nanoseconds} object) to ms.
+function _tsToMs(ts) {
+    if (!ts) return null;
+    if (typeof ts.toMillis === 'function') return ts.toMillis();
+    if (ts.seconds != null) return ts.seconds * 1000;
+    return null;
+}
+
+// Elapsed minutes since a Firestore Timestamp; returns null if unavailable.
+function _elapsedMin(ts) {
+    const ms = _tsToMs(ts);
+    if (ms === null) return null;
+    return Math.max(0, Math.floor((Date.now() - ms) / 60000));
+}
+
+// Start the live timer that patches elapsed-time labels every 30 s.
+// Safe to call multiple times — only one interval runs at a time.
+function _startPreparingTimer() {
+    if (_timerInterval) return;
+    _timerInterval = setInterval(() => {
+        document.querySelectorAll('.aos-card[data-kot-at]').forEach(card => {
+            const kotMs = parseInt(card.dataset.kotAt, 10);
+            if (!kotMs) return;
+            const elapsed = Math.max(0, Math.floor((Date.now() - kotMs) / 60000));
+            const label = card.querySelector('.aos-status-label');
+            if (label) label.textContent = `Preparing 🍕 • ${elapsed} min`;
+        });
+    }, 30000);
+}
+
+// Stop and clear the preparing timer.
+function _stopPreparingTimer() {
+    if (_timerInterval) { clearInterval(_timerInterval); _timerInterval = null; }
+}
 
 // ── Public API (used by app.js) ───────────────────────────────────────────────
 
@@ -174,6 +231,7 @@ export async function startOrderTracking(callbacks = {}) {
         items:       o.items      || [],
         total:       o.totalPrice || 0,
         createdAt:   o.createdAt  || null,
+        kotAt:       o.kotAt      || null,   // forwarded so the UI can show elapsed time
       }));
 
       if (typeof callbacks.onActiveOrders === "function") {
@@ -227,11 +285,13 @@ export async function startOrderTracking(callbacks = {}) {
 
 /**
  * stopOrderTracking()
- * Detaches both Firestore listeners. Call on logout or page unload.
+ * Detaches both Firestore listeners and stops the preparing timer.
+ * Call on logout or page unload.
  */
 export function stopOrderTracking() {
   if (_unsubActive)  { _unsubActive();  _unsubActive  = null; }
   if (_unsubHistory) { _unsubHistory(); _unsubHistory = null; }
+  _stopPreparingTimer();
 }
 
 // ── DOM rendering (used by initOrderStatus) ───────────────────────────────────
@@ -267,30 +327,54 @@ function _renderActiveOrders(orders) {
   if (!orders || orders.length === 0) {
     section.classList.add("hidden");
     list.innerHTML = "";
+    _stopPreparingTimer();   // no preparing orders — timer not needed
     return;
   }
 
   section.classList.remove("hidden");
 
+  let hasPreparingOrder = false;
+
   list.innerHTML = orders.map(order => {
     const status      = (order.status || "pending").toLowerCase();
-    const statusLabel = order.statusLabel || getStatusLabel(status);
     const itemCount   = (order.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
 
     // Status row modifier — .aos-preparing for kot, .aos-pending for all others
-    const isPrepping  = status === "kot";
-    const statusMod   = isPrepping ? "aos-preparing" : "aos-pending";
-    const dotMod      = isPrepping ? "aos-dot-prep"  : "aos-dot-pend";
+    const isPrepping = status === "kot";
+    const statusMod  = isPrepping ? "aos-preparing" : "aos-pending";
+    const dotMod     = isPrepping ? "aos-dot-prep"  : "aos-dot-pend";
 
-    // Items list — show all items using the ul.aos-items / li pattern
+    // ── KOT elapsed-time label ─────────────────────────────────────────────────
+    // When status is 'kot', show "Preparing 🍕 • X min" using kotAt timestamp.
+    // data-kot-at stores the epoch-ms so the live timer interval can patch the
+    // label directly in the DOM without a full Firestore round-trip.
+    let displayLabel;
+    let kotAtMs = null;
+    if (isPrepping) {
+      hasPreparingOrder = true;
+      kotAtMs = _tsToMs(order.kotAt);
+      const elapsed = kotAtMs !== null ? _elapsedMin(order.kotAt) : null;
+      displayLabel = elapsed !== null
+        ? `Preparing 🍕 • ${elapsed} min`
+        : "Preparing 🍕";
+    } else {
+      displayLabel = order.statusLabel || getStatusLabel(status);
+    }
+
+    // ── Items list ─────────────────────────────────────────────────────────────
     const itemsHtml = (order.items || []).map(it => `
       <li>
         <span class="aos-item-name">${_esc(it.name || "")}</span>
         <span class="aos-item-qty">×${it.quantity || 1} &nbsp; ${_fmt((it.price || 0) * (it.quantity || 1))}</span>
       </li>`).join("");
 
+    // data-kot-at is only set on preparing cards so the interval can target them.
+    const kotAtAttr = (isPrepping && kotAtMs !== null)
+      ? ` data-kot-at="${kotAtMs}"`
+      : "";
+
     return `
-      <div class="aos-card" data-order-id="${_esc(order.id)}">
+      <div class="aos-card" data-order-id="${_esc(order.id)}"${kotAtAttr}>
         <div class="aos-card-top">
           <div class="aos-card-left">
             <span class="aos-table-tag">${_esc(order.tableId || "—")}</span>
@@ -301,7 +385,7 @@ function _renderActiveOrders(orders) {
 
         <div class="aos-status ${statusMod}">
           <span class="aos-dot ${dotMod}"></span>
-          <span class="aos-status-label">${_esc(statusLabel)}</span>
+          <span class="aos-status-label">${_esc(displayLabel)}</span>
         </div>
 
         <ul class="aos-items">
@@ -309,6 +393,16 @@ function _renderActiveOrders(orders) {
         </ul>
       </div>`;
   }).join("");
+
+  // ── Start / stop preparing timer ───────────────────────────────────────────
+  // Start a 30-second interval that patches elapsed-time labels in the DOM.
+  // Stop it when there are no more preparing orders (saves CPU and avoids
+  // querying stale DOM nodes after a full re-render clears the cards).
+  if (hasPreparingOrder) {
+    _startPreparingTimer();
+  } else {
+    _stopPreparingTimer();
+  }
 }
 
 /**

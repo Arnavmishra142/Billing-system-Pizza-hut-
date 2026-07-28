@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28
+> Last updated: 2026-07-28 (session 2)
 
 ---
 
@@ -33,6 +33,14 @@
 - `customer_order_history/{uid}/orders` — completed order records, written by billing panel, read by Customer Panel
 
 ---
+
+## Features Completed ✅ (session 2 additions)
+
+- **Menu Management — Individual pizza variant toggles** — Pizza variant items (e.g. "Paneer Pizza (Large)") now have their own `inStock` toggle in a dedicated "Individual Pizza Availability" section, independently of the whole-size toggle. Previously they were permanently excluded from the list.
+- **Menu Management — Listener error recovery** — Firestore `onSnapshot` errors now set `_unsubItems`/`_unsubPizzaSizes = null` and schedule a 5 s auto-retry. `initMenuManagement()` detects dropped listeners (null refs) and restarts them without a loading flash. The permanent-until-reload error state is fixed.
+- **Incoming Orders — visibilitychange no longer recreates listener** — `visibilitychange` now only calls `enableNetwork()` to re-open the network channel. The existing live listener is preserved, eliminating the stale-IndexedDB-cache delay on every tab focus.
+- **Incoming Orders — order-count caching** — `getCustomerOrderCount()` now caches results in `_countCache` (Map keyed by phone). No more N Firestore round-trips per render; cache is cleared on listener restart.
+- **KOT Timer — customer sees elapsed time** — `startOrderTracking` now forwards `kotAt` from Firestore into mapped order objects. `_renderActiveOrders` computes elapsed minutes from `kotAt` and renders "Preparing 🍕 • X min". A 30 s `setInterval` patches labels in the DOM on pre-existing cards — no Firestore round-trips. Timer starts automatically when a preparing order appears and stops when all preparing orders are gone or on logout.
 
 ## Features Completed ✅
 
@@ -167,7 +175,14 @@ Until these rules are deployed:
 
 ---
 
-## Files Modified (2026-07-28 — current session)
+## Files Modified (2026-07-28 — session 2)
+
+| File | Repo | Change |
+|------|------|--------|
+| `order-panel-updates/js/order-status.js` | Billing Panel (staging) | KOT timer: added `_tsToMs`, `_elapsedMin`, `_startPreparingTimer`, `_stopPreparingTimer`; added `kotAt` to mapped order objects; `_renderActiveOrders` now renders "Preparing 🍕 • X min" and manages the interval; `stopOrderTracking` now calls `_stopPreparingTimer` |
+| `AI_HANDOFF.md` | Billing Panel | Updated with session 2 state, root-cause documentation, remaining known issues |
+
+## Files Modified (2026-07-28 — session 1)
 
 | File | Repo | Change |
 |------|------|--------|
@@ -276,9 +291,19 @@ The Customer Panel's `js/menu.js` may still filter on `available` field instead 
 
 ---
 
+## Remaining Known Issues ⚠️
+
+| Issue | Impact | Fix |
+|-------|--------|-----|
+| Firestore rules not yet deployed | Bill & Settle / Save & Exit cannot mark orders `completed`; `customer_order_history` writes denied | Run `firebase deploy --only firestore:rules` from the billing repo root |
+| `order-panel-updates/js/order-status.js` not yet pushed to Customer Panel repo | KOT timer, `initOrderStatus`/`stopOrderStatus`, and order history sync will not work on the live Customer Panel | Replace `js/order-status.js` in `teamdovolve-hue/Order-` with the file from this repo (see instructions below) |
+| `GROQ_API_KEY` secret not set | AI chat in `admin/chat.ai.html` shows no response | Set `GROQ_API_KEY` in Replit Secrets |
+
+---
+
 ## Next Steps for Next AI Agent
 
-1. **Verify** the Firestore rules have been deployed (`firebase deploy --only firestore:rules`)
-2. **Confirm** `js/order-status.js` in `teamdovolve-hue/Order-` has been updated (check for `initOrderStatus` export)
-3. **Test** the end-to-end flow: Customer places order → billing panel accepts → KOT → Bill & Settle → customer sees completed in history
-4. If `GROQ_API_KEY` is available, verify AI chat in `admin/chat.ai.html` works
+1. **Deploy Firestore rules**: `firebase deploy --only firestore:rules` — required before order completion flow works end-to-end.
+2. **Push updated `order-status.js` to Customer Panel** (see "Customer Panel Integration Status" section).
+3. **End-to-end test**: Customer places order → billing panel accepts → KOT printed → customer sees "Preparing 🍕 • X min" with ticking timer → Bill & Settle → customer sees order move to history.
+4. If `GROQ_API_KEY` is available, verify AI chat in `admin/chat.ai.html` works.
