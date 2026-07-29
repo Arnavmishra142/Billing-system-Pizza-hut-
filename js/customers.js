@@ -433,6 +433,15 @@ window._custExecuteDelete = async function() {
         // 3. Delete the customer profile
         batch.delete(doc(db, `customers/${phone}`));
 
+        // 4. Delete username registry entry to prevent orphaned username documents.
+        // AI UPDATE [2026-07-29] session 22: without this step the username stays
+        // permanently reserved in the usernames/{username} collection after the
+        // customer profile is deleted — the handle can never be reused by a new
+        // registration. Firestore rule: usernames allow delete if isOperator().
+        if (c.username) {
+            batch.delete(doc(db, `usernames/${c.username}`));
+        }
+
         await batch.commit();
 
         // Update local state

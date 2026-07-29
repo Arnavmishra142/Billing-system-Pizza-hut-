@@ -10,7 +10,9 @@
 // AI UPDATE [2026-07-29] session 17: v3→v4 — bust cached customers.js after uid field fix
 // AI UPDATE [2026-07-29] session 18: v4→v5 — bust cached customers.js after architecture improvement
 // AI UPDATE [2026-07-29] session 19: v5→v6 — bust cached admin.js after switchTab fix
-const CACHE = 'admin-pos-v6';
+// AI UPDATE [2026-07-29] session 22: v6→v7 — bust cached customers.js after delete
+// flow fix (username cleanup + correct Firestore batch delete rules).
+const CACHE = 'admin-pos-v7';
 const PRECACHE = [
     '/admin/index.html',
     '/css/admin.css',

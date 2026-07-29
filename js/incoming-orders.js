@@ -177,11 +177,13 @@ let _initialLoadDone = false;
 
 // ── Pushover notification via backend ─────────────────────────────────────────
 // AI UPDATE [2026-07-28] v6: Replaced browser audio/notification with Pushover.
-// AI UPDATE [2026-07-28] v7: Added temporary debug logs to trace notification chain.
 // AI UPDATE [2026-07-29] v10: Rich payload — pass orderId, customerPhone, and
 //   items array so server.js can build a fully-formatted Pushover notification
 //   (Customer Name, Phone, Table, Order #, itemised list).  Priority bumped to
 //   emergency (2) in server.js.
+// AI UPDATE [2026-07-29] session 22: Removed temporary [notify-debug] trace logs.
+//   Notification chain confirmed working end-to-end in session 14. Only failure
+//   paths are logged (non-OK response, fetch error).
 // Calls POST /api/notify-order on the local Express server (server.js), which
 // proxies to the Pushover API with the operator's credentials.
 // Fire-and-forget — a failure is logged but never disrupts the order flow.
@@ -192,9 +194,6 @@ async function notifyNewOrder(orderId, data) {
     const items         = data.items             || [];
     const itemCount     = items.reduce((s, i) => s + (i.quantity || 1), 0);
 
-    // [DEBUG] Step 3 — POST request starting
-    console.log('[notify-debug] Step 3: POST /api/notify-order starting', { orderId, tableId, customerName, customerPhone, itemCount });
-
     try {
         const res = await fetch('/api/notify-order', {
             method:  'POST',
@@ -202,22 +201,13 @@ async function notifyNewOrder(orderId, data) {
             body:    JSON.stringify({ orderId, tableId, customerName, customerPhone, items, itemCount })
         });
 
-        // [DEBUG] Step 4 — POST request completed
-        console.log('[notify-debug] Step 4: POST /api/notify-order completed — HTTP status:', res.status);
-
-        let body;
-        try { body = await res.clone().json(); } catch(_) { body = await res.text(); }
-        // [DEBUG] Step 5 — Backend response body
-        console.log('[notify-debug] Step 5: Backend response body:', body);
-
-        if (res.ok) {
-            console.log('[notify-debug] ✅ Pushover notification delivered for:', tableId);
-        } else {
-            console.warn('[notify-debug] ❌ Pushover endpoint returned non-OK status:', res.status, body);
+        if (!res.ok) {
+            let body;
+            try { body = await res.clone().json(); } catch(_) { body = await res.text(); }
+            console.warn('[incoming-orders] Pushover endpoint error:', res.status, body);
         }
     } catch (err) {
-        // [DEBUG] Step 6 — Network/thrown error
-        console.error('[notify-debug] ❌ Step 6: fetch threw an error:', err.name, err.message, err);
+        console.error('[incoming-orders] Pushover fetch failed:', err.name, err.message);
     }
 }
 
@@ -513,14 +503,6 @@ function renderDrawer(orders) {
 let _unsubscribe = null;
 
 function startListening() {
-    // [DEBUG] Log every call so unexpected restarts are immediately visible
-    console.log(
-        `[notify-debug] startListening() called — ` +
-        `was running: ${!!_unsubscribe}, ` +
-        `_initialLoadDone: ${_initialLoadDone}, ` +
-        `_notified.size: ${_notified.size}`
-    );
-
     // Cancel any existing listener before creating a new one.
     if (_unsubscribe) {
         _unsubscribe();
@@ -550,15 +532,6 @@ function startListening() {
     );
 
     _unsubscribe = onSnapshot(q, (snapshot) => {
-        // [DEBUG] Snapshot-level state — shows every snapshot event with full context
-        console.log(
-            `[notify-debug] ── Snapshot fired ── ` +
-            `total docs: ${snapshot.size}, ` +
-            `doc changes: ${snapshot.docChanges().length}, ` +
-            `_initialLoadDone: ${_initialLoadDone}, ` +
-            `_notified.size: ${_notified.size}`
-        );
-
         const pending = [];
 
         snapshot.forEach(docSnap => {
@@ -584,30 +557,17 @@ function startListening() {
                 // This replaces the v9 timestamp-based guard which broke whenever
                 // the client clock was ahead of the Firestore server clock by > 10 s.
                 if (!_initialLoadDone) {
-                    // [DEBUG] Pre-existing order silenced on initial load
-                    console.log(
-                        '[notify-debug] Step 1: SILENCED (initial load, pre-existing):',
-                        docSnap.id, data.tableId
-                    );
                     return;
                 }
-
-                // [DEBUG] Step 1 — genuinely new order detected
-                console.log('[notify-debug] Step 1: NEW ORDER detected:', docSnap.id, data.tableId, data.customer?.name);
 
                 const itemCount = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
                 showToast(data.tableId || 'Unknown Table', itemCount || 1);
 
-                // [DEBUG] Step 2 — calling notifyNewOrder
-                console.log('[notify-debug] Step 2: Calling notifyNewOrder() for:', data.tableId);
                 // AI UPDATE [2026-07-28] v6: Pushover push notification via backend.
-                // AI UPDATE [2026-07-28] v7: Debug logs added.
                 // AI UPDATE [2026-07-29] v10: Pass docSnap.id as orderId for rich notification.
                 // AI UPDATE [2026-07-29] v11: Timestamp guard removed; _initialLoadDone guard restored.
+                // AI UPDATE [2026-07-29] session 22: [notify-debug] trace logs removed.
                 notifyNewOrder(docSnap.id, data);
-            } else {
-                // [DEBUG] Order already notified — correct DEDUP skip.
-                console.log('[notify-debug] DEDUP skip (already notified):', docSnap.id, data.tableId);
             }
         });
 
@@ -620,9 +580,7 @@ function startListening() {
         setBadge(pending.length);
         renderDrawer(pending);
     }, (err) => {
-        // [DEBUG] Listener error — this triggers a 5-second restart of startListening()
-        // Before the v8 fix, a restart here + new order = silenced notification.
-        console.error('[notify-debug] ❌ Firestore listener ERROR — will retry in 5s:', err.code, err.message, err);
+        console.error('[incoming-orders] Firestore listener error — retrying in 5s:', err.code, err.message);
         _unsubscribe = null;
         setTimeout(startListening, 5000);
     });

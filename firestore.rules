@@ -92,6 +92,7 @@ service cloud.firestore {
     //  • Any authenticated user may CREATE their own profile — but only with
     //    phoneVerified: false (cannot self-issue a verified status).
     //  • UPDATE is operator-only (staff support edits).
+    //  • DELETE is operator-only (Customer Management delete flow in js/customers.js).
     //
     // When customerAuth Cloud Function is restored:
     //  • Remove the allow read (anonymous) and allow create lines (marked BRIDGE).
@@ -103,7 +104,11 @@ service cloud.firestore {
                     && request.resource.data.phoneVerified == false;
       // Operator support edits (e.g. fix a wrong name)
       allow update: if isOperator();
-      allow delete: if false;
+      // AI UPDATE [2026-07-29] session 22: Changed from `if false` to `if isOperator()`.
+      // Customer Management delete flow (js/customers.js _custExecuteDelete) calls
+      // batch.delete(customers/{phone}). The previous `if false` rule denied every
+      // deletion attempt, silently throwing permission-denied inside the batch commit.
+      allow delete: if isOperator();
     }
 
     // ── usernames ─────────────────────────────────────────────────────────────
@@ -114,12 +119,21 @@ service cloud.firestore {
     //   New collection added for the username system.
     //   Any authenticated user may read (for availability check in registration
     //   form) and create (when registering — includes the username they chose).
-    //   Updates and deletes are blocked; username changes are a future feature.
     //   Structure: usernames/{username} → { phone: "+91XXXXXXXXXX" }
+    //
+    // AI UPDATE [2026-07-29] session 22:
+    //   DELETE changed from `if false` to `if isOperator()`.
+    //   Customer Management delete flow (js/customers.js _custExecuteDelete) now
+    //   batch-deletes usernames/{username} alongside customers/{phone} to prevent
+    //   orphaned username registry entries. Without this rule change, the batch
+    //   delete threw permission-denied and the username was permanently reserved
+    //   after the customer profile was deleted.
+    //   UPDATE remains `if false` — username changes are a future feature.
     match /usernames/{username} {
-      allow read:          if request.auth != null;
-      allow create:        if request.auth != null;
-      allow update, delete: if false;
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if false;
+      allow delete: if isOperator();
     }
 
     // ── customer_uid_map ──────────────────────────────────────────────────────
@@ -166,6 +180,17 @@ service cloud.firestore {
     //     completedAt (Timestamp), completionReason, orderedAt (ISO string)
     //
     // Added: 2026-07-28
+    //
+    // AI UPDATE [2026-07-29] session 22: Added parent-document rule for
+    // customer_order_history/{uid}. The Customer Management delete flow
+    // (js/customers.js _custExecuteDelete) calls batch.delete on the parent
+    // doc to clean up after deleting all sub-documents. The subcollection rule
+    // below does NOT cover the parent path — without this separate match block
+    // the batch.delete was silently denied by the catch-all rule.
+    match /customer_order_history/{uid} {
+      allow delete: if isOperator();
+    }
+
     match /customer_order_history/{uid}/orders/{orderId} {
       // AI UPDATE [2026-07-28]: Write now allows both isOperator() AND isSameCustomer(uid).
       // isSameCustomer(uid) added so authenticated customers can write only their own
