@@ -4,6 +4,62 @@
 
 ---
 
+## Files Modified (2026-07-29 — session 19)
+
+### Customer Statistics — Stale In-Memory Cache Bug Fix
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/admin.js` | Billing Panel | `switchTab('customers')`: `initCustomerManagement()` → `refreshCustomerManagement()` so every Customers tab open re-reads from the Firestore IndexedDB cache (which reflects the latest `increment()` writes) instead of serving the stale in-memory `_customers` array |
+| `order-panel-updates/js/auth.js` | Billing Panel (staging → Customer Panel) | `_onCreateAccount()`: `authUid: uid` → `uid: uid` (schema spec fix); added `totalOrders: 0, lifetimeSpend: 0, lastOrderAt: null` initialisation so new Customer Panel registrations use the fast path immediately |
+| `admin/sw.js` | Billing Panel | **v5→v6** — bust cached `admin.js` after switchTab fix |
+
+#### Root Cause — 0 Orders / ₹0 in Customer Management
+
+**Primary bug (`js/admin.js` line 124):**
+
+`initCustomerManagement()` has an in-memory cache guard:
+```js
+if (_loaded) { _renderList(); return; }   // returns stale _customers array
+```
+`_loaded` is set to `true` after the first Customers tab open. Every subsequent tab switch returned the cached `_customers` array — even after `syncCustomerOrderCompletion()` had already applied `increment()` writes to the Firestore IndexedDB cache. The result: once the operator opened the Customers tab before completing an order, it showed 0 orders / ₹0 until page reload or manual refresh.
+
+**Fix:** `switchTab('customers')` now calls `refreshCustomerManagement()` which always resets `_loaded = false` and re-reads `customers/{phone}` from Firestore (the IndexedDB cache already has the `increment()` applied via `persistentMultipleTabManager`).
+
+**Secondary bug (`order-panel-updates/js/auth.js`):**
+
+Customers registered via the Customer Panel (`teamdovolve-hue/Order-`) had their profile written with `authUid` (not `uid`) and without `totalOrders: 0 / lifetimeSpend: 0 / lastOrderAt: null`. This caused the migration path to run for every Customer Panel customer on every admin open (O(N) Firestore reads). Fixed in the staging file; must be pushed to the live Customer Panel repo.
+
+#### Complete Verified Data Flow (post-fix)
+
+```
+Bill & Settle / Save & Exit (index.html)
+    │
+    ▼
+syncCustomerOrderCompletion() — fire-and-forget
+    │
+    ├── pending_table_orders → status: 'completed'  ✅ (rules deployed)
+    │
+    ├── customer_order_history/{uid}/orders/ORDER_{ts}  ✅ (rules deployed)
+    │
+    └── customers/{phone}: increment(totalOrders, lifetimeSpend), lastOrderAt  ✅
+          └── Firestore IndexedDB updated immediately (optimistic write)
+                └── Shared across tabs via persistentMultipleTabManager
+
+Admin opens Customers tab (admin/index.html)
+    │
+    ▼
+refreshCustomerManagement()  ← was initCustomerManagement() [stale cache bug]
+    │
+    ▼
+getDocs(customers) from IndexedDB → fast path (totalOrders is number) → correct stats ✅
+```
+
+#### No Customer Panel changes required
+The only Customer Panel-adjacent change is to `order-panel-updates/js/auth.js` (staging file). The live `teamdovolve-hue/Order-` repo must be updated — see "Customer Panel Integration Status" below.
+
+---
+
 ## Investigation Results (2026-07-29 — session 19)
 
 ### Verified Root Cause: Firestore Rules NOT Deployed

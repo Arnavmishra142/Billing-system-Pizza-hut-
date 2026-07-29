@@ -121,7 +121,17 @@ window.switchTab = function(tabName, navBtn) {
         loadAdminExpenses('days', 1, todayBtn);
     }
     if (tabName === 'sales') loadSalesData('days', 1);
-    if (tabName === 'customers') initCustomerManagement();
+    // AI UPDATE [2026-07-29] session 19:
+    // Changed initCustomerManagement() → refreshCustomerManagement() here.
+    // Root cause: initCustomerManagement() returned the in-memory _customers
+    // array immediately when _loaded = true (set on first tab open).  If an
+    // order was completed AFTER the Customers tab was first opened, the stale
+    // cache showed 0 orders / ₹0 forever until the page was reloaded or the
+    // refresh button was manually tapped.
+    // refreshCustomerManagement() always resets _loaded=false and re-reads from
+    // the Firestore IndexedDB cache (which already reflects the increment() write
+    // from syncCustomerOrderCompletion via persistentMultipleTabManager).
+    if (tabName === 'customers') refreshCustomerManagement();
 };
 
 // ==========================================

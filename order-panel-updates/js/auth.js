@@ -265,14 +265,26 @@ async function _onCreateAccount() {
     // BRIDGE: write customer profile directly to Firestore.
     // phoneVerified: false — ready for OTP gate when Fast2SMS DLT is approved.
     // DO NOT change to true here; only OTP verification should set this.
+    //
+    // AI UPDATE [2026-07-29] session 19:
+    //   authUid → uid  (matches ARCHITECTURE_LOCK schema spec; customers.js reads
+    //     c.uid || c.authUid for backward-compat with any existing docs).
+    //   Added totalOrders, lifetimeSpend, lastOrderAt initialised to 0 / null so
+    //     that the fast path in customers.js (typeof c.totalOrders === 'number')
+    //     fires immediately on the first admin-panel open instead of the O(N)
+    //     migration path that reads the full order-history subcollection.
     await setDoc(doc(db, "customers", _pendingPhone), {
       phone:         _pendingPhone,
       name:          _pendingName,
-      authUid:       uid,
+      uid:           uid,           // ← was "authUid" (typo vs schema spec)
       phoneVerified: false,
       createdAt:     now,
       updatedAt:     now,
       lastLoginAt:   now,
+      // Pre-computed stats — updated atomically by cart.js on each order completion
+      totalOrders:   0,
+      lifetimeSpend: 0,
+      lastOrderAt:   null,
     });
 
     await _completeLogin(_pendingName, _pendingPhone);
