@@ -661,10 +661,18 @@ document.getElementById('phoneContinueBtn').addEventListener('click', async () =
         if (snap.exists()) {
             // ── Returning customer — log in directly ──────────────────────
             const profile = snap.data();
+            // AI UPDATE [2026-07-29] session 20: Use STORED profile uid (not
+            // auth.currentUser.uid) so that customer_order_history path stays
+            // consistent across logout/re-login cycles.  auth.currentUser.uid
+            // can change each time the anonymous Firebase Auth session is reset
+            // (e.g. after another customer used the device), causing history to
+            // appear empty in the admin CRM.  The stored uid is the canonical
+            // key for customer_order_history/{uid}/orders.
+            const stableUid = profile.uid || profile.authUid || auth.currentUser?.uid || '';
             saveSession({
                 phone:         profile.phone || phone,
                 name:          profile.name  || 'Customer',
-                uid:           auth.currentUser?.uid || '',
+                uid:           stableUid,
                 phoneVerified: profile.phoneVerified || false,
             });
             closeOverlay('phoneOverlay');
@@ -842,7 +850,12 @@ async function placeOrder() {
         await addDoc(collection(db, 'pending_table_orders'), {
             tableId:    tableName,
             customer: {
-                uid:   auth.currentUser?.uid || '',
+                // AI UPDATE [2026-07-29] session 20: prefer customerSession.uid
+                // (the stable stored profile uid) over auth.currentUser.uid.
+                // This ensures syncCustomerOrderCompletion() in cart.js writes
+                // history to the correct customer_order_history/{uid} path even
+                // after the anonymous auth session was reset between logins.
+                uid:   customerSession?.uid || auth.currentUser?.uid || '',
                 name:  customerSession?.name  || '',
                 phone: customerSession?.phone || '',
             },
@@ -852,14 +865,21 @@ async function placeOrder() {
             createdAt:  serverTimestamp(),
         });
 
-        // Update lastLoginAt + uid (non-critical — don't block order on failure).
-        // AI UPDATE [2026-07-29] session 17: also merge uid so the profile always
-        // reflects the current anonymous UID (guards against browser-data-clear
-        // creating a new anon UID that diverges from the stored uid field).
+        // Update lastLoginAt only — non-critical, fire-and-forget.
+        // AI UPDATE [2026-07-29] session 20: Removed uid from this update.
+        // Previously this wrote { lastLoginAt, uid: auth.currentUser.uid } which
+        // overwrote customers/{phone}.uid with the new anonymous auth uid every
+        // time an order was placed.  That broke the customer_order_history lookup
+        // because js/customers.js uses c.uid to build the Firestore path:
+        //   customer_order_history/{c.uid}/orders
+        // After the overwrite, that path pointed to an empty collection while all
+        // previous history remained under the original uid.  Fix: only update
+        // lastLoginAt.  The uid field was set correctly at registration and should
+        // never be changed by client code after that point.
         if (customerSession?.phone) {
             setDoc(
                 doc(db, 'customers', customerSession.phone),
-                { lastLoginAt: serverTimestamp(), uid: auth.currentUser?.uid || '' },
+                { lastLoginAt: serverTimestamp() },
                 { merge: true }
             ).catch(() => {});
         }

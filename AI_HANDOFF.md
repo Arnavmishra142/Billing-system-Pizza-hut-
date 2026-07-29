@@ -1,6 +1,83 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 19)
+> Last updated: 2026-07-29 (session 20)
+
+---
+
+## Bug Fixed (2026-07-29 — session 20)
+
+### Order History Disappears After Logout / Re-Login
+
+#### Root Cause
+
+Firebase anonymous auth generates a **new UID every time the session is cleared** (e.g. `signOut(auth)` called on logout, or browser data cleared, or a different customer used the same device). All order history is stored at `customer_order_history/{uid}/orders/`. When the uid changed between sessions, the admin CRM and the Customer Panel looked up history at the new (empty) uid path, while all real history sat at the old uid path.
+
+This was compounded by two code bugs that made the uid diverge:
+
+1. **`customer.html` line 667** — returning customer login saved `uid: auth.currentUser?.uid` (the new anonymous uid) instead of `profile.uid` (the stable stored uid).
+2. **`customer.html` line 862 (placeOrder)** — every order placement overwrote `customers/{phone}.uid` with `auth.currentUser?.uid`, permanently breaking the link between the profile and the history path.
+3. **`order-panel-updates/js/auth.js` `_completeLogin()`** — session uid was set to `auth.currentUser?.uid` (new) instead of the stored profile uid.
+4. **`order-panel-updates/js/auth.js` `getLoginInfo()`** — overrode `_currentUser.uid` with `_firebaseUser?.uid` (the new auth uid), so callers always got the wrong uid.
+5. **`order-panel-updates/js/order-status.js`** — used `auth.currentUser?.uid` directly for history queries, reading from the wrong Firestore path.
+6. **`order-panel-updates/js/order.js`** — used `auth.currentUser?.uid` in new order data, so billing panel wrote new history to the wrong uid path.
+7. **`firestore.rules`** — `customer_order_history` read was `isSameCustomer(uid)` only, denying operator reads; admin CRM could only read from IndexedDB cache (session-bound), not from the server.
+8. **`firestore.rules`** — `pending_table_orders` create required `customer.uid == request.auth.uid`, blocking orders placed with the stable stored uid when auth uid had drifted.
+
+#### Why statistics showed correctly but history did not
+
+`customers/{phone}.totalOrders`, `lifetimeSpend`, `lastOrderAt` are keyed by **phone number** and written via `increment()` in `cart.js` — completely uid-independent. History is stored at `customer_order_history/{uid}/orders` — **uid-dependent**. After uid divergence, stats remained correct but history lookup hit an empty path.
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `customer.html` | Billing Panel | Returning customer login: use `profile.uid \|\| profile.authUid` (stable) instead of `auth.currentUser.uid`. Order placement: use `customerSession.uid` (stable). `placeOrder()` profile update: removed `uid` field — only `lastLoginAt` is updated. |
+| `order-panel-updates/js/auth.js` | Billing Panel (→ Customer Panel) | `_onPhoneSubmit`: pass stored `profile.uid` to `_completeLogin`. `_completeLogin()`: accepts `profileUid` param; uses it for session instead of `auth.currentUser.uid`; only updates `lastLoginAt` in Firestore (removed uid overwrite). `getLoginInfo()`: returns `_currentUser` as-is without overriding uid with `_firebaseUser.uid`. |
+| `order-panel-updates/js/order-status.js` | Billing Panel (→ Customer Panel) | Imports `getLoginInfo`; uses `getLoginInfo().uid` (stable profile uid) instead of `auth.currentUser.uid` for both the active-orders query and the history listener. |
+| `order-panel-updates/js/order.js` | Billing Panel (→ Customer Panel) | Imports `getLoginInfo`; uses `getLoginInfo().uid` (stable) for `pending_table_orders.customer.uid` so billing panel writes new history to the correct path. |
+| `firestore.rules` | Billing Panel | `customer_order_history` read: added `\|\| isOperator()` so admin CRM can always read history server-side. `pending_table_orders` create: removed `customer.uid == request.auth.uid` constraint (stored uid may differ from auth uid after session reset). |
+| `sw.js` | Billing Panel | **v14→v15** — bust cached `customer.html` after uid stability fix. |
+
+#### Complete Flow After Fix
+
+```
+Customer A — first login:
+  signInAnonymously() → uid_1
+  customers/A_phone.uid = uid_1    (set at registration, never changed again)
+  Order placed with customer.uid = uid_1
+  Bill & Settle → customer_order_history/uid_1/orders/ORDER_xxx  ✅
+
+Customer A — re-login (any session, same or different uid):
+  signInAnonymously() → uid_new  (may differ)
+  Read customers/A_phone → profile.uid = uid_1  (unchanged)
+  Session uid = uid_1  (stable, from profile)  ✅
+  Order placed with customer.uid = uid_1  ✅
+  Bill & Settle → customer_order_history/uid_1/orders/ORDER_yyy  ✅
+
+Admin CRM (js/customers.js):
+  Reads customers/A_phone → c.uid = uid_1
+  getDocs(customer_order_history/uid_1/orders)
+  → allowed by isOperator() Firestore rule  ✅
+  → shows complete history  ✅
+```
+
+#### Customer Panel Changes Required
+
+Yes — the `order-panel-updates/js/` files must be pushed to `teamdovolve-hue/Order-`:
+
+| File | Change needed |
+|------|--------------|
+| `js/auth.js` | `_onPhoneSubmit`: pass stored profile uid to `_completeLogin`. `_completeLogin`: use profileUid param, remove uid from lastLoginAt update. `getLoginInfo`: don't override uid with `_firebaseUser.uid`. |
+| `js/order-status.js` | Import `getLoginInfo`; use `getLoginInfo().uid` for uid variable. |
+| `js/order.js` | Import `getLoginInfo`; use `getLoginInfo().uid` in order document. |
+
+#### Firestore Rules Deployment
+
+**⚠️ firestore.rules was updated and must be deployed:**
+```bash
+firebase deploy --only firestore:rules --token $FIREBASE_TOKEN
+```
+Until deployed, the admin CRM continues reading from IndexedDB cache (works during the same browser session; may fail after cache clear or browser restart).
 
 ---
 

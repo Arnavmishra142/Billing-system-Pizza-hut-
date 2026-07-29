@@ -71,8 +71,8 @@ import {
   collection, query, where,
   onSnapshot, orderBy,
 }                               from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-import { waitForAuthReady }     from "./auth.js";
-import { saveOrderToHistory }   from "./history.js";
+import { waitForAuthReady, getLoginInfo } from "./auth.js";
+import { saveOrderToHistory }            from "./history.js";
 
 // ── Status display helpers ────────────────────────────────────────────────────
 
@@ -199,7 +199,14 @@ export async function startOrderTracking(callbacks = {}) {
   stopOrderTracking();
 
   await waitForAuthReady();
-  const uid = auth.currentUser?.uid;
+  // AI UPDATE [2026-07-29] session 20: Use the stable stored profile uid from
+  // getLoginInfo() instead of auth.currentUser?.uid.  auth.currentUser.uid is
+  // a new anonymous uid after every logout+re-login (signOut clears the auth
+  // session), causing history queries to target an empty Firestore path.
+  // getLoginInfo().uid is the uid stored in customers/{phone}.uid at account
+  // creation — the permanent key for customer_order_history/{uid}/orders.
+  const loginInfo = getLoginInfo();
+  const uid = loginInfo?.uid || auth.currentUser?.uid;
   if (!uid) {
     console.warn("[order-status] Cannot start tracking — user not signed in.");
     return;

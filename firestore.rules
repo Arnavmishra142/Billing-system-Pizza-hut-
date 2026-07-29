@@ -53,16 +53,18 @@ service cloud.firestore {
 
     // ── pending_table_orders ──────────────────────────────────────────────────
     // Reads:    owning customer OR any operator
-    // Creates:  BRIDGE — any authenticated user may create their own order
-    //           (uid in customer.uid must match the caller's Auth UID).
+    // Creates:  BRIDGE — any authenticated user may create an order.
+    //           AI UPDATE [2026-07-29] session 20: Removed customer.uid == request.auth.uid
+    //           constraint. Returning customers now use their stable stored profile UID
+    //           which may differ from the current anonymous auth UID after re-login,
+    //           so the strict uid-match would block their orders.
     //           When Cloud Functions are restored: change create back to `if false`
     //           so only createCustomerOrder Cloud Function can write.
     // Updates:  operators only, status transitions they own (accept, dismiss, kot).
     match /pending_table_orders/{orderId} {
       allow read:   if isOrderOwner() || isOperator();
       // BRIDGE: direct browser write — remove when createCustomerOrder CF is live
-      allow create: if request.auth != null
-                    && request.resource.data.customer.get('uid', '') == request.auth.uid;
+      allow create: if request.auth != null;
       allow update: if isOperator() && isAllowedStatusUpdate();
     }
 
@@ -157,8 +159,11 @@ service cloud.firestore {
       // UID differs from the customer's UID; removing isOperator() would deny that write
       // and break the order completion flow entirely.
       allow write: if isOperator() || isSameCustomer(uid);
-      // Customer reads only their own history.
-      allow read:  if isSameCustomer(uid);
+      // AI UPDATE [2026-07-29] session 20: Added isOperator() to allow the admin CRM
+      // (js/customers.js) to read order history directly from Firestore server, not
+      // just from the IndexedDB offline cache. Without this, history was only visible
+      // during the session that wrote it (cache-served) and disappeared after reload.
+      allow read:  if isSameCustomer(uid) || isOperator();
     }
 
     // ── Catch-all ─────────────────────────────────────────────────────────────

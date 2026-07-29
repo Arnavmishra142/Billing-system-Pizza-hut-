@@ -70,10 +70,12 @@ export function isLoggedIn() { return !!_currentUser; }
 
 export function getLoginInfo() {
   if (!_currentUser) return null;
-  return {
-    ..._currentUser,
-    uid: _firebaseUser?.uid || _currentUser.uid || "",
-  };
+  // AI UPDATE [2026-07-29] session 20: Return _currentUser.uid as-is (the stable
+  // stored profile uid).  Previously this overrode uid with _firebaseUser?.uid
+  // which is the current anonymous auth uid — a new uid after every re-login.
+  // order-status.js and order.js use getLoginInfo().uid to query Firestore paths,
+  // so the override caused them to read/write under the wrong uid.
+  return { ..._currentUser };
 }
 
 export function requireLogin(cb) {
@@ -194,7 +196,12 @@ async function _onPhoneSubmit(e) {
 
     if (snap.exists()) {
       const profile = snap.data();
-      await _completeLogin(profile.name || "Customer", profile.phone || normalised);
+      // AI UPDATE [2026-07-29] session 20: Pass stored profile uid so that
+      // _completeLogin uses the stable uid (not auth.currentUser.uid which may
+      // be a new anonymous uid after re-login).  Stable uid = stable
+      // customer_order_history path = history always visible in admin CRM.
+      const storedUid = profile.uid || profile.authUid || "";
+      await _completeLogin(profile.name || "Customer", profile.phone || normalised, storedUid);
     } else {
       _showProfileStep();
     }
@@ -304,19 +311,38 @@ async function _onCreateAccount() {
 }
 
 // ── Complete login (shared by all sign-in paths) ──────────────────────────────
+// AI UPDATE [2026-07-29] session 20:
+// Added optional profileUid parameter.  When a returning customer logs in,
+// _onPhoneSubmit now reads the stored uid from their Firestore profile and passes
+// it here so the session uses the STABLE uid, not auth.currentUser.uid.
+//
+// Root cause of the history-loss bug: auth.currentUser.uid is a fresh anonymous
+// UID every time the Firebase Auth session is cleared (e.g. another customer
+// called signOut, or browser data was cleared).  Using it for the session meant
+// every re-login produced a new uid, so order-status.js queried an empty
+// customer_order_history/{new-uid}/orders path.
+//
+// Fix: use profileUid (from customers/{phone}.uid in Firestore) as the session
+// uid.  This uid was written at account creation and is the permanent key for the
+// customer_order_history collection.  Only fall back to auth.currentUser.uid for
+// brand-new accounts that have no stored uid yet (handled in _onCreateAccount).
 
-async function _completeLogin(name, phone) {
+async function _completeLogin(name, phone, profileUid = "") {
   // Ensure Firebase anonymous session exists
   if (!_firebaseUser) {
     await signInAnonymously(auth);
   }
-  _currentUser = { name, phone, uid: auth.currentUser?.uid || "" };
+  // Prefer the stored profile uid; fall back to current auth uid for new accounts.
+  const uid = profileUid || auth.currentUser?.uid || "";
+  _currentUser = { name, phone, uid };
   _saveSession(_currentUser);
   _updateGreeting();
   _dispatchAuthChange(_currentUser);
   _hideModal();
 
-  // Update lastLoginAt non-critically
+  // Update lastLoginAt only — do NOT update uid field.
+  // Overwriting uid with auth.currentUser.uid would change the
+  // customer_order_history lookup path and make all previous history invisible.
   if (phone) {
     setDoc(doc(db, "customers", phone), { lastLoginAt: serverTimestamp() }, { merge: true })
       .catch(() => {});

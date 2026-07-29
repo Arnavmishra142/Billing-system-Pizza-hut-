@@ -21,7 +21,9 @@
 //   Pushover notifications. These files no longer exist in the project.
 //
 // AI UPDATE [2026-07-29] session 15: v13→v14 — invalidate stale JS after Customer Management Panel added
-const CACHE_NAME = 'pos-static-v14';
+// AI UPDATE [2026-07-29] session 20: v14→v15 — bust cached customer.html after
+// uid stability fix (returning customer re-login now uses stored profile uid).
+const CACHE_NAME = 'pos-static-v15';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

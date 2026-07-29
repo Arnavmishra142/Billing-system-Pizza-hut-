@@ -21,7 +21,7 @@ import {
 }                                         from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { cart, clearCart }                from "./cart.js";
 import { getCustomer }                    from "./customer.js";
-import { waitForAuthReady }               from "./auth.js";
+import { waitForAuthReady, getLoginInfo } from "./auth.js";
 
 // ── Read table number from the URL ────────────────────────────────────────────
 //
@@ -145,10 +145,17 @@ export async function placeOrder() {
     //   clearCart();
     //   _showSuccess(assignedTable, totalItems, totalPrice, customer);
 
+    // AI UPDATE [2026-07-29] session 20: Use stored profile uid from getLoginInfo()
+    // so new orders are written under the same uid as the customer's existing history.
+    // auth.currentUser.uid is a fresh anonymous uid after every re-login and would
+    // cause syncCustomerOrderCompletion() to write history to a different path than
+    // where all previous orders live.
+    const _loginInfo = getLoginInfo();
+    const _stableUid = _loginInfo?.uid || auth.currentUser?.uid || "";
     await addDoc(collection(db, "pending_table_orders"), {
       tableId,
       customer: {
-        uid:   auth.currentUser?.uid || "",
+        uid:   _stableUid,
         name:  customer?.name  || "",
         phone: customer?.phone || "",
       },
