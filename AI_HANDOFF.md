@@ -1,6 +1,56 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 23)
+> Last updated: 2026-07-29 (session 24)
+
+---
+
+## Bug Fixed (2026-07-29 — session 24)
+
+### AI Manager Shows "AI key not configured" — Groq Key Not Injected
+
+#### Root Cause
+
+`server.js` generates `admin/groq-key.generated.js` at startup by reading `process.env.GROQ_API_KEY`. The `GROQ_API_KEY` secret had never been set in Replit Secrets, so the file was written with an empty string:
+
+```js
+window.GROQ_API_KEY = "";
+```
+
+`admin/chat.ai.html` loads this file as a `<script>` tag, then checks `if (!window.GROQ_API_KEY)` before every Groq call and throws:
+
+> "Error: AI key not configured. Run the build step to generate groq-key.generated.js."
+
+The server, the generated file, the `<script>` include path, and the `.gitignore` were all correct. The only missing piece was the secret itself.
+
+#### Why It Occurred
+
+The project was imported into a new Replit environment. Replit Secrets are not transferred with the repository — each environment needs its own secrets configured. The secret was noted as pending in previous sessions but never set.
+
+#### Fix
+
+Set `GROQ_API_KEY` in Replit Secrets. On the next server start, `server.js` wrote:
+
+```js
+window.GROQ_API_KEY = "gsk_...";   // 56-char key
+```
+
+Server log confirms: `[server] Wrote groq-key.generated.js (56 char key)`
+
+No code was modified. No files were changed.
+
+#### Verification Performed
+
+- Server restarted; log shows "Wrote groq-key.generated.js (56 char key)" (no warning).
+- `admin/groq-key.generated.js` contains the real key (non-empty).
+- `admin/chat.ai.html` loads and renders the greeting message — no error thrown.
+- AI Manager initializes successfully; suggestion chips and input field are active.
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| *(none)* | — | No code changes. Secret added to Replit Secrets only. |
+| `AI_HANDOFF.md` | Billing Panel | Updated with session 24 root cause and fix |
 
 ---
 
