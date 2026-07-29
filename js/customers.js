@@ -1,6 +1,22 @@
 // js/customers.js
 // Customer Management Panel — list, view, and delete customers.
 //
+// AI UPDATE [2026-07-29] session 17:
+//   BUG FIX — Customer statistics always showed 0 orders / ₹0 / empty history.
+//   Root cause: customer.html wrote the anonymous UID to customers/{phone} under
+//   the field name `authUid`, but this module read it as `c.uid` (undefined for
+//   every existing document → guard `if (!c.uid)` fired immediately → no history
+//   ever fetched).
+//   Fix:
+//     1. customers.js now resolves the UID as `c.uid || c.authUid` in both the
+//        fetch enrichment path and the delete path — backward-compat with all
+//        existing documents regardless of which field name was used.
+//     2. customer.html corrected to write `uid` (schema-spec field name); also
+//        merges `uid` on every returning-customer order so the profile stays
+//        current if the browser's anonymous auth state is ever reset.
+//   Only js/customers.js and customer.html were changed.  No Firestore schema,
+//   collection names, billing workflow, or UI was modified.
+//
 // AI UPDATE [2026-07-29] session 15:
 //   NEW FILE — Customer Management Panel feature.
 //   - Fetches all docs from `customers/{phone}` collection.
@@ -67,13 +83,18 @@ async function _fetchCustomers() {
         snap.forEach(d => raw.push({ id: d.id, ...d.data() }));
 
         // Enrich with order stats — fetch all customers in parallel
+        // AI UPDATE [2026-07-29] session 17:
+        // customer.html previously wrote the anonymous UID as `authUid` (bug); it now
+        // writes `uid` (schema-correct).  Read both so existing documents (with authUid)
+        // and new documents (with uid) are handled correctly without migration.
         const enriched = await Promise.all(raw.map(async c => {
-            if (!c.uid) {
+            const resolvedUid = c.uid || c.authUid || '';
+            if (!resolvedUid) {
                 return { ...c, orderCount: 0, lastOrderTs: 0, totalSpending: 0, orders: [] };
             }
             try {
                 const ordSnap = await getDocs(
-                    collection(db, `customer_order_history/${c.uid}/orders`)
+                    collection(db, `customer_order_history/${resolvedUid}/orders`)
                 );
                 const orders = [];
                 let totalSpending = 0;
@@ -321,13 +342,16 @@ window._custExecuteDelete = async function() {
         const batch = writeBatch(db);
 
         // 1. Delete all order history documents
-        if (c.uid) {
+        // AI UPDATE [2026-07-29] session 17: use resolvedUid (c.uid || c.authUid) so
+        // deletion works for both old documents (authUid) and new ones (uid).
+        const resolvedUid = c.uid || c.authUid || '';
+        if (resolvedUid) {
             const ordSnap = await getDocs(
-                collection(db, `customer_order_history/${c.uid}/orders`)
+                collection(db, `customer_order_history/${resolvedUid}/orders`)
             );
             ordSnap.forEach(od => batch.delete(od.ref));
             // 2. Delete the uid-level parent document (if it exists)
-            batch.delete(doc(db, `customer_order_history/${c.uid}`));
+            batch.delete(doc(db, `customer_order_history/${resolvedUid}`));
         }
 
         // 3. Delete the customer profile

@@ -1,6 +1,57 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 16)
+> Last updated: 2026-07-29 (session 17)
+
+---
+
+## Files Modified (2026-07-29 — session 17)
+
+### Bug Fix — Customer Statistics Always Showed 0 Orders / ₹0 / Empty History
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/customers.js` | Billing Panel | Resolved UID as `c.uid \|\| c.authUid` in both the enrichment fetch path and the delete path — backward-compatible with all existing Firestore documents regardless of which field name was written. Added session 17 AI UPDATE comment. |
+| `customer.html` | Billing Panel | (1) New-account creation: changed field `authUid: uid` → `uid: uid` to match ARCHITECTURE_LOCK schema spec. (2) Returning-customer order: also merges `uid: auth.currentUser?.uid` alongside `lastLoginAt` so the profile UID stays current if the browser's anonymous auth state is ever reset. |
+| `admin/sw.js` | Billing Panel | **v3→v4** — Bumped admin SW cache to force eviction of cached `customers.js`. |
+
+#### Root Cause
+
+`customer.html` wrote the Firebase anonymous UID to `customers/{phone}` documents under the field name **`authUid`** (not `uid`). The ARCHITECTURE_LOCK schema specifies the field as `uid`. `customers.js` read `c.uid`, which was `undefined` on every existing document. The guard:
+
+```js
+if (!c.uid) {
+    return { ...c, orderCount: 0, lastOrderTs: 0, totalSpending: 0, orders: [] };
+}
+```
+
+fired immediately for every customer → no `customer_order_history` lookup was ever attempted → 0 orders, ₹0 lifetime spend, empty history for all customers.
+
+#### Fix
+
+1. **`js/customers.js`** — resolve UID as `c.uid || c.authUid` everywhere the UID is used (enrichment fetch + delete batch). This makes all existing documents (written with `authUid`) readable immediately, with no data migration required.
+
+2. **`customer.html`** — fix the field name at the write side:
+   - New account creation: `authUid: uid` → `uid: uid`
+   - Returning customer order: merge `uid: auth.currentUser?.uid` so the profile UID is always kept current (guard against browser-data-clear creating a new anonymous UID that diverges from the stored value)
+
+3. **`admin/sw.js`** — cache v3→v4 to flush stale `customers.js` from admin panel installs.
+
+#### No Customer Panel changes required
+
+The bug was entirely within the Billing Panel's admin CRM module and the customer-facing ordering page's profile write. No shared Firestore collections, field names (other than the private `uid`/`authUid` distinction in `customers/`), status values, or cross-repo contracts were changed.
+
+#### Firestore collections involved
+
+| Collection | Access | Notes |
+|-----------|--------|-------|
+| `customers/{phone}` | read (list), write (uid field on returning login), delete | Fix: read `uid \|\| authUid`; write: field now `uid` |
+| `customer_order_history/{uid}/orders/{orderId}` | read (per customer), delete | Path now resolved via `c.uid \|\| c.authUid` |
+
+#### Whether migration is required
+
+**No.** The backward-compat fallback `c.uid || c.authUid` reads all existing documents correctly. New documents will use `uid`. Old documents will continue to be read via `authUid`. No Firestore writes need to be changed retroactively.
+
+---
 
 ---
 

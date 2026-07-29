@@ -754,10 +754,14 @@ document.getElementById('confirmCreateBtn').addEventListener('click', async () =
         // ── Write customer profile ────────────────────────────────────────
         // phoneVerified: false — ready for OTP gate when DLT is approved.
         // DO NOT change this to true here; verification must go through OTP.
+        // AI UPDATE [2026-07-29] session 17:
+        // Field renamed authUid → uid to match ARCHITECTURE_LOCK schema spec and
+        // customers.js reader.  Old documents that still have authUid are handled
+        // by the backward-compat fallback in customers.js (c.uid || c.authUid).
         await setDoc(doc(db, 'customers', _pendingPhone), {
             phone:         _pendingPhone,
             name:          _pendingName,
-            authUid:       uid,
+            uid:           uid,
             phoneVerified: false,     // ← OTP bridge: always false until verified
             createdAt:     now,
             updatedAt:     now,
@@ -841,11 +845,14 @@ async function placeOrder() {
             createdAt:  serverTimestamp(),
         });
 
-        // Update lastLoginAt (non-critical — don't block order on failure)
+        // Update lastLoginAt + uid (non-critical — don't block order on failure).
+        // AI UPDATE [2026-07-29] session 17: also merge uid so the profile always
+        // reflects the current anonymous UID (guards against browser-data-clear
+        // creating a new anon UID that diverges from the stored uid field).
         if (customerSession?.phone) {
             setDoc(
                 doc(db, 'customers', customerSession.phone),
-                { lastLoginAt: serverTimestamp() },
+                { lastLoginAt: serverTimestamp(), uid: auth.currentUser?.uid || '' },
                 { merge: true }
             ).catch(() => {});
         }
