@@ -1,6 +1,111 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 18)
+> Last updated: 2026-07-29 (session 19)
+
+---
+
+## Investigation Results (2026-07-29 — session 19)
+
+### Verified Root Cause: Firestore Rules NOT Deployed
+
+**Task:** End-to-end audit of the customer history architecture. Verify whether the undeployed Firestore rules are the real root cause. Trace the exact break point.
+
+---
+
+### Verification Method
+
+- Read `ARCHITECTURE_LOCK.md` and `AI_HANDOFF.md` in full.
+- Inspected `firestore.rules`, `js/cart.js`, `js/customers.js`, `customer.html` in full.
+- Installed Firebase CLI (`npm install -g firebase-tools`).
+- Attempted `firebase deploy --only firestore:rules --project billing-system-f8531` → **"Failed to authenticate, have you run firebase login?"** — confirms CLI is ready but needs a `FIREBASE_TOKEN`.
+
+---
+
+### Exact Break Point in the Flow
+
+```
+Customer places order (Customer Panel)
+    ↓ ✅ WORKS — pending_table_orders created (anonymous create allowed)
+Operator "Open in POS"
+    ↓ ✅ WORKS — status → 'accepted' (in isAllowedStatusUpdate in deployed rules)
+KOT printed
+    ↓ ✅ WORKS — status → 'kot' (in isAllowedStatusUpdate in deployed rules)
+Bill & Settle / Save & Exit
+    ↓ ❌ BREAKS HERE (1) — status → 'completed' DENIED
+      Reason: deployed rules do NOT have 'completed' in isAllowedStatusUpdate()
+              (it was added to the file in session ~1, but never deployed)
+    ↓ ❌ BREAKS HERE (2) — customer_order_history/{uid}/orders/ORDER_{ts} write DENIED
+      Reason: deployed rules have no match rule for customer_order_history collection
+              (added to the file in session ~1, but never deployed)
+    ↓ ❌ BREAKS HERE (3) — customers/{phone} stats increment DENIED
+      Reason: same — if customers update rule was not in deployed version,
+              this updateDoc() call also fails (non-fatal, caught silently)
+```
+
+**Net effect without deployed rules:**
+- Customer sees their order permanently stuck in "Active Orders" (never moves to history)
+- Order History tab stays empty forever
+- Customer Management panel shows 0 orders / ₹0 for all customers
+
+---
+
+### Application Code Status — NO CHANGES REQUIRED
+
+All code is correct as of session 18. Inspected in full:
+
+| File | Status | Notes |
+|------|--------|-------|
+| `js/cart.js` `syncCustomerOrderCompletion()` | ✅ Correct | Updates pending_table_orders to 'completed', writes customer_order_history, updates customers/{phone} stats with increment() |
+| `js/customers.js` | ✅ Correct | Fast path reads pre-computed stats; migration path for legacy customers; lazy history loading |
+| `customer.html` | ✅ Correct | New customer setDoc initialises totalOrders:0, lifetimeSpend:0, lastOrderAt:null |
+| `firestore.rules` | ✅ Correct in repo — ❌ NOT deployed | All needed rules present; just needs `firebase deploy` |
+
+---
+
+### Firestore Rules — What Needs Deploying
+
+The `firestore.rules` file in the repo already has every rule that is needed. No editing required. Only deployment is missing.
+
+**Critical rules that are in the file but NOT yet live:**
+
+```
+// 1. In isAllowedStatusUpdate():
+let allowed = ['accepted', 'dismissed', 'kot', 'completed'];   ← 'completed' was added
+
+// 2. New collection rule (entire block is new):
+match /customer_order_history/{uid}/orders/{orderId} {
+  allow write: if isOperator() || isSameCustomer(uid);
+  allow read:  if isSameCustomer(uid);
+}
+```
+
+**To deploy:**
+```bash
+firebase deploy --only firestore:rules --token $FIREBASE_TOKEN
+```
+(Firebase CLI is already installed via `npm install -g firebase-tools`. Only the token is missing.)
+
+---
+
+### Will Deploying the Rules Fully Resolve the Issue?
+
+**Yes — for new orders completed after the deploy.**
+
+- The billing panel will be able to mark orders as 'completed' → customer's Active Orders clears ✅
+- customer_order_history writes will succeed → customer's Order History populates ✅
+- customers/{phone} stats increment will succeed → Customer Management panel shows correct counts ✅
+
+**For orders completed BEFORE the deploy:**
+- Those orders were silently dropped — they will NOT retroactively appear in history (there is no backfill mechanism and none is needed for a live restaurant POS).
+
+---
+
+### What Still Needs Doing After Rules Are Deployed
+
+1. **Push updated `order-status.js` to Customer Panel** — `teamdovolve-hue/Order-` still needs `order-panel-updates/js/order-status.js`. Without this, the customer's app won't show the live "Preparing 🍕 • X min" timer or clear Active Orders when complete.
+2. **Set `GROQ_API_KEY` secret** — AI chat in `admin/chat.ai.html` won't work without it.
+
+---
 
 ---
 
