@@ -1,7 +1,13 @@
 // ============================================================
 //  POS Service Worker — Cache-first for static assets
-//  Version: 11 (bump this number whenever you deploy changes)
+//  Version: 12 (bump this number whenever you deploy changes)
 // ============================================================
+//
+// AI UPDATE [2026-07-29] session 13: Bumped v11 → v12.
+//   js/incoming-orders.js v10 — notifyNewOrder() now passes orderId +
+//                               customerPhone + items array for rich Pushover.
+//   server.js session 13      — Rich formatted notification message; priority 2
+//                               (emergency) so device alerts immediately.
 //
 // AI UPDATE [2026-07-28] session 12: Bumped v10 → v11.
 //   js/incoming-orders.js v9 — Issue 1 fix (timestamp-based notification guard)
@@ -14,7 +20,7 @@
 //   the browser notification/audio system has been replaced by server-side
 //   Pushover notifications. These files no longer exist in the project.
 //
-const CACHE_NAME = 'pos-static-v11';
+const CACHE_NAME = 'pos-static-v12';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

@@ -1,6 +1,68 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-28 (session 12)
+> Last updated: 2026-07-29 (session 13)
+
+---
+
+## Files Modified (2026-07-29 — session 13)
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/incoming-orders.js` | Billing Panel | **v10** — `notifyNewOrder()` signature changed to `notifyNewOrder(orderId, data)`. Now sends richer payload to backend: `orderId` (Firestore doc ID), `customerPhone`, full `items` array (in addition to existing `tableId`, `customerName`, `itemCount`). Call site updated to pass `docSnap.id` as `orderId`. |
+| `server.js` | Billing Panel | **session 13** — `POST /api/notify-order` now accepts `orderId`, `customerPhone`, and `items` array. Builds fully-formatted notification message (Customer, Phone, Table, Order #, itemised list). Pushover `priority` bumped from default (0) to **2 (emergency)** with `retry: 30` and `expire: 300` — device is alerted immediately, bypassing Do Not Disturb / quiet hours. |
+| `sw.js` | Billing Panel | **v11→v12** — Bumped cache version to invalidate stale copies of updated JS files. |
+
+### Root Cause — Pushover Notification Missing Rich Content + Low Priority (FIXED)
+
+**The issue:** The notification chain was working end-to-end (listener → `notifyNewOrder()` → `POST /api/notify-order` → Pushover → phone), but the content and urgency were insufficient:
+
+1. **Missing content**: `notifyNewOrder(data)` only sent `{tableId, customerName, itemCount}` — phone number, order ID, and individual items were not included. `server.js` built a one-line summary with no itemised list.
+
+2. **Default priority (0)**: Pushover notifications at priority 0 may be silenced by device Do Not Disturb settings or quiet hours. For a restaurant receiving customer orders, the notification must break through immediately.
+
+**The fix:**
+
+1. `notifyNewOrder(orderId, data)` — added `orderId` parameter (Firestore doc ID); extracts `customerPhone` and `items` array from `data`; sends all fields to backend.
+
+2. `server.js` — builds a fully-formatted multi-line notification:
+   ```
+   New Order Received
+
+   Customer: <name>
+   Phone: <phone>
+   Table: <tableId>
+   Order #: <orderId>
+
+   Items:
+   • <item> ×<qty>
+   • <item> ×<qty>
+   ```
+   Priority set to `2` (Pushover emergency) with `retry: 30`, `expire: 300`. Emergency priority requires both `retry` and `expire` per Pushover API spec.
+
+### Final Notification Flow (complete, working)
+
+```
+New Customer Order placed on Customer Panel
+    ↓
+Firestore: pending_table_orders doc created (status: "pending")
+    ↓
+js/incoming-orders.js: onSnapshot fires, order detected as genuinely new
+  (timestamp guard: createdAt > _sessionStartedAt − 10s)
+  (dedup guard: docId not in _notified set)
+    ↓
+notifyNewOrder(docSnap.id, data) called — fire-and-forget
+    ↓
+POST /api/notify-order  {orderId, tableId, customerName, customerPhone, items}
+    ↓
+server.js: builds rich formatted message, POSTs to Pushover API
+  priority: 2, retry: 30, expire: 300, sound: "notification"
+    ↓
+Pushover API → operator's phone (emergency alert, bypasses DND)
+```
+
+### No Customer Panel changes required
+
+This change is entirely within the Billing Panel's notification payload and server message builder. No Firestore schema, collection names, or shared contracts were changed.
 
 ---
 

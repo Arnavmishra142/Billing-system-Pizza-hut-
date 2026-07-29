@@ -166,22 +166,28 @@ let _sessionStartedAt = 0;
 // ── Pushover notification via backend ─────────────────────────────────────────
 // AI UPDATE [2026-07-28] v6: Replaced browser audio/notification with Pushover.
 // AI UPDATE [2026-07-28] v7: Added temporary debug logs to trace notification chain.
+// AI UPDATE [2026-07-29] v10: Rich payload — pass orderId, customerPhone, and
+//   items array so server.js can build a fully-formatted Pushover notification
+//   (Customer Name, Phone, Table, Order #, itemised list).  Priority bumped to
+//   emergency (2) in server.js.
 // Calls POST /api/notify-order on the local Express server (server.js), which
 // proxies to the Pushover API with the operator's credentials.
 // Fire-and-forget — a failure is logged but never disrupts the order flow.
-async function notifyNewOrder(data) {
-    const tableId      = data.tableId           || 'Unknown Table';
-    const customerName = data.customer?.name    || '';
-    const itemCount    = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
+async function notifyNewOrder(orderId, data) {
+    const tableId       = data.tableId           || 'Unknown Table';
+    const customerName  = data.customer?.name    || '';
+    const customerPhone = data.customer?.phone   || '';
+    const items         = data.items             || [];
+    const itemCount     = items.reduce((s, i) => s + (i.quantity || 1), 0);
 
     // [DEBUG] Step 3 — POST request starting
-    console.log('[notify-debug] Step 3: POST /api/notify-order starting', { tableId, customerName, itemCount });
+    console.log('[notify-debug] Step 3: POST /api/notify-order starting', { orderId, tableId, customerName, customerPhone, itemCount });
 
     try {
         const res = await fetch('/api/notify-order', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ tableId, customerName, itemCount })
+            body:    JSON.stringify({ orderId, tableId, customerName, customerPhone, items, itemCount })
         });
 
         // [DEBUG] Step 4 — POST request completed
@@ -590,7 +596,8 @@ function startListening() {
                 // AI UPDATE [2026-07-28] v6: Pushover push notification via backend.
                 // AI UPDATE [2026-07-28] v7: Debug logs added.
                 // AI UPDATE [2026-07-28] v9: timestamp guard replaces _initialLoadDone.
-                notifyNewOrder(data);
+                // AI UPDATE [2026-07-29] v10: Pass docSnap.id as orderId for rich notification.
+                notifyNewOrder(docSnap.id, data);
             } else {
                 // [DEBUG] Order already notified — correct DEDUP skip.
                 console.log('[notify-debug] DEDUP skip (already notified):', docSnap.id, data.tableId);

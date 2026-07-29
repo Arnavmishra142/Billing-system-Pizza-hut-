@@ -15,6 +15,14 @@
 //   Created — replaces static `npx serve` with Express so the Pushover
 //   notification endpoint can exist without exposing credentials to the browser.
 //   Deployment type must be changed from "static" to "autoscale" in .replit.
+//
+// AI UPDATE [2026-07-29] session 13:
+//   POST /api/notify-order: accepts richer payload (orderId, customerPhone, items
+//   array) and builds a fully-formatted notification message:
+//     Customer, Phone, Table, Order #, itemised list.
+//   Priority bumped to 2 (emergency) so the device is alerted immediately even
+//   in Do Not Disturb / quiet hours.  retry=30 s, expire=300 s (Pushover
+//   emergency priority requires both fields).
 
 'use strict';
 
@@ -49,46 +57,83 @@ app.use(express.json());
 
 // ── POST /api/notify-order ────────────────────────────────────────────────────
 // Called by js/incoming-orders.js whenever a genuinely new customer order arrives.
-// Request body (all optional):
-//   { tableId, customerName, itemCount, message }
-// Sends a Pushover push notification with a dynamic message.
-// The "message" field overrides the auto-generated message if supplied.
+// Request body (all optional fields — build message from whatever is present):
+//   { orderId, tableId, customerName, customerPhone, items, itemCount, message }
+//
+// AI UPDATE [2026-07-29] session 13:
+//   Richer payload accepted: orderId, customerPhone, items array.
+//   Builds fully-formatted notification with all order details.
+//   Priority: 2 (emergency) — device alerted immediately, bypasses DND/quiet hours.
+//   Emergency priority requires retry + expire fields (Pushover API requirement).
 app.post('/api/notify-order', async (req, res) => {
-    const { tableId, customerName, itemCount, message } = req.body || {};
+    const {
+        orderId,
+        tableId      = 'Unknown Table',
+        customerName  = '',
+        customerPhone = '',
+        items         = [],
+        itemCount,
+        message
+    } = req.body || {};
 
-    // Build dynamic notification message
-    let title = '🔔 New Order — New Pizza Hut & Live Cake';
-    let msg   = 'New order received for New Pizza Hut and Live Cake!';
+    const title = '🔔 New Order — New Pizza Hut & Live Cake';
 
-    if (tableId) {
-        msg = `New order for ${tableId}`;
-        if (customerName) msg += ` — ${customerName}`;
-        if (itemCount)    msg += ` (${itemCount} item${itemCount !== 1 ? 's' : ''})`;
+    let msg;
+
+    if (message) {
+        // Explicit override (unused in normal flow but kept for future use)
+        msg = message;
+    } else {
+        // Build rich, fully-formatted notification
+        const lines = [];
+
+        lines.push('New Order Received');
+        lines.push('');
+
+        if (customerName)  lines.push(`Customer: ${customerName}`);
+        if (customerPhone) lines.push(`Phone: ${customerPhone}`);
+        if (tableId)       lines.push(`Table: ${tableId}`);
+        if (orderId)       lines.push(`Order #: ${orderId}`);
+
+        if (items && items.length > 0) {
+            lines.push('');
+            lines.push('Items:');
+            items.forEach(item => {
+                const qty  = item.quantity || 1;
+                const name = item.name     || 'Unknown Item';
+                lines.push(`• ${name} ×${qty}`);
+            });
+        } else if (itemCount) {
+            lines.push('');
+            lines.push(`Items: ${itemCount} item${itemCount !== 1 ? 's' : ''}`);
+        }
+
+        msg = lines.join('\n');
     }
 
-    // Explicit message overrides the auto-built one
-    if (message) msg = message;
-
-    console.log(`[notify] Sending Pushover: "${msg}"`);
+    console.log(`[notify] Sending Pushover (priority 2/emergency):\n  Title: "${title}"\n  Body preview: "${msg.slice(0, 120)}..."`);
 
     try {
         const response = await fetch(PUSHOVER_URL, {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify({
-                token:   PUSHOVER_TOKEN,
-                user:    PUSHOVER_USER,
+                token:    PUSHOVER_TOKEN,
+                user:     PUSHOVER_USER,
                 title,
-                message: msg,
-                sound:   'notification'
+                message:  msg,
+                sound:    'notification',
+                priority: 2,    // Emergency: highest priority, bypasses DND/quiet hours
+                retry:    30,   // Resend every 30 s until acknowledged (required for priority 2)
+                expire:   300   // Stop retrying after 5 min (required for priority 2)
             })
         });
 
         const result = await response.json();
 
         if (result.status === 1) {
-            console.log('[notify] Pushover delivered ✓');
-            res.json({ ok: true });
+            console.log('[notify] Pushover delivered ✓ receipt:', result.receipt);
+            res.json({ ok: true, receipt: result.receipt });
         } else {
             console.error('[notify] Pushover API error:', result);
             res.status(500).json({ ok: false, errors: result.errors });
