@@ -136,6 +136,33 @@
             <div id="menuCardGrid"></div>
         </div>
 
+        <!-- ══ CUSTOMERS SECTION ══ -->
+        <!-- AI UPDATE [2026-07-29] session 15: New Customer Management Panel -->
+        <div id="customersSection" class="section">
+
+            <div class="filter-scroll-row" style="align-items:center; gap:8px;">
+                <div class="cust-search-wrap">
+                    <span class="cust-search-icon">🔍</span>
+                    <input
+                        id="custSearchInput"
+                        class="cust-search-input"
+                        type="search"
+                        placeholder="Search by name or phone…"
+                        autocomplete="off"
+                        oninput="window._custSearch(this.value)"
+                    >
+                </div>
+                <button class="icon-btn" id="custRefreshBtn" title="Refresh" onclick="window._custRefresh()">↻</button>
+            </div>
+
+            <div class="cust-count-row">
+                <span id="customerCount" class="list-title">Loading…</span>
+            </div>
+
+            <div id="customerCardList"></div>
+
+        </div><!-- /customersSection -->
+
         <!-- ══ EXPENSE SECTION ══ -->
         <div id="expenseSection" class="section">
 
@@ -161,6 +188,7 @@
     </main>
 
     <!-- BOTTOM NAV -->
+    <!-- AI UPDATE [2026-07-29] session 15: Added Customers tab -->
     <nav class="bottom-nav">
         <button class="bnav-btn active" id="bnav-sales" onclick="switchTab('sales', this)">
             <span class="bnav-icon">📊</span>
@@ -170,6 +198,10 @@
             <span class="bnav-icon">🍔</span>
             <span class="bnav-label">Menu</span>
         </button>
+        <button class="bnav-btn" id="bnav-customers" onclick="switchTab('customers', this)">
+            <span class="bnav-icon">👥</span>
+            <span class="bnav-label">Customers</span>
+        </button>
         <button class="bnav-btn" id="bnav-expense" onclick="switchTab('expense', this)">
             <span class="bnav-icon">📉</span>
             <span class="bnav-label">Expenses</span>
@@ -177,6 +209,40 @@
     </nav>
 
 </div><!-- /adminContent -->
+
+<!-- ── CUSTOMER DETAIL OVERLAY ── -->
+<!-- AI UPDATE [2026-07-29] session 15: Customer detail + delete confirmation modals -->
+<div id="custDetailOverlay" class="cust-overlay hidden">
+    <div class="cust-overlay-sheet">
+        <div class="cust-overlay-topbar">
+            <span class="cust-overlay-title">Customer Details</span>
+            <button class="modal-close-x" onclick="window._custCloseDetail()">✕</button>
+        </div>
+        <div id="custDetailBody" class="cust-overlay-body"></div>
+    </div>
+</div>
+
+<!-- ── CUSTOMER DELETE CONFIRMATION ── -->
+<div id="custDeleteConfirm" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width:420px;">
+        <div class="modal-header">
+            <h2>⚠️ Delete Customer?</h2>
+            <button class="modal-close-x" onclick="window._custCancelDelete()">✕</button>
+        </div>
+        <p style="color:#8b949e; font-size:0.95rem; line-height:1.6; margin-bottom:20px;">
+            Are you sure you want to permanently delete this customer?<br>
+            <strong style="color:#f85149;">This action cannot be undone.</strong>
+        </p>
+        <p style="color:#8b949e; font-size:0.85rem; line-height:1.55; margin-bottom:0;">
+            This will remove the customer profile, login information, and complete order history from Firestore.
+            Billing records in Sales history will be preserved.
+        </p>
+        <div class="modal-actions">
+            <button class="btn btn-cancel" onclick="window._custCancelDelete()">Cancel</button>
+            <button class="btn btn-danger" id="custDeleteBtn" onclick="window._custExecuteDelete()">Delete Permanently</button>
+        </div>
+    </div>
+</div>
 
 <!-- ── ITEM MODAL ── -->
 <div id="itemModal" class="modal-overlay hidden">
@@ -217,7 +283,8 @@
     </div>
 </div>
 
-<script type="module" src="../js/admin.js?v=20"></script>
+<script type="module" src="../js/admin.js?v=21"></script>
+<script type="module" src="../js/customers.js?v=1"></script>
 
 <!-- ── SMART AI MANAGER ── -->
 <button id="aiManagerFab" title="Smart AI Manager" aria-label="Open AI Manager">🤖</button>

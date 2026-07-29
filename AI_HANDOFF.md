@@ -1,6 +1,68 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 14)
+> Last updated: 2026-07-29 (session 15)
+
+---
+
+## Features Completed ✅ (session 15)
+
+### Customer Management Panel
+
+A new **Customers** tab has been added to the Admin Panel bottom navigation, sitting between Menu and Expenses.
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/customers.js` | Billing Panel | **NEW** — Full Customer Management module |
+| `admin/index.html` | Billing Panel | Added `customersSection`, bottom nav tab, detail overlay, delete confirmation modal |
+| `js/admin.js` | Billing Panel | Added import of `initCustomerManagement` + `refreshCustomerManagement`; added `customers` case to `switchTab()` |
+| `css/admin.css` | Billing Panel | Added all customer panel CSS (search bar, customer cards, skeleton, detail overlay, order cards) |
+| `sw.js` | Billing Panel | **v13→v14** — Bumped cache version to invalidate stale JS |
+
+#### What was built
+
+**Customer List (`customersSection`)**
+- Fetches all docs from `customers/{phone}` collection
+- For each customer with a `uid`, fetches their full `customer_order_history/{uid}/orders` subcollection in parallel to compute: order count, last order date, total lifetime spending
+- Renders searchable card list — cards show avatar initial, name, phone, joined date, last order date, order count, lifetime spend
+- Search bar filters by name or phone in real time (client-side, no Firestore reads)
+- Refresh button re-fetches from Firestore
+
+**Customer Detail (full-screen slide-up overlay)**
+- Opens on card tap
+- Shows: avatar, name, phone, stats row (total orders, lifetime spend, date joined)
+- Complete order history in reverse chronological order (newest first)
+- Each order card: order ID, table, date, time, itemised list with qty and subtotal, total, "✅ Completed" status
+- Delete Customer button at the bottom
+
+**Delete Customer (two-step confirmation)**
+- First tap: shows confirmation modal with warning
+- "Delete Permanently" executes a Firestore batch write that:
+  1. Deletes all docs in `customer_order_history/{uid}/orders/*`
+  2. Deletes the `customer_order_history/{uid}` parent document
+  3. Deletes `customers/{phone}` profile document
+- Updates local state and re-renders list immediately (no Firestore re-fetch)
+- `sales_history` records are **not touched** — billing records are preserved
+
+#### Firestore collections accessed
+
+| Collection | Access |
+|-----------|--------|
+| `customers/{phone}` | read (list), delete |
+| `customer_order_history/{uid}/orders/{orderId}` | read (per customer), delete |
+| `customer_order_history/{uid}` | delete (parent doc) |
+
+#### Auth pattern
+`js/customers.js` follows the mandatory pattern: `signInAnonymously` at module top-level, `onAuthStateChanged` guard via `_waitForAuth()`.
+
+#### Customer Panel changes required
+**None.** This feature is read/delete-only on existing Firestore data. No shared contracts (collection names, document shapes, status values) were changed.
+
+#### Note on Firebase Auth UID deletion
+The customer's Firebase anonymous Auth UID (`auth.uid`) cannot be deleted from the client side without the Firebase Admin SDK (server-side). The Firestore data (profile + order history) is fully deleted. If the customer re-registers with the same phone number, a new `customers/{phone}` doc and a new anonymous UID will be created — the customer appears as a completely new user. The old Auth UID becomes orphaned but is harmless (no Firestore data references it).
+
+---
 
 ---
 

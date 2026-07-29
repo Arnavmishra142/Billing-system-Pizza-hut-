@@ -1,4 +1,8 @@
+// AI UPDATE [2026-07-29] session 15:
+// Added Customers tab support to switchTab(). Imports initCustomerManagement
+// and refreshCustomerManagement from js/customers.js.
 import { db, storage, auth, functions } from './firebase-config.js';
+import { initCustomerManagement, refreshCustomerManagement } from './customers.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
     getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot
@@ -117,6 +121,7 @@ window.switchTab = function(tabName, navBtn) {
         loadAdminExpenses('days', 1, todayBtn);
     }
     if (tabName === 'sales') loadSalesData('days', 1);
+    if (tabName === 'customers') initCustomerManagement();
 };
 
 // ==========================================

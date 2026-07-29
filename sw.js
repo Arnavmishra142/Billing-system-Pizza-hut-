@@ -20,7 +20,8 @@
 //   the browser notification/audio system has been replaced by server-side
 //   Pushover notifications. These files no longer exist in the project.
 //
-const CACHE_NAME = 'pos-static-v13';
+// AI UPDATE [2026-07-29] session 15: v13→v14 — invalidate stale JS after Customer Management Panel added
+const CACHE_NAME = 'pos-static-v14';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
