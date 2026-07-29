@@ -6,7 +6,8 @@
 // was served straight from cache before the network response could replace
 // it for *this* load. Network-first always tries fresh code first and only
 // falls back to cache when offline.
-const CACHE = 'admin-pos-v2';
+// AI UPDATE [2026-07-29] session 16: v2→v3 — bust cached admin.css after Customer UI fix
+const CACHE = 'admin-pos-v3';
 const PRECACHE = [
     '/admin/index.html',
     '/css/admin.css',

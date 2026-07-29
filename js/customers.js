@@ -135,7 +135,7 @@ function _avatarLetter(name) {
     return (name || '?').trim()[0].toUpperCase();
 }
 
-// ── List rendering ────────────────────────────────────────────────────────
+// ── List rendering — uses existing bill-card / bill-card-* classes ────────
 function _renderList() {
     const listEl  = document.getElementById('customerCardList');
     const countEl = document.getElementById('customerCount');
@@ -163,22 +163,25 @@ function _renderList() {
 
     listEl.innerHTML = filtered.map(c => {
         const joinedTs = c.createdAt?.toMillis?.() ?? 0;
+        // Build meta line — joined date + last order date
+        const metaParts = [];
+        if (joinedTs)      metaParts.push(`Joined ${_fmtDate(joinedTs)}`);
+        if (c.lastOrderTs) metaParts.push(`Last order ${_fmtDate(c.lastOrderTs)}`);
+
         return `
-<div class="cust-card" onclick="window._custOpenDetail('${_esc(c.id)}')">
-    <div class="cust-card-avatar">${_avatarLetter(c.name)}</div>
-    <div class="cust-card-body">
-        <div class="cust-card-name">${_esc(c.name || 'Unknown')}</div>
-        <div class="cust-card-phone">${_esc(c.phone || c.id)}</div>
-        <div class="cust-card-meta">
-            ${joinedTs         ? `<span>Joined ${_fmtDate(joinedTs)}</span>` : ''}
-            ${c.lastOrderTs    ? `<span>Last order ${_fmtDate(c.lastOrderTs)}</span>` : ''}
-        </div>
+<div class="bill-card cust-bill-card" onclick="window._custOpenDetail('${_esc(c.id)}')">
+    <div class="cust-av">${_avatarLetter(c.name)}</div>
+    <div class="bill-card-left" style="flex:1;min-width:0;margin-left:2px;">
+        <div class="bill-card-name">${_esc(c.name || 'Unknown')}</div>
+        <div class="bill-card-time" style="color:#58a6ff;">${_esc(c.phone || c.id)}</div>
+        ${metaParts.length ? `<div class="bill-card-time">${_esc(metaParts.join(' · '))}</div>` : ''}
     </div>
-    <div class="cust-card-stats">
-        <div class="cust-stat-num">${c.orderCount}</div>
-        <div class="cust-stat-lbl">orders</div>
-        <div class="cust-stat-spend">${_fmtRupee(c.totalSpending)}</div>
+    <div class="bill-card-right" style="flex-direction:column;align-items:flex-end;gap:1px;">
+        <span style="font-size:1.15rem;font-weight:900;color:#58a6ff;line-height:1.15;">${c.orderCount}</span>
+        <span style="font-size:0.68rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:0.4px;">orders</span>
+        <span class="bill-card-amt" style="font-size:0.88rem;">${_fmtRupee(c.totalSpending)}</span>
     </div>
+    <span style="color:#8b949e;font-size:1.1rem;margin-left:2px;flex-shrink:0;">›</span>
 </div>`;
     }).join('');
 }
@@ -186,15 +189,7 @@ function _renderList() {
 function _showSkeletons() {
     const listEl = document.getElementById('customerCardList');
     if (!listEl) return;
-    listEl.innerHTML = Array(5).fill(`
-<div class="cust-card cust-card--skel">
-    <div class="cust-card-avatar cust-skel-block" style="border-radius:50%"></div>
-    <div class="cust-card-body">
-        <div class="cust-skel-block" style="width:120px;height:13px;border-radius:6px;margin-bottom:7px"></div>
-        <div class="cust-skel-block" style="width:88px;height:11px;border-radius:6px;margin-bottom:7px"></div>
-        <div class="cust-skel-block" style="width:140px;height:10px;border-radius:5px"></div>
-    </div>
-</div>`).join('');
+    listEl.innerHTML = `<div class="loading-state">Loading customers… ☁️</div>`;
 }
 
 // ── Search (called from inline oninput) ───────────────────────────────────
@@ -203,7 +198,7 @@ window._custSearch = function(val) {
     _renderList();
 };
 
-// ── Detail overlay ────────────────────────────────────────────────────────
+// ── Detail overlay — reuses modal-overlay/modal-box + existing CSS ────────
 window._custOpenDetail = function(phone) {
     const c = _customers.find(x => x.id === phone);
     if (!c) return;
@@ -214,69 +209,75 @@ window._custOpenDetail = function(phone) {
 
     const joinedTs = c.createdAt?.toMillis?.() ?? 0;
 
-    // Order history rows
+    // Order history — each order uses bill-card style
     let ordersHtml;
     if (c.orders.length === 0) {
-        ordersHtml = `<div class="empty-state" style="margin-top:8px">No orders yet.</div>`;
+        ordersHtml = `<div class="empty-state">No orders yet.</div>`;
     } else {
-        ordersHtml = c.orders.map(o => {
-            const ts       = o.completedAt?.toMillis?.() ?? 0;
+        ordersHtml = `<div class="bills-list">` + c.orders.map(o => {
+            const ts = o.completedAt?.toMillis?.() ?? 0;
             const itemsHtml = (o.items || []).map(it => `
-<div class="cust-ord-item">
-    <span class="cust-ord-item-name">${_esc(it.name)}</span>
-    <span class="cust-ord-item-qty">×${it.quantity || 1}</span>
-    <span class="cust-ord-item-sub">${_fmtRupee(it.subtotal)}</span>
+<div class="cust-ord-item-row">
+    <span class="name">${_esc(it.name)}</span>
+    <span class="qty">×${it.quantity || 1}</span>
+    <span class="sub">${_fmtRupee(it.subtotal)}</span>
 </div>`).join('');
 
             return `
-<div class="cust-ord-card">
-    <div class="cust-ord-header">
-        <div class="cust-ord-id-block">
-            <span class="cust-ord-id">${_esc(o.orderId || o.id)}</span>
-            <span class="cust-ord-table">${_esc(o.tableId || '—')}</span>
+<div class="bill-card" style="flex-direction:column;align-items:stretch;gap:10px;border-left:3px solid #1f6feb;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div class="bill-card-left">
+            <div class="bill-card-name" style="color:#58a6ff;font-size:0.88rem;">${_esc(o.orderId || o.id)}</div>
+            <div class="bill-card-time">${_esc(o.tableId || '—')} · ${_fmtDate(ts)}${ts ? ' · ' + _fmtTime(ts) : ''}</div>
         </div>
-        <div class="cust-ord-total">${_fmtRupee(o.total)}</div>
+        <div class="bill-card-amt" style="flex-shrink:0;">${_fmtRupee(o.total)}</div>
     </div>
-    <div class="cust-ord-datetime">${_fmtDate(ts)}${ts ? ' · ' + _fmtTime(ts) : ''}</div>
-    <div class="cust-ord-items">${itemsHtml}</div>
-    <div class="cust-ord-status">✅ Completed</div>
+    ${itemsHtml ? `<div style="border-top:1px solid #21262d;padding-top:8px;">${itemsHtml}</div>` : ''}
+    <div style="font-size:0.75rem;font-weight:600;color:#3fb950;">✅ Completed</div>
 </div>`;
-        }).join('');
+        }).join('') + `</div>`;
     }
 
     body.innerHTML = `
 <!-- Profile header -->
-<div class="cust-detail-top">
-    <div class="cust-detail-avatar">${_avatarLetter(c.name)}</div>
-    <div class="cust-detail-info">
-        <div class="cust-detail-name">${_esc(c.name || 'Unknown')}</div>
-        <div class="cust-detail-phone">${_esc(c.phone || c.id)}</div>
+<div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #30363d;">
+    <div class="cust-av cust-av-lg">${_avatarLetter(c.name)}</div>
+    <div style="min-width:0;">
+        <div style="font-size:1.15rem;font-weight:800;color:#e6edf3;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(c.name || 'Unknown')}</div>
+        <div style="font-size:0.92rem;color:#58a6ff;letter-spacing:0.2px;">${_esc(c.phone || c.id)}</div>
     </div>
 </div>
 
-<!-- Stats row -->
-<div class="cust-detail-stats">
-    <div class="cust-ds">
-        <div class="cust-ds-val">${c.orderCount}</div>
-        <div class="cust-ds-lbl">Orders</div>
+<!-- Stats — reuse stats-row / stat-card -->
+<div class="stats-row">
+    <div class="stat-card blue">
+        <div class="stat-label">Total Orders</div>
+        <div class="stat-value">${c.orderCount}</div>
     </div>
-    <div class="cust-ds">
-        <div class="cust-ds-val" style="font-size:1.15rem">${_fmtRupee(c.totalSpending)}</div>
-        <div class="cust-ds-lbl">Lifetime Spend</div>
+    <div class="stat-card green">
+        <div class="stat-label">Lifetime Spend</div>
+        <div class="stat-value" style="font-size:1.4rem;">${_fmtRupee(c.totalSpending)}</div>
     </div>
-    <div class="cust-ds">
-        <div class="cust-ds-val" style="font-size:1rem">${joinedTs ? _fmtDate(joinedTs) : '—'}</div>
-        <div class="cust-ds-lbl">Joined</div>
+</div>
+<div class="stats-row" style="margin-top:-6px;">
+    <div class="stat-card" style="border-left:4px solid #6e40c9;flex:1 1 100%;">
+        <div class="stat-label">Date Joined</div>
+        <div class="stat-value" style="font-size:1.1rem;color:#c9d1d9;">${joinedTs ? _fmtDate(joinedTs) : '—'}</div>
     </div>
+    ${c.lastOrderTs ? `
+    <div class="stat-card" style="border-left:4px solid #8b949e;flex:1 1 100%;">
+        <div class="stat-label">Last Order</div>
+        <div class="stat-value" style="font-size:1.1rem;color:#c9d1d9;">${_fmtDate(c.lastOrderTs)}</div>
+    </div>` : ''}
 </div>
 
 <!-- Order history -->
-<div class="cust-detail-section-title">Order History</div>
-<div class="cust-ord-list">${ordersHtml}</div>
+<div class="list-title" style="margin-top:4px;margin-bottom:12px;">Order History</div>
+${ordersHtml}
 
 <!-- Delete button -->
-<div style="padding: 20px 0 8px;">
-    <button class="btn btn-danger full-width" style="padding:14px;font-size:1rem;"
+<div style="padding:20px 0 4px;">
+    <button class="btn btn-danger full-width" style="padding:14px;font-size:1rem;justify-content:center;"
         onclick="window._custConfirmDelete('${_esc(c.id)}')">
         🗑️ Delete Customer
     </button>

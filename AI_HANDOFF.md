@@ -1,6 +1,25 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 15)
+> Last updated: 2026-07-29 (session 16)
+
+---
+
+## Files Modified (2026-07-29 — session 16)
+
+### Customer Management Panel — UI Fix
+
+| File | Repo | Change |
+|------|------|--------|
+| `css/admin.css` | Billing Panel | Stripped 325 lines of parallel custom CSS (`cust-card`, `cust-overlay`, `cust-detail-*`, `cust-ord-*` etc.). Replaced with 82 lines of minimal additions: `.cust-search-wrap/icon/input` (search bar), `.cust-av`/`.cust-av-lg` (avatar circle), `.cust-bill-card` (hover/tap extension of `bill-card`), `.cust-ord-item-row` (order item rows inside detail). Everything else reuses existing classes. |
+| `js/customers.js` | Billing Panel | Rewrote `_renderList()` and `_showSkeletons()` to use `bill-card`/`bill-card-left`/`bill-card-right`/`bill-card-name`/`bill-card-time`/`bill-card-amt`. Rewrote `_custOpenDetail` body HTML to use `stats-row`/`stat-card`, `list-title`, `bills-list`/`bill-card` for order history cards. |
+| `admin/index.html` | Billing Panel | Changed `custDetailOverlay` from custom `cust-overlay`/`cust-overlay-sheet` to existing `modal-overlay`/`modal-box`/`modal-header` (same pattern as Item modal). Added `class="bills-list"` to `customerCardList` div. Bumped script versions to v22/v2. |
+| `admin/sw.js` | Billing Panel | **v2→v3** — Bumped admin SW cache to force eviction of cached CSS/JS. |
+
+**Root cause:** The previous implementation created a parallel CSS system with 20+ custom classes (`cust-card`, `cust-overlay`, etc.) instead of reusing the existing `bill-card`, `modal-overlay`, `stat-card` components. The admin service worker (`admin/sw.js`) had cached the old `admin.css` at v2, and even with the new CSS present in the file, the visual structure didn't match the admin panel's established design language. Fix: stripped to minimal new CSS, rewrote HTML templates to use existing classes throughout.
+
+**No Firestore logic, deletion flow, navigation, or backend was changed.**
+
+---
 
 ---
 

@@ -159,7 +159,7 @@
                 <span id="customerCount" class="list-title">Loading…</span>
             </div>
 
-            <div id="customerCardList"></div>
+            <div id="customerCardList" class="bills-list"></div>
 
         </div><!-- /customersSection -->
 
@@ -211,14 +211,14 @@
 </div><!-- /adminContent -->
 
 <!-- ── CUSTOMER DETAIL OVERLAY ── -->
-<!-- AI UPDATE [2026-07-29] session 15: Customer detail + delete confirmation modals -->
-<div id="custDetailOverlay" class="cust-overlay hidden">
-    <div class="cust-overlay-sheet">
-        <div class="cust-overlay-topbar">
-            <span class="cust-overlay-title">Customer Details</span>
+<!-- AI UPDATE [2026-07-29] session 16: UI fix — switched to modal-overlay/modal-box (same as item modal) -->
+<div id="custDetailOverlay" class="modal-overlay hidden">
+    <div class="modal-box" style="max-height:90dvh;overflow-y:auto;">
+        <div class="modal-header">
+            <h2>Customer Details</h2>
             <button class="modal-close-x" onclick="window._custCloseDetail()">✕</button>
         </div>
-        <div id="custDetailBody" class="cust-overlay-body"></div>
+        <div id="custDetailBody"></div>
     </div>
 </div>
 
@@ -283,8 +283,8 @@
     </div>
 </div>
 
-<script type="module" src="../js/admin.js?v=21"></script>
-<script type="module" src="../js/customers.js?v=1"></script>
+<script type="module" src="../js/admin.js?v=22"></script>
+<script type="module" src="../js/customers.js?v=2"></script>
 
 <!-- ── SMART AI MANAGER ── -->
 <button id="aiManagerFab" title="Smart AI Manager" aria-label="Open AI Manager">🤖</button>
