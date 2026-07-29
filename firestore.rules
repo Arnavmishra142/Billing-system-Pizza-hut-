@@ -106,6 +106,22 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── usernames ─────────────────────────────────────────────────────────────
+    // Username uniqueness registry. Document ID = username (without @).
+    // Written on account creation; read for real-time availability checks.
+    //
+    // AI UPDATE [2026-07-29] session 21:
+    //   New collection added for the username system.
+    //   Any authenticated user may read (for availability check in registration
+    //   form) and create (when registering — includes the username they chose).
+    //   Updates and deletes are blocked; username changes are a future feature.
+    //   Structure: usernames/{username} → { phone: "+91XXXXXXXXXX" }
+    match /usernames/{username} {
+      allow read:          if request.auth != null;
+      allow create:        if request.auth != null;
+      allow update, delete: if false;
+    }
+
     // ── customer_uid_map ──────────────────────────────────────────────────────
     // Written exclusively by Cloud Functions (Admin SDK). Not used in bridge build.
     match /customer_uid_map/{uid} {

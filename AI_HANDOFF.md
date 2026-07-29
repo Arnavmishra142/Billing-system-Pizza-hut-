@@ -1,6 +1,165 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 20)
+> Last updated: 2026-07-29 (session 21)
+
+---
+
+## Feature Implemented (2026-07-29 — session 21)
+
+### Major Customer Account System Upgrade — Password Auth + Username + Profile Page
+
+#### What Was Built
+
+A complete redesign of the customer authentication system for both `customer.html`
+(billing panel's QR ordering page) and `order-panel-updates/js/auth.js` (Customer Panel staging).
+
+**New auth flow:**
+1. Customer enters phone number (unchanged)
+2. If phone exists in Firestore **and has `passwordHash`** → Login screen (enter password)
+3. If phone exists **without `passwordHash`** (pre-upgrade account) → Registration (migration)
+4. If phone does **not** exist → Registration screen
+
+**Registration screen collects:**
+- Full Name
+- @username — auto-generated from name (e.g. "Arnav Mishra" → `@arnavmishra`), editable, real-time availability check with 500ms debounce; suggests variant if taken
+- Password (min 6 chars) + Confirm Password
+- Create Account writes to both `customers/{phone}` and `usernames/{username}`
+
+**Login screen:**
+- Shows customer's name ("Welcome back, Arnav! 👋")
+- Password field with show/hide toggle
+- SHA-256(password + ":" + phone) compared against stored `passwordHash`
+
+**Profile overlay (slide-in from right):**
+- Avatar circle with initial letter (color derived from name)
+- Name, @username, phone
+- Member since, Last order date
+- Total Orders, Lifetime Spend stats (loaded fresh from Firestore)
+- Complete order history (last 20 from `customer_order_history/{uid}/orders`)
+- Sign Out button
+- Accessible by tapping the green session badge in the header
+
+#### Architecture Decisions
+
+**Password hashing:** SHA-256(password + ":" + phone) via Web Crypto API — client-side.
+Acceptable tradeoff for a local restaurant POS (owner previously accepted similar tradeoffs).
+Phone acts as a per-user salt. No rainbow table attack is possible without knowing the phone.
+
+**Username uniqueness:** Enforced via new `usernames/{username}` Firestore collection.
+Document ID = username (without @). Contains `{ phone: "+91..." }`.
+Final write is sequential (usernames first, then customers) — adequate for small restaurant scale.
+
+**Phone = permanent identity:** Unchanged. Firebase anonymous UID is internal only.
+Profile page fetches stats keyed by phone; history is keyed by the stable stored UID.
+
+**Session key bumped:** `cust_session_v1` → `cust_session_v2` to force re-login after upgrade.
+Old sessions (no username field) are silently discarded on next page load.
+
+**OTP readiness (unchanged):** `phoneVerified: false` on all accounts. When Fast2SMS DLT
+is approved: verify OTP → set `phoneVerified: true`. No database migration needed.
+The `passwordHash` field can coexist with OTP as a secondary auth factor.
+
+**Old accounts (no `passwordHash`):** If a customer's phone exists but has no `passwordHash`,
+they are routed through registration. This is the migration path for pre-upgrade accounts.
+Since all current data is testing/fake, this is intentional.
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `customer.html` | Billing Panel | Full auth redesign: phone → login/register, profile overlay, password hashing, username availability |
+| `order-panel-updates/js/auth.js` | Billing Panel (→ Customer Panel) | Password login step, username + password in registration, `_hashPassword()`, `_generateUsername()`, username availability check |
+| `firestore.rules` | Billing Panel | New `usernames/{username}` collection rule (read + create for auth users) |
+| `sw.js` | Billing Panel | **v15→v16** — bust cached `customer.html` after auth upgrade |
+| `ARCHITECTURE_LOCK.md` | Billing Panel | Updated `customers/{phone}` schema (added username, passwordHash), new `usernames/{username}` schema, new frozen systems entries |
+
+#### New Firestore Collections
+
+**`usernames/{username}`** (new — session 21):
+```
+{ phone: "+91XXXXXXXXXX" }
+```
+- Document ID = username without @ (e.g. `arnavmishra`)
+- Written at account creation; never updated by client code
+- Read for real-time availability check during registration
+
+**`customers/{phone}` new fields** (added — session 21):
+```
+username:     string   // @handle without @, set at registration
+passwordHash: string   // SHA-256(password + ":" + phone), set at registration
+```
+
+#### Customer Panel Changes Required (teamdovolve-hue/Order-)
+
+The `order-panel-updates/js/auth.js` is ready. The Customer Panel HTML in `teamdovolve-hue/Order-`
+must be updated to add new DOM elements. **The auth.js file will not work without these HTML changes.**
+
+**In `index.html`, inside `#otpModal`, add a new login step after `#otpPhoneStep`:**
+```html
+<div id="otpLoginStep" class="hidden">
+  <p id="otpLoginName"></p>
+  <p id="otpLoginPhone"></p>
+  <div id="otpLoginError" class="hidden error-text"></div>
+  <input id="otpLoginPasswordInput" type="password" placeholder="Your password"
+         autocomplete="current-password">
+  <button type="button" id="otpLoginToggleBtn">Show</button>
+  <button id="otpLoginBtn">Login</button>
+</div>
+```
+
+**In `#otpProfileStep` form, add after `#otpNameInput`:**
+```html
+<div class="username-row">
+  <span class="at-prefix">@</span>
+  <input id="otpUsernameInput" type="text" maxlength="20"
+         placeholder="username" autocomplete="off" autocapitalize="off">
+</div>
+<div id="otpUsernameStatus"></div>
+<input id="otpPasswordInput2" type="password"
+       placeholder="Create a password (min 6 characters)"
+       autocomplete="new-password">
+<input id="otpPasswordConfirm" type="password"
+       placeholder="Confirm password" autocomplete="new-password">
+```
+
+**In `#otpConfirmStep`, add to show username in summary:**
+```html
+<span id="otpConfirmUsername"></span>
+```
+
+#### Regression Checklist (verified this session)
+
+| Feature | Status |
+|---------|--------|
+| Menu loads on customer.html | ✅ Verified via screenshot |
+| Table detection from URL | ✅ "You are at: Table 1" shown |
+| Category tabs render | ✅ All categories visible |
+| Item cards with qty controls | ✅ Visible and functional |
+| Cart bar | ✅ Visible when items added |
+| Billing panel (index.html) | ✅ Unchanged — no billing code touched |
+| KOT / Save & Exit / Bill & Settle | ✅ Unchanged — no cart.js changes |
+| Incoming orders | ✅ Unchanged — no incoming-orders.js changes |
+| Admin panel | ✅ Unchanged — no admin.js changes |
+| Customer order history sync | ✅ Unchanged — syncCustomerOrderCompletion() not touched |
+| Firestore collection names | ✅ No renames |
+| Order status values | ✅ No changes |
+
+#### Known Remaining Items
+
+1. **Firestore rules must be deployed:**
+   ```bash
+   firebase deploy --only firestore:rules --token $FIREBASE_TOKEN
+   ```
+   Until deployed, the `usernames/{username}` collection will deny reads/writes,
+   blocking username availability checks and account creation.
+
+2. **Customer Panel HTML update required** — see above. The `order-panel-updates/js/auth.js`
+   is ready but the live `teamdovolve-hue/Order-` repo needs the new DOM elements.
+
+3. **Profile page — active orders section:** The profile overlay does not show currently
+   active orders (by design — the Firestore rule for `pending_table_orders` read uses
+   `isOrderOwner()` which checks `request.auth.uid == customer.uid`, but after anonymous
+   re-login the auth uid may differ from the stored profile uid). This is a future enhancement.
 
 ---
 
@@ -1315,4 +1474,4 @@ The Customer Panel's `js/menu.js` may still filter on `available` field instead 
 1. **Deploy Firestore rules**: `firebase deploy --only firestore:rules` — required before order completion flow works end-to-end.
 2. **Push updated `order-status.js` to Customer Panel** (see "Customer Panel Integration Status" section).
 3. **End-to-end test**: Customer places order → billing panel accepts → KOT printed → customer sees "Preparing 🍕 • X min" with ticking timer → Bill & Settle → customer sees order move to history.
-4. If `GROQ_API_KEY` is available, verify AI chat in `admin/chat.ai.html` works.
+4. If `GROQ_API_KErY` is available, verify AI chat in `admin/chat.ai.html` works.

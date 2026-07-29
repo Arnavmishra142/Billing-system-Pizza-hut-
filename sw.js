@@ -23,7 +23,9 @@
 // AI UPDATE [2026-07-29] session 15: v13→v14 — invalidate stale JS after Customer Management Panel added
 // AI UPDATE [2026-07-29] session 20: v14→v15 — bust cached customer.html after
 // uid stability fix (returning customer re-login now uses stored profile uid).
-const CACHE_NAME = 'pos-static-v15';
+// AI UPDATE [2026-07-29] session 21: v15→v16 — bust cached customer.html after
+// major auth upgrade: password + username system, profile overlay.
+const CACHE_NAME = 'pos-static-v16';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

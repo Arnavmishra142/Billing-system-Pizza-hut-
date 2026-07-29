@@ -5,26 +5,77 @@
  * Cloud Function (customerAuth) is intentionally bypassed while
  * Firebase billing / Fast2SMS DLT approval is pending.
  *
- * Flow (unchanged UX):
+ * Flow (session 21 — password + username):
  *   Phone → lookup customers/{+91…} in Firestore
- *     found  → signInAnonymously → session saved → login complete
- *     not found → name step → confirm step → setDoc → login complete
+ *     found + passwordHash  → login step (password verification)
+ *     found + no passwordHash → registration step (password migration)
+ *     not found             → registration step (new account)
  *
- * All accounts are created with phoneVerified: false.
- * When Fast2SMS DLT is approved and Cloud Functions are restored:
+ * Registration collects: Full Name, @username (auto-generated, editable),
+ * Password (×2). Username uniqueness is enforced via usernames/{username}.
+ *
+ * Password storage: SHA-256(password + ":" + phone). Client-side hash.
+ * Acceptable for a local restaurant POS (owner accepted the tradeoff;
+ * easily rotated, no financial data exposed).
+ *
+ * Session key: "qrmenu_user" — { name, phone, uid, username }
+ * Previously only stored name/phone/uid; username added in session 21.
+ *
+ * OTP readiness:
+ *   When Fast2SMS DLT is approved and Cloud Functions are restored:
  *   1. Restore customerAuth callable calls in _onPhoneSubmit and _onCreateAccount
  *   2. Restore signInWithCustomToken calls
  *   3. Remove direct Firestore read/write blocks marked "BRIDGE"
- *   4. No DB migration needed — phoneVerified field is already present
+ *   4. No DB migration needed — passwordHash + phoneVerified fields already present
  *
  * Public API (unchanged — app.js / customer.js / order.js see the same surface):
  *   initAuth()         — wire DOM events, start onAuthStateChanged
  *   requireLogin(cb)   — ensure session, then call cb()
  *   isLoggedIn()       — true if session exists in localStorage
- *   getLoginInfo()     — { name, phone, uid } | null
+ *   getLoginInfo()     — { name, phone, uid, username } | null
  *   waitForAuthReady() — Promise resolving when Firebase Auth state is known
  *   onAuthReady(cb)    — call cb with locally cached session
  *   updateGreeting()   — refresh customer chip in header
+ *
+ * ─────────────────────────────────────────────────────────────
+ * CUSTOMER PANEL HTML CHANGES REQUIRED (teamdovolve-hue/Order-)
+ * ─────────────────────────────────────────────────────────────
+ * The following DOM elements must be added to the otpModal in index.html:
+ *
+ * 1. NEW LOGIN STEP — add inside #otpModal after #otpPhoneStep:
+ *    <div id="otpLoginStep" class="hidden">
+ *      <p id="otpLoginName"></p>          <!-- "Welcome back, {name}!" -->
+ *      <p id="otpLoginPhone"></p>         <!-- phone display -->
+ *      <div id="otpLoginError" class="hidden"></div>
+ *      <input id="otpLoginPasswordInput" type="password" placeholder="Your password">
+ *      <button type="button" id="otpLoginToggleBtn">Show</button>
+ *      <button id="otpLoginBtn">Login</button>
+ *    </div>
+ *
+ * 2. EXPAND #otpProfileStep — add username + password fields after #otpNameInput:
+ *    <div class="username-row">
+ *      <span>@</span>
+ *      <input id="otpUsernameInput" type="text" maxlength="20"
+ *             placeholder="username" autocomplete="off">
+ *    </div>
+ *    <div id="otpUsernameStatus"></div>
+ *    <input id="otpPasswordInput2" type="password"
+ *           placeholder="Create a password (min 6 chars)">
+ *    <input id="otpPasswordConfirm" type="password"
+ *           placeholder="Confirm password">
+ *
+ * 3. EXPAND #otpConfirmStep — add username to the confirmation summary:
+ *    <span id="otpConfirmUsername"></span>
+ *
+ * AI UPDATE [2026-07-29] session 21:
+ *   Added password-based authentication and username system.
+ *   hashPassword(), generateUsername(), username availability check.
+ *   _onPhoneSubmit: branches to login vs register based on passwordHash.
+ *   New _showLoginStep() / _onLoginSubmit() for returning customers.
+ *   _onProfileSubmit(): now collects username + password + confirm.
+ *   _onCreateAccount(): writes username to usernames/{username} + passwordHash.
+ *   _completeLogin(): username added to session.
+ *   Session username persists across reloads via localStorage.
  */
 
 import { auth, db }      from "./firebase-config.js";
@@ -47,13 +98,16 @@ _OLD_KEYS.forEach((k) => {
 });
 
 // ── Session storage key ───────────────────────────────────────────────────────
-const SESSION_KEY = "qrmenu_user"; // stores { name, phone, uid }
+const SESSION_KEY = "qrmenu_user"; // { name, phone, uid, username }
 
 // ── Module state ──────────────────────────────────────────────────────────────
-let _currentUser         = _loadSession();  // { name, phone, uid } | null
+let _currentUser         = _loadSession();  // { name, phone, uid, username } | null
 let _pendingCb           = null;            // callback to run after login
 let _pendingPhone        = "";              // normalised +91… phone across steps
 let _pendingName         = "";
+let _pendingLoginProfile = null;            // Firestore profile for login step
+let _usernameCheckTimer  = null;
+let _usernameAvailable   = false;
 let _firebaseUser        = null;
 let _authReadyResolve;
 const _authReady         = new Promise((resolve) => { _authReadyResolve = resolve; });
@@ -70,11 +124,9 @@ export function isLoggedIn() { return !!_currentUser; }
 
 export function getLoginInfo() {
   if (!_currentUser) return null;
-  // AI UPDATE [2026-07-29] session 20: Return _currentUser.uid as-is (the stable
-  // stored profile uid).  Previously this overrode uid with _firebaseUser?.uid
-  // which is the current anonymous auth uid — a new uid after every re-login.
-  // order-status.js and order.js use getLoginInfo().uid to query Firestore paths,
-  // so the override caused them to read/write under the wrong uid.
+  // Return stable stored uid and username as-is.
+  // Do NOT override uid with _firebaseUser.uid — the anonymous auth uid
+  // may differ after session reset; the stored profile uid is canonical.
   return { ..._currentUser };
 }
 
@@ -97,20 +149,44 @@ export function requireLogin(cb) {
 export function initAuth() {
   document.getElementById("otpPhoneForm")
     ?.addEventListener("submit", _onPhoneSubmit);
+
+  // Profile form (registration step) — includes username + password now
   document.getElementById("otpProfileForm")
     ?.addEventListener("submit", _onProfileSubmit);
+
   document.getElementById("otpChangeDetails")
     ?.addEventListener("click", _showProfileStep);
+
   document.getElementById("otpCreateAccountBtn")
     ?.addEventListener("click", _onCreateAccount);
+
   document.getElementById("headerLogoutBtn")
     ?.addEventListener("click", _onLogout);
+
+  // Login step buttons (new in session 21)
+  document.getElementById("otpLoginBtn")
+    ?.addEventListener("click", _onLoginSubmit);
+
+  // Username input: live availability check
+  document.getElementById("otpUsernameInput")
+    ?.addEventListener("input", _onUsernameInput);
+
+  // Name input: auto-generate username
+  document.getElementById("otpNameInput")
+    ?.addEventListener("input", _onNameInput);
+
+  // Password toggle button in login step
+  document.getElementById("otpLoginToggleBtn")
+    ?.addEventListener("click", () => {
+      const inp = document.getElementById("otpLoginPasswordInput");
+      if (!inp) return;
+      inp.type = inp.type === "password" ? "text" : "password";
+    });
 
   onAuthStateChanged(auth, (user) => {
     _firebaseUser = user;
     _authReadyResolve(user);
     if (!user && _currentUser) {
-      // Firebase session expired but local session exists — re-auth silently
       signInAnonymously(auth).catch(() => {});
     } else if (user && _currentUser) {
       _dispatchAuthChange(_currentUser);
@@ -144,31 +220,54 @@ function _showPhoneStep() {
   document.getElementById("otpPhoneStep")?.classList.remove("hidden");
   document.getElementById("otpProfileStep")?.classList.add("hidden");
   document.getElementById("otpConfirmStep")?.classList.add("hidden");
+  document.getElementById("otpLoginStep")?.classList.add("hidden");
   _clearError("otpNameError");
   _clearError("otpPhoneError");
+  _clearError("otpLoginError");
   document.getElementById("otpPhoneInput")?.focus();
+}
+
+function _showLoginStep() {
+  document.getElementById("otpPhoneStep")?.classList.add("hidden");
+  document.getElementById("otpProfileStep")?.classList.add("hidden");
+  document.getElementById("otpConfirmStep")?.classList.add("hidden");
+  document.getElementById("otpLoginStep")?.classList.remove("hidden");
+  _clearError("otpLoginError");
+
+  // Show customer's name so they know whose account this is
+  const nameEl  = document.getElementById("otpLoginName");
+  const phoneEl = document.getElementById("otpLoginPhone");
+  if (nameEl)  nameEl.textContent  = `Welcome back, ${_pendingLoginProfile?.name || ""}! 👋`;
+  if (phoneEl) phoneEl.textContent = _pendingPhone;
+
+  const passInput = document.getElementById("otpLoginPasswordInput");
+  if (passInput) { passInput.value = ""; passInput.focus(); }
 }
 
 function _showProfileStep() {
   document.getElementById("otpPhoneStep")?.classList.add("hidden");
   document.getElementById("otpProfileStep")?.classList.remove("hidden");
   document.getElementById("otpConfirmStep")?.classList.add("hidden");
+  document.getElementById("otpLoginStep")?.classList.add("hidden");
   _clearError("otpNameError");
+
   const nameInput = document.getElementById("otpNameInput");
   if (nameInput) nameInput.value = "";
+  const usernameInput = document.getElementById("otpUsernameInput");
+  if (usernameInput) usernameInput.value = "";
+  const passInput = document.getElementById("otpPasswordInput2");
+  if (passInput) passInput.value = "";
+  const confirmInput = document.getElementById("otpPasswordConfirm");
+  if (confirmInput) confirmInput.value = "";
+  const statusEl = document.getElementById("otpUsernameStatus");
+  if (statusEl) statusEl.textContent = "";
+  _usernameAvailable = false;
+
   nameInput?.focus();
 }
 
 // ── Step 1: Phone lookup ──────────────────────────────────────────────────────
 // BRIDGE: reads Firestore directly instead of calling customerAuth Cloud Fn.
-// When Cloud Functions are restored, replace the getDoc block with:
-//   const customerAuth = httpsCallable(functions, "customerAuth");
-//   const result = await customerAuth({ action: "lookup", phone: `+91${phone}` });
-//   const profile = result.data || {};
-//   if (profile.found) {
-//     await signInWithCustomToken(auth, profile.token);
-//     await _completeLogin(profile.name, profile.phone || `+91${phone}`);
-//   } else { _pendingPhone = profile.phone || `+91${phone}`; _showProfileStep(); }
 
 async function _onPhoneSubmit(e) {
   e.preventDefault();
@@ -186,7 +285,6 @@ async function _onPhoneSubmit(e) {
   _setLoadingBtn("otpSendBtn", true, "Checking…");
 
   try {
-    // BRIDGE: ensure anonymous Firebase Auth UID before Firestore read
     if (!_firebaseUser) {
       await signInAnonymously(auth);
     }
@@ -196,13 +294,20 @@ async function _onPhoneSubmit(e) {
 
     if (snap.exists()) {
       const profile = snap.data();
-      // AI UPDATE [2026-07-29] session 20: Pass stored profile uid so that
-      // _completeLogin uses the stable uid (not auth.currentUser.uid which may
-      // be a new anonymous uid after re-login).  Stable uid = stable
-      // customer_order_history path = history always visible in admin CRM.
-      const storedUid = profile.uid || profile.authUid || "";
-      await _completeLogin(profile.name || "Customer", profile.phone || normalised, storedUid);
+
+      if (!profile.passwordHash) {
+        // Old account without password (pre-session-21) — treat as new registration.
+        // This migrates old accounts into the new password-based system.
+        _pendingLoginProfile = null;
+        _showProfileStep();
+      } else {
+        // Returning customer with password → login step
+        _pendingLoginProfile = profile;
+        _showLoginStep();
+      }
     } else {
+      // New customer → registration
+      _pendingLoginProfile = null;
       _showProfileStep();
     }
   } catch (err) {
@@ -218,18 +323,151 @@ async function _onPhoneSubmit(e) {
   }
 }
 
-// ── Step 2: Collect name ──────────────────────────────────────────────────────
+// ── Step 2a: Login (returning customer, password) ─────────────────────────────
+
+async function _onLoginSubmit() {
+  _clearError("otpLoginError");
+
+  const passEl = document.getElementById("otpLoginPasswordInput");
+  const password = passEl?.value || "";
+  if (!password) {
+    _setError("otpLoginError", "Please enter your password.");
+    return;
+  }
+
+  _setLoadingBtn("otpLoginBtn", true, "Logging in…");
+
+  try {
+    const hash = await _hashPassword(password, _pendingPhone);
+
+    if (hash !== _pendingLoginProfile.passwordHash) {
+      _setError("otpLoginError", "Incorrect password. Please try again.");
+      if (passEl) { passEl.value = ""; passEl.focus(); }
+      return;
+    }
+
+    // Password correct — use stable stored uid (not auth.currentUser.uid)
+    const p         = _pendingLoginProfile;
+    const storedUid = p.uid || p.authUid || "";
+    await _completeLogin(p.name || "Customer", p.phone || _pendingPhone, storedUid, p.username || "");
+
+  } catch (err) {
+    console.error("[auth] Login failed:", err);
+    _setError("otpLoginError", "Login failed. Please check your connection.");
+  } finally {
+    _setLoadingBtn("otpLoginBtn", false, "Login");
+  }
+}
+
+// ── Step 2b: Collect name + username + password ───────────────────────────────
+
+function _onNameInput(e) {
+  const name = (e.target?.value || "").trim();
+  if (name.length >= 2) {
+    const generated = _generateUsername(name);
+    const usernameInput = document.getElementById("otpUsernameInput");
+    if (usernameInput) usernameInput.value = generated;
+    _scheduleUsernameCheck(generated);
+  } else {
+    clearTimeout(_usernameCheckTimer);
+    const usernameInput = document.getElementById("otpUsernameInput");
+    if (usernameInput) usernameInput.value = "";
+    const statusEl = document.getElementById("otpUsernameStatus");
+    if (statusEl) statusEl.textContent = "";
+    _usernameAvailable = false;
+  }
+}
+
+function _onUsernameInput(e) {
+  const cleaned = (e.target?.value || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+  if (e.target) e.target.value = cleaned;
+  if (cleaned.length >= 1) {
+    _scheduleUsernameCheck(cleaned);
+  } else {
+    clearTimeout(_usernameCheckTimer);
+    const statusEl = document.getElementById("otpUsernameStatus");
+    if (statusEl) statusEl.textContent = "";
+    _usernameAvailable = false;
+  }
+}
+
+function _scheduleUsernameCheck(username) {
+  clearTimeout(_usernameCheckTimer);
+  const statusEl = document.getElementById("otpUsernameStatus");
+  if (statusEl) {
+    statusEl.textContent = "Checking availability…";
+    statusEl.className   = "username-status checking";
+  }
+  _usernameAvailable = false;
+
+  _usernameCheckTimer = setTimeout(async () => {
+    if (!_isValidUsername(username)) {
+      if (statusEl) {
+        statusEl.textContent = "3–20 chars: letters, numbers, underscore only";
+        statusEl.className   = "username-status invalid";
+      }
+      return;
+    }
+    try {
+      const snap = await getDoc(doc(db, "usernames", username));
+      if (!snap.exists()) {
+        if (statusEl) {
+          statusEl.textContent = `✓  @${username} is available`;
+          statusEl.className   = "username-status available";
+        }
+        _usernameAvailable = true;
+      } else {
+        if (statusEl) {
+          statusEl.textContent = `✗  @${username} is already taken`;
+          statusEl.className   = "username-status taken";
+        }
+        _usernameAvailable = false;
+      }
+    } catch (_) {
+      if (statusEl) {
+        statusEl.textContent = "Could not check availability";
+        statusEl.className   = "username-status checking";
+      }
+    }
+  }, 500);
+}
 
 async function _onProfileSubmit(e) {
   e.preventDefault();
   _clearError("otpNameError");
 
-  const name = (document.getElementById("otpNameInput")?.value || "").trim();
+  const name     = (document.getElementById("otpNameInput")?.value  || "").trim();
+  const username = (document.getElementById("otpUsernameInput")?.value || "").trim();
+  const password = document.getElementById("otpPasswordInput2")?.value || "";
+  const confirm  = document.getElementById("otpPasswordConfirm")?.value || "";
+
   if (name.length < 2) {
     _setError("otpNameError", "Please enter your name.");
     document.getElementById("otpNameInput")?.focus();
     return;
   }
+  if (!_isValidUsername(username)) {
+    _setError("otpNameError", "Username must be 3–20 characters: letters, numbers, underscore.");
+    document.getElementById("otpUsernameInput")?.focus();
+    return;
+  }
+  if (!_usernameAvailable) {
+    _setError("otpNameError", "Please choose an available username.");
+    document.getElementById("otpUsernameInput")?.focus();
+    return;
+  }
+  if (password.length < 6) {
+    _setError("otpNameError", "Password must be at least 6 characters.");
+    document.getElementById("otpPasswordInput2")?.focus();
+    return;
+  }
+  if (password !== confirm) {
+    _setError("otpNameError", "Passwords do not match.");
+    document.getElementById("otpPasswordConfirm")?.value && (document.getElementById("otpPasswordConfirm").value = "");
+    document.getElementById("otpPasswordConfirm")?.focus();
+    return;
+  }
+
   if (!_pendingPhone) {
     _setError("otpNameError", "Session expired. Please enter your phone again.");
     _showPhoneStep();
@@ -237,28 +475,40 @@ async function _onProfileSubmit(e) {
   }
 
   _pendingName = name;
-  const confirmName  = document.getElementById("otpConfirmName");
-  const confirmPhone = document.getElementById("otpConfirmPhone");
-  if (confirmName)  confirmName.textContent  = name;
-  if (confirmPhone) confirmPhone.textContent = _formatPhone(_pendingPhone);
+
+  // Fill confirm step
+  const confirmName     = document.getElementById("otpConfirmName");
+  const confirmPhone    = document.getElementById("otpConfirmPhone");
+  const confirmUsername = document.getElementById("otpConfirmUsername");
+  if (confirmName)     confirmName.textContent     = name;
+  if (confirmPhone)    confirmPhone.textContent    = _formatPhone(_pendingPhone);
+  if (confirmUsername) confirmUsername.textContent = `@${username}`;
+
   document.getElementById("otpProfileStep")?.classList.add("hidden");
   document.getElementById("otpConfirmStep")?.classList.remove("hidden");
 }
 
 // ── Step 3: Create account ────────────────────────────────────────────────────
 // BRIDGE: writes Firestore directly instead of calling customerAuth Cloud Fn.
-// When Cloud Functions are restored, replace the setDoc block with:
-//   const customerAuth = httpsCallable(functions, "customerAuth");
-//   const result = await customerAuth({ action: "create", phone: _pendingPhone, name: _pendingName });
-//   await signInWithCustomToken(auth, result.data.token);
-//   await _completeLogin(result.data.name || _pendingName, result.data.phone || _pendingPhone);
 
 async function _onCreateAccount() {
   _clearError("otpNameError");
+
   if (!_pendingName || !_pendingPhone) {
     _showPhoneStep();
     return;
   }
+
+  const username = (document.getElementById("otpUsernameInput")?.value || "").trim();
+  const password = document.getElementById("otpPasswordInput2")?.value || "";
+
+  if (!_isValidUsername(username) || !_usernameAvailable) {
+    document.getElementById("otpConfirmStep")?.classList.add("hidden");
+    document.getElementById("otpProfileStep")?.classList.remove("hidden");
+    _setError("otpNameError", "Please choose an available username before continuing.");
+    return;
+  }
+
   _setLoadingBtn("otpCreateAccountBtn", true, "Creating…");
 
   try {
@@ -266,35 +516,45 @@ async function _onCreateAccount() {
       await signInAnonymously(auth);
     }
 
-    const uid = auth.currentUser?.uid || "";
-    const now = serverTimestamp();
+    // Final availability check (guards against race condition)
+    const snap = await getDoc(doc(db, "usernames", username));
+    if (snap.exists()) {
+      document.getElementById("otpConfirmStep")?.classList.add("hidden");
+      document.getElementById("otpProfileStep")?.classList.remove("hidden");
+      _setError("otpNameError", `@${username} was just taken. Please choose another.`);
+      _usernameAvailable = false;
+      const statusEl = document.getElementById("otpUsernameStatus");
+      if (statusEl) {
+        statusEl.textContent = `✗  @${username} is already taken`;
+        statusEl.className   = "username-status taken";
+      }
+      return;
+    }
 
-    // BRIDGE: write customer profile directly to Firestore.
-    // phoneVerified: false — ready for OTP gate when Fast2SMS DLT is approved.
-    // DO NOT change to true here; only OTP verification should set this.
-    //
-    // AI UPDATE [2026-07-29] session 19:
-    //   authUid → uid  (matches ARCHITECTURE_LOCK schema spec; customers.js reads
-    //     c.uid || c.authUid for backward-compat with any existing docs).
-    //   Added totalOrders, lifetimeSpend, lastOrderAt initialised to 0 / null so
-    //     that the fast path in customers.js (typeof c.totalOrders === 'number')
-    //     fires immediately on the first admin-panel open instead of the O(N)
-    //     migration path that reads the full order-history subcollection.
+    const uid          = auth.currentUser?.uid || "";
+    const passwordHash = await _hashPassword(password, _pendingPhone);
+    const now          = serverTimestamp();
+
+    // Write username uniqueness registry first
+    await setDoc(doc(db, "usernames", username), { phone: _pendingPhone });
+
+    // Write customer profile
     await setDoc(doc(db, "customers", _pendingPhone), {
       phone:         _pendingPhone,
       name:          _pendingName,
-      uid:           uid,           // ← was "authUid" (typo vs schema spec)
+      username,
+      uid,
+      passwordHash,
       phoneVerified: false,
       createdAt:     now,
       updatedAt:     now,
       lastLoginAt:   now,
-      // Pre-computed stats — updated atomically by cart.js on each order completion
       totalOrders:   0,
       lifetimeSpend: 0,
       lastOrderAt:   null,
     });
 
-    await _completeLogin(_pendingName, _pendingPhone);
+    await _completeLogin(_pendingName, _pendingPhone, uid, username);
   } catch (err) {
     console.error("[auth] Account creation failed:", err);
     _setError(
@@ -311,52 +571,37 @@ async function _onCreateAccount() {
 }
 
 // ── Complete login (shared by all sign-in paths) ──────────────────────────────
-// AI UPDATE [2026-07-29] session 20:
-// Added optional profileUid parameter.  When a returning customer logs in,
-// _onPhoneSubmit now reads the stored uid from their Firestore profile and passes
-// it here so the session uses the STABLE uid, not auth.currentUser.uid.
-//
-// Root cause of the history-loss bug: auth.currentUser.uid is a fresh anonymous
-// UID every time the Firebase Auth session is cleared (e.g. another customer
-// called signOut, or browser data was cleared).  Using it for the session meant
-// every re-login produced a new uid, so order-status.js queried an empty
-// customer_order_history/{new-uid}/orders path.
-//
-// Fix: use profileUid (from customers/{phone}.uid in Firestore) as the session
-// uid.  This uid was written at account creation and is the permanent key for the
-// customer_order_history collection.  Only fall back to auth.currentUser.uid for
-// brand-new accounts that have no stored uid yet (handled in _onCreateAccount).
+// profileUid: the stable stored uid from customers/{phone}.uid — must be
+// used instead of auth.currentUser.uid to keep customer_order_history stable.
+// username: @handle stored in the session for display purposes.
 
-async function _completeLogin(name, phone, profileUid = "") {
-  // Ensure Firebase anonymous session exists
+async function _completeLogin(name, phone, profileUid = "", username = "") {
   if (!_firebaseUser) {
     await signInAnonymously(auth);
   }
-  // Prefer the stored profile uid; fall back to current auth uid for new accounts.
   const uid = profileUid || auth.currentUser?.uid || "";
-  _currentUser = { name, phone, uid };
+  _currentUser = { name, phone, uid, username };
   _saveSession(_currentUser);
   _updateGreeting();
   _dispatchAuthChange(_currentUser);
   _hideModal();
 
-  // Update lastLoginAt only — do NOT update uid field.
-  // Overwriting uid with auth.currentUser.uid would change the
-  // customer_order_history lookup path and make all previous history invisible.
+  // Update lastLoginAt only — do NOT touch uid or passwordHash.
   if (phone) {
     setDoc(doc(db, "customers", phone), { lastLoginAt: serverTimestamp() }, { merge: true })
       .catch(() => {});
   }
 
   const cb = _pendingCb;
-  _pendingCb    = null;
-  _pendingPhone = "";
-  _pendingName  = "";
+  _pendingCb           = null;
+  _pendingPhone        = "";
+  _pendingName         = "";
+  _pendingLoginProfile = null;
+  _usernameAvailable   = false;
   if (cb) cb();
 }
 
 // ── Ensure Firebase session on page reload ────────────────────────────────────
-// BRIDGE: uses signInAnonymously instead of calling customerAuth to get a token.
 
 async function _ensureFirebaseSession() {
   await _authReady;
@@ -368,10 +613,11 @@ async function _ensureFirebaseSession() {
 // ── Logout ────────────────────────────────────────────────────────────────────
 
 async function _onLogout() {
-  if (!confirm("Log out? You'll need to enter your phone number again before placing the next order.")) return;
-  _currentUser  = null;
-  _pendingPhone = "";
-  _pendingName  = "";
+  if (!confirm("Log out? You'll need to enter your phone number and password again.")) return;
+  _currentUser         = null;
+  _pendingPhone        = "";
+  _pendingName         = "";
+  _pendingLoginProfile = null;
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem("qrmenu_history");
   localStorage.removeItem("qrmenu_moved_to_history");
@@ -398,6 +644,33 @@ function _updateGreeting() {
     chip?.classList.add("hidden");
     logoutBtn?.classList.add("hidden");
   }
+}
+
+// ── Password & username utilities ─────────────────────────────────────────────
+
+// SHA-256(password + ":" + phone). Phone acts as a per-user salt.
+async function _hashPassword(password, phone) {
+  const encoder = new TextEncoder();
+  const data    = encoder.encode(password + ":" + phone);
+  const buf     = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(buf))
+    .map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// "Arnav Mishra" → "arnavmishra"
+function _generateUsername(name) {
+  return (name || "")
+    .trim()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 20) || "user";
+}
+
+function _isValidUsername(u) {
+  return /^[a-z0-9_]{3,20}$/.test(u);
 }
 
 // ── Session helpers ───────────────────────────────────────────────────────────

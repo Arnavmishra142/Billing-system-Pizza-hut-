@@ -146,8 +146,7 @@
         }
 
         /* ═══════════════════════════════════════════════════
-           AUTH MODALS — Phone login / Register flow
-           Three screens: phone → name → confirm
+           AUTH MODALS — Phone / Login / Register flow
            All slide up as a bottom sheet, full-screen on mobile.
            ═══════════════════════════════════════════════════ */
 
@@ -156,7 +155,6 @@
             background: rgba(0,0,0,0.7);
             backdrop-filter: blur(4px);
             display: flex; align-items: flex-end;
-            /* Hidden by default; JS adds .auth-open to show */
             opacity: 0; pointer-events: none;
             transition: opacity 0.25s ease;
         }
@@ -227,7 +225,7 @@
             width: 100%; background: #1a1d2e;
             border: 1.5px solid #374151; border-radius: 14px;
             color: #f1f5f9; font-size: 1rem; font-weight: 600;
-            padding: 14px 16px; outline: none; margin-bottom: 16px;
+            padding: 14px 16px; outline: none; margin-bottom: 14px;
             transition: border-color 0.2s;
         }
         .auth-input:focus { border-color: #f97316; }
@@ -270,51 +268,16 @@
             margin-top: 8px; line-height: 1.5;
         }
 
-        /* ── CONFIRM SCREEN ── */
-        .confirm-detail-card {
-            background: #0d1017; border: 1px solid #1f2937;
-            border-radius: 14px; padding: 16px 18px;
-            margin-bottom: 16px;
-        }
-        .confirm-row {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 8px 0;
-        }
-        .confirm-row + .confirm-row { border-top: 1px solid #1f2937; }
-        .confirm-row .label { font-size: 0.8rem; color: #6b7280; font-weight: 500; }
-        .confirm-row .value { font-size: 0.95rem; font-weight: 700; color: #f1f5f9; }
-
-        /* ── RED WARNING BOX ── */
-        .warning-box {
-            background: rgba(239,68,68,0.08);
+        /* ── ERROR message ── */
+        .auth-error {
+            background: rgba(239,68,68,0.1);
             border: 1px solid rgba(239,68,68,0.3);
-            border-radius: 12px; padding: 14px 16px;
-            margin-bottom: 20px;
+            border-radius: 10px; padding: 10px 14px;
             font-size: 0.83rem; color: #fca5a5;
-            line-height: 1.6;
+            margin-bottom: 14px; text-align: center;
+            display: none;
         }
-        .warning-box strong {
-            display: block; margin-bottom: 4px;
-            font-size: 0.85rem; color: #ef4444;
-        }
-
-        /* ── CONFIRM BUTTON ROW ── */
-        .confirm-btn-row {
-            display: flex; gap: 10px;
-        }
-        .confirm-btn-row .auth-btn-secondary { margin-bottom: 0; flex: 1; }
-        .confirm-btn-row .auth-btn-primary   { margin-bottom: 0; flex: 2; }
-
-        /* ── LOADING STATE inside auth sheet ── */
-        .auth-spinner {
-            width: 22px; height: 22px;
-            border: 2.5px solid rgba(255,255,255,0.3);
-            border-top-color: white;
-            border-radius: 50%;
-            animation: spin 0.7s linear infinite;
-            display: inline-block; vertical-align: middle;
-            margin-right: 8px;
-        }
+        .auth-error.show { display: block; }
 
         /* ── LOGGED-IN BADGE in header ── */
         .cust-header .session-badge {
@@ -328,16 +291,215 @@
         }
         .cust-header .session-badge:hover { border-color: #10b981; }
 
-        /* ── ERROR message ── */
-        .auth-error {
-            background: rgba(239,68,68,0.1);
-            border: 1px solid rgba(239,68,68,0.3);
-            border-radius: 10px; padding: 10px 14px;
-            font-size: 0.83rem; color: #fca5a5;
-            margin-bottom: 14px; text-align: center;
-            display: none;
+        /* ── LOADING STATE inside auth sheet ── */
+        .auth-spinner {
+            width: 22px; height: 22px;
+            border: 2.5px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            display: inline-block; vertical-align: middle;
+            margin-right: 8px;
         }
-        .auth-error.show { display: block; }
+
+        /* ── PASSWORD FIELD (with show/hide toggle) ── */
+        .password-field {
+            position: relative;
+            margin-bottom: 14px;
+        }
+        .password-field .auth-input {
+            padding-right: 50px;
+            margin-bottom: 0;
+        }
+        .password-toggle {
+            position: absolute; right: 14px; top: 50%;
+            transform: translateY(-50%);
+            background: none; border: none; cursor: pointer;
+            color: #6b7280; font-size: 1rem; padding: 4px;
+            line-height: 1;
+        }
+        .password-toggle:hover { color: #f97316; }
+
+        /* ── USERNAME FIELD ── */
+        .username-row {
+            display: flex; align-items: center;
+            background: #1a1d2e; border: 1.5px solid #374151;
+            border-radius: 14px; overflow: hidden;
+            margin-bottom: 6px;
+            transition: border-color 0.2s;
+        }
+        .username-row:focus-within { border-color: #f97316; }
+        .username-at-prefix {
+            padding: 0 10px 0 16px;
+            font-size: 1.1rem; font-weight: 800; color: #f97316;
+            border-right: 1px solid #374151;
+            height: 52px; display: flex; align-items: center;
+            flex-shrink: 0;
+        }
+        .username-row input {
+            flex: 1; background: transparent; border: none; outline: none;
+            color: #f1f5f9; font-size: 1rem; font-weight: 600;
+            padding: 0 14px; height: 52px;
+            letter-spacing: 0.3px;
+        }
+        .username-row input::placeholder { color: #4b5563; font-weight: 400; }
+        .username-status {
+            font-size: 0.8rem; font-weight: 600;
+            margin-bottom: 14px; padding-left: 4px;
+            min-height: 20px; transition: color 0.2s;
+        }
+        .username-status.available { color: #10b981; }
+        .username-status.taken     { color: #ef4444; }
+        .username-status.checking  { color: #6b7280; }
+        .username-status.invalid   { color: #f59e0b; }
+
+        /* ── LOGIN SCREEN: welcome header ── */
+        .login-welcome-name {
+            font-size: 1.3rem; font-weight: 800; color: #f1f5f9;
+            text-align: center; margin-bottom: 4px;
+        }
+        .login-phone-display {
+            font-size: 0.85rem; color: #6b7280;
+            text-align: center; margin-bottom: 22px;
+        }
+
+        /* ── PROFILE OVERLAY ── */
+        .profile-overlay {
+            position: fixed; inset: 0; z-index: 600;
+            background: #0b0c10;
+            overflow-y: auto;
+            transform: translateX(100%);
+            transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+        }
+        .profile-overlay.open {
+            transform: translateX(0);
+        }
+        .profile-header {
+            display: flex; align-items: center;
+            padding: 14px 16px 14px 12px;
+            border-bottom: 1px solid #1f2937;
+            background: #111318;
+            position: sticky; top: 0; z-index: 10;
+        }
+        .profile-close-btn {
+            background: none; border: none; cursor: pointer;
+            color: #9ca3af; font-size: 1.4rem; padding: 6px 10px;
+            margin-right: 8px; line-height: 1; border-radius: 8px;
+        }
+        .profile-close-btn:hover { color: #f97316; }
+        .profile-header h2 {
+            font-size: 1.05rem; font-weight: 700; color: #f1f5f9;
+        }
+        .profile-body { padding: 20px 18px 40px; }
+
+        /* avatar + name row */
+        .profile-avatar-row {
+            display: flex; align-items: center; gap: 14px;
+            background: #13161f; border: 1px solid #1f2937;
+            border-radius: 16px; padding: 16px 16px;
+            margin-bottom: 14px;
+        }
+        .profile-avatar {
+            width: 56px; height: 56px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem; font-weight: 800; color: white;
+            flex-shrink: 0; text-transform: uppercase;
+        }
+        .profile-name { font-size: 1.1rem; font-weight: 800; color: #f1f5f9; }
+        .profile-username-display {
+            font-size: 0.88rem; color: #f97316;
+            font-weight: 600; margin-top: 2px;
+        }
+        .profile-phone-display {
+            font-size: 0.78rem; color: #6b7280;
+            margin-top: 2px; letter-spacing: 0.3px;
+        }
+
+        /* info card */
+        .profile-info-card {
+            background: #13161f; border: 1px solid #1f2937;
+            border-radius: 14px; padding: 2px 0;
+            margin-bottom: 14px;
+        }
+        .profile-info-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 16px;
+        }
+        .profile-info-row + .profile-info-row { border-top: 1px solid #1f2937; }
+        .profile-info-label { font-size: 0.8rem; color: #6b7280; }
+        .profile-info-value { font-size: 0.88rem; font-weight: 600; color: #e2e8f0; }
+
+        /* stats grid */
+        .stats-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 10px; margin-bottom: 16px;
+        }
+        .stat-card {
+            background: #13161f; border: 1px solid #1f2937;
+            border-radius: 14px; padding: 16px 12px; text-align: center;
+        }
+        .stat-value {
+            font-size: 1.35rem; font-weight: 800; color: #f97316;
+        }
+        .stat-label {
+            font-size: 0.72rem; color: #6b7280;
+            margin-top: 4px; font-weight: 500; text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* section title */
+        .profile-section-title {
+            font-size: 0.72rem; font-weight: 700; color: #4b5563;
+            text-transform: uppercase; letter-spacing: 1px;
+            margin: 18px 0 10px;
+        }
+
+        /* order history items */
+        .history-item {
+            background: #13161f; border: 1px solid #1f2937;
+            border-radius: 12px; padding: 13px 15px;
+            margin-bottom: 10px;
+        }
+        .history-item-top {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            margin-bottom: 5px;
+        }
+        .history-order-id { font-size: 0.78rem; color: #38bdf8; font-weight: 700; }
+        .history-date { font-size: 0.72rem; color: #6b7280; }
+        .history-table-label {
+            font-size: 0.78rem; color: #9ca3af; margin-bottom: 5px;
+        }
+        .history-items-text {
+            font-size: 0.8rem; color: #6b7280; line-height: 1.5;
+            margin-bottom: 6px;
+        }
+        .history-total-row {
+            font-size: 0.9rem; font-weight: 700; color: #10b981;
+            text-align: right;
+        }
+        .history-empty {
+            text-align: center; padding: 30px 20px;
+            color: #4b5563; font-size: 0.9rem;
+        }
+        .profile-loading {
+            text-align: center; padding: 32px;
+            color: #4b5563;
+        }
+        .profile-loading .loading-spinner {
+            width: 28px; height: 28px; margin: 0 auto 10px;
+        }
+
+        /* logout button */
+        .profile-logout-btn {
+            width: 100%; padding: 14px;
+            background: rgba(239,68,68,0.08);
+            color: #ef4444;
+            border: 1px solid rgba(239,68,68,0.25);
+            border-radius: 14px; font-size: 0.95rem; font-weight: 600;
+            cursor: pointer; margin-top: 22px;
+            transition: background 0.15s;
+        }
+        .profile-logout-btn:hover { background: rgba(239,68,68,0.16); }
     </style>
 </head>
 <body>
@@ -346,8 +508,8 @@
     <h1>🍕 New Pizza Hut & Live Cake</h1>
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
         <div class="table-badge">You are at: <span id="tableLabel">Loading…</span></div>
-        <span id="sessionBadge" class="session-badge" style="display:none" title="Tap to switch account">
-            <span id="sessionName"></span> ✓
+        <span id="sessionBadge" class="session-badge" style="display:none" title="View your profile">
+            👤 <span id="sessionName"></span>
         </span>
     </div>
 </div>
@@ -403,68 +565,145 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════
-     AUTH SCREEN 2 — Name (new customers only)
+     AUTH SCREEN 2 — Login (returning customers with password)
      ═══════════════════════════════════════════════════════════ -->
-<div class="auth-overlay" id="nameOverlay">
+<div class="auth-overlay" id="loginOverlay">
     <div class="auth-sheet">
-        <button class="auth-back-link" id="nameBackBtn">← Change number</button>
-        <div class="auth-logo">👋</div>
-        <h2>New here?</h2>
-        <p class="auth-sub">We couldn't find this number. What's your name?</p>
+        <button class="auth-back-link" id="loginBackBtn">← Change number</button>
+        <div class="auth-logo">👤</div>
+        <div class="login-welcome-name" id="loginWelcomeName">Welcome back!</div>
+        <div class="login-phone-display" id="loginPhoneDisplay"></div>
 
-        <div class="auth-error" id="nameError"></div>
+        <div class="auth-error" id="loginError"></div>
 
-        <input type="text" class="auth-input" id="nameInput"
-               maxlength="40" placeholder="Your name"
-               autocomplete="name">
+        <div class="password-field">
+            <input type="password" class="auth-input" id="loginPasswordInput"
+                   placeholder="Enter your password"
+                   autocomplete="current-password">
+            <button type="button" class="password-toggle" id="loginPasswordToggle">👁</button>
+        </div>
 
-        <button class="auth-btn-primary" id="nameContinueBtn">Continue →</button>
+        <button class="auth-btn-primary" id="loginBtn">Login →</button>
     </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════
-     AUTH SCREEN 3 — Confirm details (new customers only)
+     AUTH SCREEN 3 — Registration (new customers)
+     Name + Username + Password
      ═══════════════════════════════════════════════════════════ -->
-<div class="auth-overlay" id="confirmOverlay">
+<div class="auth-overlay" id="registerOverlay">
     <div class="auth-sheet">
-        <div class="auth-logo">✔️</div>
-        <h2>Confirm Your Details</h2>
-        <p class="auth-sub">Please review before creating your account</p>
+        <button class="auth-back-link" id="registerBackBtn">← Change number</button>
+        <div class="auth-logo">👋</div>
+        <h2>Create Account</h2>
+        <p class="auth-sub" id="registerSub">Set up your account to place orders</p>
 
-        <div class="confirm-detail-card">
-            <div class="confirm-row">
-                <span class="label">Name</span>
-                <span class="value" id="confirmNameVal">—</span>
+        <div class="auth-error" id="registerError"></div>
+
+        <input type="text" class="auth-input" id="registerNameInput"
+               maxlength="40" placeholder="Full Name"
+               autocomplete="name">
+
+        <div class="username-row">
+            <span class="username-at-prefix">@</span>
+            <input type="text" id="registerUsernameInput"
+                   maxlength="20" placeholder="username"
+                   autocomplete="off" autocorrect="off"
+                   autocapitalize="off" spellcheck="false">
+        </div>
+        <div class="username-status" id="usernameStatus"></div>
+
+        <div class="password-field">
+            <input type="password" class="auth-input" id="registerPasswordInput"
+                   placeholder="Create a password (min 6 characters)"
+                   autocomplete="new-password">
+            <button type="button" class="password-toggle" id="registerPasswordToggle">👁</button>
+        </div>
+
+        <div class="password-field">
+            <input type="password" class="auth-input" id="registerConfirmInput"
+                   placeholder="Confirm password"
+                   autocomplete="new-password">
+            <button type="button" class="password-toggle" id="registerConfirmToggle">👁</button>
+        </div>
+
+        <button class="auth-btn-primary" id="registerBtn">Create Account</button>
+        <p class="auth-hint">Ordering as: <span id="registerPhoneHint" style="color:#38bdf8;font-weight:700;"></span></p>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     PROFILE OVERLAY — Full-screen profile page
+     ═══════════════════════════════════════════════════════════ -->
+<div class="profile-overlay" id="profileOverlay">
+    <div class="profile-header">
+        <button class="profile-close-btn" id="profileCloseBtn">←</button>
+        <h2>My Profile</h2>
+    </div>
+    <div class="profile-body">
+        <!-- Avatar + Name -->
+        <div class="profile-avatar-row">
+            <div class="profile-avatar" id="profileAvatar">A</div>
+            <div>
+                <div class="profile-name" id="profileName">—</div>
+                <div class="profile-username-display" id="profileUsernameDisplay"></div>
+                <div class="profile-phone-display" id="profilePhoneDisplay"></div>
             </div>
-            <div class="confirm-row">
-                <span class="label">Mobile</span>
-                <span class="value" id="confirmPhoneVal">—</span>
+        </div>
+
+        <!-- Dates -->
+        <div class="profile-info-card">
+            <div class="profile-info-row">
+                <span class="profile-info-label">Member since</span>
+                <span class="profile-info-value" id="profileJoined">—</span>
+            </div>
+            <div class="profile-info-row">
+                <span class="profile-info-label">Last order</span>
+                <span class="profile-info-value" id="profileLastOrder">—</span>
             </div>
         </div>
 
-        <div class="warning-box">
-            <strong>⚠️ Please read before continuing</strong>
-            Please check your name and phone number carefully before creating your account.
-            These details will be linked to your future orders.
-            If you enter the wrong phone number, you may not be able to access your account
-            once phone verification becomes mandatory.
+        <!-- Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-value" id="profileTotalOrders">0</div>
+                <div class="stat-label">Total Orders</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="profileLifetimeSpend">₹0</div>
+                <div class="stat-label">Lifetime Spend</div>
+            </div>
         </div>
 
-        <div class="auth-error" id="confirmError"></div>
-
-        <div class="confirm-btn-row">
-            <button class="auth-btn-secondary" id="confirmBackBtn">Change Details</button>
-            <button class="auth-btn-primary" id="confirmCreateBtn">Create Account</button>
+        <!-- Order History -->
+        <div class="profile-section-title">Order History</div>
+        <div id="profileHistoryList">
+            <div class="profile-loading">
+                <div class="loading-spinner"></div>
+                Loading history…
+            </div>
         </div>
+
+        <button class="profile-logout-btn" id="profileLogoutBtn">Sign Out</button>
     </div>
 </div>
 
 <script type="module">
+// AI UPDATE [2026-07-29] session 21: Major customer auth system upgrade.
+//   - Added password-based login (SHA-256 hashed, phone-salted).
+//   - Added username system (@handle, unique, auto-generated from name, editable).
+//   - New auth flow: Phone → Login (existing) / Registration (new) with password.
+//   - Added profile overlay: avatar, stats, order history.
+//   - Session key bumped v1 → v2 (forces re-login; adds username to session).
+//   - New Firestore collection: usernames/{username} → { phone } for uniqueness.
+//   - Old accounts (no passwordHash) are treated as new and re-registered.
+//   - Architecture is OTP-ready: passwordHash field can coexist with future OTP.
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
 import {
     getFirestore, collection, doc,
-    getDoc, setDoc, addDoc,
-    onSnapshot, query, orderBy,
+    getDoc, setDoc, addDoc, getDocs,
+    onSnapshot, query, orderBy, limit,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { getAuth, signInAnonymously }
@@ -483,8 +722,6 @@ const db   = getFirestore(app);
 const auth = getAuth(app);
 
 // ── Anonymous Auth (needed for Firestore write rules) ───────────────────────
-// Every customer gets an anonymous Firebase UID. This is free, always-on, and
-// gives each device a server-issued identity without any Cloud Function.
 let _authReady = false;
 await signInAnonymously(auth)
     .then(() => { _authReady = true; })
@@ -505,23 +742,22 @@ let pizzaSizes    = { regular: true, medium: true, large: true };
 let _lastByCat    = {};
 
 // ════════════════════════════════════════════════════════════════════════════
-// CUSTOMER SESSION
+// CUSTOMER SESSION (v2)
 //
 // Stored in sessionStorage so a page reload within the same tab keeps the
-// customer logged in without re-entering their number. Intentionally NOT
-// localStorage — a new visit (fresh tab / cleared storage) should always
-// prompt again so the right person is identified at a shared device.
+// customer logged in. Intentionally NOT localStorage — a new visit always
+// prompts again so the right person is identified at a shared device.
 //
-// Structure: { phone, name, uid, phoneVerified }
+// Session v2 structure: { phone, name, uid, username, phoneVerified }
 //
-// phoneVerified is always false in this bridge build.
-// When Fast2SMS DLT is approved and OTP is enabled:
-//   1. Set REQUIRE_PHONE_VERIFICATION = true (server-side in Cloud Function)
-//   2. Customers with phoneVerified: false are prompted to verify on next order
-//   3. After OTP success: write phoneVerified: true to Firestore
-//   4. No DB migration needed — field is already present on every document
+// v1 sessions (no username field) will not be found since we bumped the key,
+// forcing all customers to re-login with the new password-based flow.
+//
+// OTP readiness: phoneVerified is always false until Fast2SMS DLT is approved.
+// When OTP is enabled: after OTP success, write phoneVerified: true to Firestore
+// and update this session field. No DB migration needed.
 // ════════════════════════════════════════════════════════════════════════════
-const SESSION_KEY = 'cust_session_v1';
+const SESSION_KEY = 'cust_session_v2';
 
 let customerSession = null;
 
@@ -546,30 +782,19 @@ function clearSession() {
 }
 
 function refreshSessionBadge() {
-    const badge = document.getElementById('sessionBadge');
+    const badge  = document.getElementById('sessionBadge');
     const nameEl = document.getElementById('sessionName');
-    if (customerSession) {
-        nameEl.textContent = customerSession.name;
-        badge.style.display = 'inline-flex';
+    if (customerSession?.name) {
+        nameEl.textContent   = customerSession.name;
+        badge.style.display  = 'inline-flex';
     } else {
-        badge.style.display = 'none';
+        badge.style.display  = 'none';
     }
 }
 
-// Tapping the session badge lets the customer switch accounts
+// Session badge → open profile overlay
 document.getElementById('sessionBadge').addEventListener('click', () => {
-    if (confirm(`Switch account?\n\nCurrently: ${customerSession?.name} (${customerSession?.phone})`)) {
-        clearSession();
-        // Clear cart too so we don't place an order on behalf of the wrong person
-        cart = {};
-        Object.keys(menuMap).forEach(id => {
-            const el = document.getElementById('qty-' + id);
-            if (el) el.textContent = '0';
-            const card = document.getElementById('card-' + id);
-            if (card) card.classList.remove('in-cart');
-        });
-        updateCartBar();
-    }
+    openProfileOverlay();
 });
 
 loadSession();
@@ -614,9 +839,51 @@ function setLoading(btn, loading, defaultText) {
         : defaultText;
 }
 
-// ── State shared between the three auth screens ─────────────────────────────
-let _pendingPhone = ''; // normalised phone after screen 1
-let _pendingName  = ''; // name after screen 2
+// ── Auth state shared between screens ───────────────────────────────────────
+let _pendingPhone        = '';   // normalised +91… after screen 1
+let _pendingLoginProfile = null; // existing Firestore profile (for login screen)
+let _usernameCheckTimer  = null;
+let _usernameAvailable   = false;
+
+// ════════════════════════════════════════════════════════════════════════════
+// PASSWORD & USERNAME UTILITIES
+// ════════════════════════════════════════════════════════════════════════════
+
+// SHA-256 hash using Web Crypto API.
+// Phone number is used as a salt to prevent cross-account rainbow table attacks.
+async function hashPassword(password, phone) {
+    const encoder = new TextEncoder();
+    const data    = encoder.encode(password + ':' + phone);
+    const buf     = await crypto.subtle.digest('SHA-256', data);
+    return Array.from(new Uint8Array(buf))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Derive a clean username from a display name.
+// "Arnav Mishra" → "arnavmishra"
+// "José García"  → "josegarcia" (NFKD normalisation strips accents)
+function generateUsername(name) {
+    const base = (name || '')
+        .trim()
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '') // strip combining diacritics
+        .toLowerCase()
+        .replace(/\s+/g, '')             // remove spaces
+        .replace(/[^a-z0-9_]/g, '')      // keep only safe chars
+        .slice(0, 20);
+    return base || 'user';
+}
+
+// Username must be 3-20 chars, only [a-z0-9_]
+function isValidUsername(u) {
+    return /^[a-z0-9_]{3,20}$/.test(u);
+}
+
+// Check whether a username is available in Firestore usernames/{username}
+async function checkUsernameAvailable(username) {
+    const snap = await getDoc(doc(db, 'usernames', username));
+    return !snap.exists();
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // SCREEN 1 — Phone input
@@ -629,7 +896,6 @@ function showPhoneScreen() {
 }
 
 document.getElementById('phoneInput').addEventListener('input', (e) => {
-    // Allow digits only
     e.target.value = e.target.value.replace(/\D/g, '');
 });
 
@@ -639,7 +905,7 @@ document.getElementById('phoneInput').addEventListener('keydown', (e) => {
 
 document.getElementById('phoneContinueBtn').addEventListener('click', async () => {
     clearError('phoneError');
-    const raw = document.getElementById('phoneInput').value;
+    const raw   = document.getElementById('phoneInput').value;
     const phone = normalizePhone(raw);
     if (!phone) {
         showError('phoneError', 'Please enter a valid 10-digit mobile number.');
@@ -650,7 +916,6 @@ document.getElementById('phoneContinueBtn').addEventListener('click', async () =
     setLoading(btn, true, 'Continue →');
 
     try {
-        // Ensure we have a Firebase Auth UID before reading Firestore
         if (!_authReady) {
             await signInAnonymously(auth);
             _authReady = true;
@@ -659,32 +924,27 @@ document.getElementById('phoneContinueBtn').addEventListener('click', async () =
         const snap = await getDoc(doc(db, 'customers', phone));
 
         if (snap.exists()) {
-            // ── Returning customer — log in directly ──────────────────────
             const profile = snap.data();
-            // AI UPDATE [2026-07-29] session 20: Use STORED profile uid (not
-            // auth.currentUser.uid) so that customer_order_history path stays
-            // consistent across logout/re-login cycles.  auth.currentUser.uid
-            // can change each time the anonymous Firebase Auth session is reset
-            // (e.g. after another customer used the device), causing history to
-            // appear empty in the admin CRM.  The stored uid is the canonical
-            // key for customer_order_history/{uid}/orders.
-            const stableUid = profile.uid || profile.authUid || auth.currentUser?.uid || '';
-            saveSession({
-                phone:         profile.phone || phone,
-                name:          profile.name  || 'Customer',
-                uid:           stableUid,
-                phoneVerified: profile.phoneVerified || false,
-            });
-            closeOverlay('phoneOverlay');
-            // Proceed to place order with items already in cart
-            await placeOrder();
+            _pendingPhone = phone;
 
+            if (!profile.passwordHash) {
+                // Old-style account (no password) — migrate by re-registering.
+                // This safely handles any pre-upgrade accounts.
+                closeOverlay('phoneOverlay');
+                showRegisterScreen('setup');
+            } else {
+                // Returning customer with password → login screen
+                _pendingLoginProfile = profile;
+                closeOverlay('phoneOverlay');
+                showLoginScreen();
+            }
         } else {
-            // ── New customer — collect name next ──────────────────────────
+            // New customer → registration screen
             _pendingPhone = phone;
             closeOverlay('phoneOverlay');
-            showNameScreen();
+            showRegisterScreen('new');
         }
+
     } catch (err) {
         console.error('[Phone lookup]', err);
         showError('phoneError', 'Could not check your number. Please check your connection.');
@@ -694,60 +954,237 @@ document.getElementById('phoneContinueBtn').addEventListener('click', async () =
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// SCREEN 2 — Name input (new customers only)
+// SCREEN 2a — Login (returning customer, password)
 // ════════════════════════════════════════════════════════════════════════════
-function showNameScreen() {
-    clearError('nameError');
-    document.getElementById('nameInput').value = '';
-    openOverlay('nameOverlay');
-    setTimeout(() => document.getElementById('nameInput').focus(), 350);
+function showLoginScreen() {
+    clearError('loginError');
+    document.getElementById('loginPasswordInput').value = '';
+    document.getElementById('loginWelcomeName').textContent =
+        `Welcome back, ${_pendingLoginProfile?.name || ''}! 👋`;
+    document.getElementById('loginPhoneDisplay').textContent = _pendingPhone;
+    openOverlay('loginOverlay');
+    setTimeout(() => document.getElementById('loginPasswordInput').focus(), 350);
 }
 
-document.getElementById('nameBackBtn').addEventListener('click', () => {
-    closeOverlay('nameOverlay');
+document.getElementById('loginBackBtn').addEventListener('click', () => {
+    closeOverlay('loginOverlay');
+    _pendingLoginProfile = null;
     showPhoneScreen();
 });
 
-document.getElementById('nameInput').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') document.getElementById('nameContinueBtn').click();
+document.getElementById('loginPasswordInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('loginBtn').click();
 });
 
-document.getElementById('nameContinueBtn').addEventListener('click', () => {
-    clearError('nameError');
-    const name = document.getElementById('nameInput').value.trim();
-    if (!name) {
-        showError('nameError', 'Please enter your name.');
+// Show/hide password toggle
+document.getElementById('loginPasswordToggle').addEventListener('click', () => {
+    const inp = document.getElementById('loginPasswordInput');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+});
+
+document.getElementById('loginBtn').addEventListener('click', async () => {
+    clearError('loginError');
+    const password = document.getElementById('loginPasswordInput').value;
+    if (!password) {
+        showError('loginError', 'Please enter your password.');
         return;
     }
+
+    const btn = document.getElementById('loginBtn');
+    setLoading(btn, true, 'Login →');
+
+    try {
+        const hash = await hashPassword(password, _pendingPhone);
+
+        if (hash !== _pendingLoginProfile.passwordHash) {
+            showError('loginError', 'Incorrect password. Please try again.');
+            document.getElementById('loginPasswordInput').value = '';
+            document.getElementById('loginPasswordInput').focus();
+            return;
+        }
+
+        // Password correct — build stable session
+        const p       = _pendingLoginProfile;
+        const stableUid = p.uid || p.authUid || auth.currentUser?.uid || '';
+
+        saveSession({
+            phone:         p.phone || _pendingPhone,
+            name:          p.name  || 'Customer',
+            uid:           stableUid,
+            username:      p.username || '',
+            phoneVerified: p.phoneVerified || false,
+        });
+
+        closeOverlay('loginOverlay');
+        _pendingLoginProfile = null;
+
+        // Update lastLoginAt — fire-and-forget
+        setDoc(
+            doc(db, 'customers', _pendingPhone),
+            { lastLoginAt: serverTimestamp() },
+            { merge: true }
+        ).catch(() => {});
+
+        await placeOrder();
+
+    } catch (err) {
+        console.error('[Login]', err);
+        showError('loginError', 'Login failed. Please check your connection.');
+    } finally {
+        setLoading(btn, false, 'Login →');
+    }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCREEN 2b — Registration (new customer / password migration)
+// Collects: Full Name, @username (auto-generated, editable), Password ×2
+// ════════════════════════════════════════════════════════════════════════════
+function showRegisterScreen(mode = 'new') {
+    clearError('registerError');
+    document.getElementById('registerNameInput').value     = '';
+    document.getElementById('registerUsernameInput').value = '';
+    document.getElementById('registerPasswordInput').value = '';
+    document.getElementById('registerConfirmInput').value  = '';
+    document.getElementById('usernameStatus').textContent  = '';
+    document.getElementById('usernameStatus').className    = 'username-status';
+    document.getElementById('registerPhoneHint').textContent = _pendingPhone;
+    _usernameAvailable = false;
+
+    if (mode === 'setup') {
+        document.getElementById('registerSub').textContent =
+            'Please set up your account with a password';
+    } else {
+        document.getElementById('registerSub').textContent =
+            'Set up your account to place orders';
+    }
+
+    openOverlay('registerOverlay');
+    setTimeout(() => document.getElementById('registerNameInput').focus(), 350);
+}
+
+document.getElementById('registerBackBtn').addEventListener('click', () => {
+    clearTimeout(_usernameCheckTimer);
+    closeOverlay('registerOverlay');
+    showPhoneScreen();
+});
+
+// Auto-generate username as user types their name
+document.getElementById('registerNameInput').addEventListener('input', (e) => {
+    const name = e.target.value;
+    if (name.trim().length >= 2) {
+        const generated = generateUsername(name);
+        document.getElementById('registerUsernameInput').value = generated;
+        scheduleUsernameCheck(generated);
+    } else {
+        clearTimeout(_usernameCheckTimer);
+        document.getElementById('registerUsernameInput').value = '';
+        document.getElementById('usernameStatus').textContent  = '';
+        document.getElementById('usernameStatus').className    = 'username-status';
+        _usernameAvailable = false;
+    }
+});
+
+// Manual username editing — enforce lowercase alphanumeric + underscore only
+document.getElementById('registerUsernameInput').addEventListener('input', (e) => {
+    const cleaned = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '');
+    e.target.value = cleaned;
+    if (cleaned.length >= 1) {
+        scheduleUsernameCheck(cleaned);
+    } else {
+        clearTimeout(_usernameCheckTimer);
+        document.getElementById('usernameStatus').textContent = '';
+        document.getElementById('usernameStatus').className   = 'username-status';
+        _usernameAvailable = false;
+    }
+});
+
+function scheduleUsernameCheck(username) {
+    clearTimeout(_usernameCheckTimer);
+    const statusEl = document.getElementById('usernameStatus');
+    statusEl.textContent = 'Checking availability…';
+    statusEl.className   = 'username-status checking';
+    _usernameAvailable   = false;
+
+    _usernameCheckTimer = setTimeout(async () => {
+        if (!isValidUsername(username)) {
+            statusEl.textContent = 'Username must be 3–20 characters: letters, numbers, underscore';
+            statusEl.className   = 'username-status invalid';
+            _usernameAvailable   = false;
+            return;
+        }
+        try {
+            const available = await checkUsernameAvailable(username);
+            if (available) {
+                statusEl.textContent = `✓  @${username} is available`;
+                statusEl.className   = 'username-status available';
+                _usernameAvailable   = true;
+            } else {
+                statusEl.textContent = `✗  @${username} is already taken`;
+                statusEl.className   = 'username-status taken';
+                _usernameAvailable   = false;
+                // Suggest a variant: append 3 random digits
+                const suggestion = username.slice(0, 17) + Math.floor(100 + Math.random() * 900);
+                setTimeout(() => {
+                    if (document.getElementById('registerUsernameInput').value === username) {
+                        const statusNow = document.getElementById('usernameStatus');
+                        statusNow.textContent = `✗  @${username} is taken  ·  try @${suggestion}`;
+                    }
+                }, 0);
+            }
+        } catch (err) {
+            statusEl.textContent = 'Could not check availability';
+            statusEl.className   = 'username-status checking';
+        }
+    }, 500);
+}
+
+// Password show/hide toggles
+['registerPasswordToggle', 'registerConfirmToggle'].forEach(toggleId => {
+    const inputId = toggleId === 'registerPasswordToggle'
+        ? 'registerPasswordInput' : 'registerConfirmInput';
+    document.getElementById(toggleId).addEventListener('click', () => {
+        const inp = document.getElementById(inputId);
+        inp.type = inp.type === 'password' ? 'text' : 'password';
+    });
+});
+
+document.getElementById('registerBtn').addEventListener('click', async () => {
+    clearError('registerError');
+
+    const name     = document.getElementById('registerNameInput').value.trim();
+    const username = document.getElementById('registerUsernameInput').value.trim();
+    const password = document.getElementById('registerPasswordInput').value;
+    const confirm  = document.getElementById('registerConfirmInput').value;
+
+    // Validate
     if (name.length < 2) {
-        showError('nameError', 'Name must be at least 2 characters.');
+        showError('registerError', 'Please enter your full name (at least 2 characters).');
+        document.getElementById('registerNameInput').focus();
         return;
     }
-    _pendingName = name;
-    closeOverlay('nameOverlay');
-    showConfirmScreen();
-});
+    if (!isValidUsername(username)) {
+        showError('registerError', 'Username must be 3–20 characters: letters, numbers, underscore.');
+        document.getElementById('registerUsernameInput').focus();
+        return;
+    }
+    if (!_usernameAvailable) {
+        showError('registerError', 'Please choose an available username.');
+        document.getElementById('registerUsernameInput').focus();
+        return;
+    }
+    if (password.length < 6) {
+        showError('registerError', 'Password must be at least 6 characters.');
+        document.getElementById('registerPasswordInput').focus();
+        return;
+    }
+    if (password !== confirm) {
+        showError('registerError', 'Passwords do not match. Please try again.');
+        document.getElementById('registerConfirmInput').value = '';
+        document.getElementById('registerConfirmInput').focus();
+        return;
+    }
 
-// ════════════════════════════════════════════════════════════════════════════
-// SCREEN 3 — Confirm details (new customers only)
-// ════════════════════════════════════════════════════════════════════════════
-function showConfirmScreen() {
-    clearError('confirmError');
-    document.getElementById('confirmNameVal').textContent  = _pendingName;
-    document.getElementById('confirmPhoneVal').textContent = _pendingPhone;
-    openOverlay('confirmOverlay');
-}
-
-// "Change Details" → go back to phone screen to start over
-document.getElementById('confirmBackBtn').addEventListener('click', () => {
-    closeOverlay('confirmOverlay');
-    showPhoneScreen();
-});
-
-// "Create Account" → write to Firestore then place the order
-document.getElementById('confirmCreateBtn').addEventListener('click', async () => {
-    clearError('confirmError');
-    const btn = document.getElementById('confirmCreateBtn');
+    const btn = document.getElementById('registerBtn');
     setLoading(btn, true, 'Create Account');
 
     try {
@@ -756,28 +1193,38 @@ document.getElementById('confirmCreateBtn').addEventListener('click', async () =
             _authReady = true;
         }
 
-        const uid = auth.currentUser?.uid || '';
-        const now = serverTimestamp();
+        // Final availability check (guards against race conditions)
+        const stillAvailable = await checkUsernameAvailable(username);
+        if (!stillAvailable) {
+            showError('registerError', `@${username} was just taken. Please choose a different username.`);
+            _usernameAvailable = false;
+            const statusEl = document.getElementById('usernameStatus');
+            statusEl.textContent = `✗  @${username} is already taken`;
+            statusEl.className   = 'username-status taken';
+            document.getElementById('registerUsernameInput').focus();
+            return;
+        }
 
-        // ── Write customer profile ────────────────────────────────────────
-        // phoneVerified: false — ready for OTP gate when DLT is approved.
-        // DO NOT change this to true here; verification must go through OTP.
-        // AI UPDATE [2026-07-29] session 17:
-        // Field renamed authUid → uid to match ARCHITECTURE_LOCK schema spec and
-        // customers.js reader.  Old documents that still have authUid are handled
-        // by the backward-compat fallback in customers.js (c.uid || c.authUid).
-        // AI UPDATE [2026-07-29] session 18:
-        // totalOrders, lifetimeSpend, lastOrderAt initialised at 0/null so the
-        // admin CRM can use fast-path profile reads instead of history scans.
+        const uid          = auth.currentUser?.uid || '';
+        const passwordHash = await hashPassword(password, _pendingPhone);
+        const now          = serverTimestamp();
+
+        // Register username for uniqueness (write this first; if it fails, the
+        // customer doc is never written either, so there's no orphan profile).
+        await setDoc(doc(db, 'usernames', username), { phone: _pendingPhone });
+
+        // Write customer profile
         await setDoc(doc(db, 'customers', _pendingPhone), {
             phone:         _pendingPhone,
-            name:          _pendingName,
-            uid:           uid,
-            phoneVerified: false,     // ← OTP bridge: always false until verified
+            name,
+            username,
+            uid,
+            passwordHash,
+            phoneVerified: false,     // OTP bridge: always false until verified
             createdAt:     now,
             updatedAt:     now,
             lastLoginAt:   now,
-            // ── Pre-computed stats (incremented by cart.js on order completion) ──
+            // Pre-computed stats — incremented atomically by cart.js on completion
             totalOrders:   0,
             lifetimeSpend: 0,
             lastOrderAt:   null,
@@ -785,24 +1232,172 @@ document.getElementById('confirmCreateBtn').addEventListener('click', async () =
 
         saveSession({
             phone:         _pendingPhone,
-            name:          _pendingName,
+            name,
             uid,
+            username,
             phoneVerified: false,
         });
 
-        closeOverlay('confirmOverlay');
+        closeOverlay('registerOverlay');
+        clearTimeout(_usernameCheckTimer);
         await placeOrder();
 
     } catch (err) {
-        console.error('[Create account]', err);
-        showError('confirmError',
+        console.error('[Register]', err);
+        showError('registerError',
             err.code === 'permission-denied'
                 ? 'Permission denied — please ask staff for help.'
-                : 'Account creation failed. Please check your connection.'
-        );
+                : 'Account creation failed. Please check your connection.');
     } finally {
         setLoading(btn, false, 'Create Account');
     }
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// PROFILE OVERLAY
+// Slides in from the right; loads stats + order history from Firestore.
+// ════════════════════════════════════════════════════════════════════════════
+
+function getAvatarColor(name) {
+    const palette = ['#f97316','#10b981','#3b82f6','#8b5cf6','#ec4899','#14b8a6','#f59e0b','#6366f1'];
+    const code    = (name || 'A').charCodeAt(0);
+    return palette[code % palette.length];
+}
+
+function formatDate(ts) {
+    if (!ts) return '—';
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+function formatDateShort(ts) {
+    if (!ts) return 'Never';
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+async function openProfileOverlay() {
+    if (!customerSession) return;
+
+    const overlay = document.getElementById('profileOverlay');
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    // Fill from session immediately (no flicker)
+    const s       = customerSession;
+    const initial = (s.name || '?').charAt(0).toUpperCase();
+    const color   = getAvatarColor(s.name);
+
+    const avatarEl = document.getElementById('profileAvatar');
+    avatarEl.textContent   = initial;
+    avatarEl.style.background = color;
+
+    document.getElementById('profileName').textContent = s.name;
+    document.getElementById('profileUsernameDisplay').textContent =
+        s.username ? `@${s.username}` : '';
+    document.getElementById('profilePhoneDisplay').textContent = s.phone || '';
+
+    // Reset dynamic fields
+    document.getElementById('profileTotalOrders').textContent  = '—';
+    document.getElementById('profileLifetimeSpend').textContent = '—';
+    document.getElementById('profileJoined').textContent       = '—';
+    document.getElementById('profileLastOrder').textContent    = '—';
+    document.getElementById('profileHistoryList').innerHTML    =
+        '<div class="profile-loading"><div class="loading-spinner"></div>Loading…</div>';
+
+    // Load fresh profile data from Firestore
+    try {
+        const profileSnap = await getDoc(doc(db, 'customers', s.phone));
+        if (profileSnap.exists()) {
+            const p = profileSnap.data();
+            document.getElementById('profileTotalOrders').textContent  = p.totalOrders  ?? 0;
+            document.getElementById('profileLifetimeSpend').textContent = `₹${p.lifetimeSpend ?? 0}`;
+            document.getElementById('profileJoined').textContent       = formatDate(p.createdAt);
+            document.getElementById('profileLastOrder').textContent    = formatDateShort(p.lastOrderAt);
+        }
+    } catch (err) {
+        console.warn('[Profile] stats load failed:', err);
+    }
+
+    // Load order history
+    await loadOrderHistory(s.uid);
+}
+
+async function loadOrderHistory(uid) {
+    const listEl = document.getElementById('profileHistoryList');
+    if (!uid) {
+        listEl.innerHTML = '<div class="history-empty">No order history yet</div>';
+        return;
+    }
+
+    try {
+        const q    = query(
+            collection(db, 'customer_order_history', uid, 'orders'),
+            orderBy('completedAt', 'desc'),
+            limit(20)
+        );
+        const snap = await getDocs(q);
+
+        if (snap.empty) {
+            listEl.innerHTML = '<div class="history-empty">No orders yet</div>';
+            return;
+        }
+
+        listEl.innerHTML = '';
+        snap.forEach(d => {
+            const order    = d.data();
+            const dateStr  = order.completedAt?.toDate
+                ? order.completedAt.toDate().toLocaleDateString('en-IN',
+                    { day: 'numeric', month: 'short', year: 'numeric' })
+                : '—';
+            const timeStr  = order.completedAt?.toDate
+                ? order.completedAt.toDate().toLocaleTimeString('en-IN',
+                    { hour: '2-digit', minute: '2-digit' })
+                : '';
+            const itemsStr = (order.items || [])
+                .map(i => `${esc(i.name)} ×${i.quantity}`)
+                .join(', ');
+            const orderId  = order.orderId || d.id;
+
+            const div = document.createElement('div');
+            div.className = 'history-item';
+            div.innerHTML = `
+                <div class="history-item-top">
+                    <span class="history-order-id">${esc(orderId)}</span>
+                    <span class="history-date">${dateStr}${timeStr ? ' · ' + timeStr : ''}</span>
+                </div>
+                <div class="history-table-label">📍 ${esc(order.tableId || '—')}</div>
+                <div class="history-items-text">${itemsStr}</div>
+                <div class="history-total-row">₹${order.total}</div>
+            `;
+            listEl.appendChild(div);
+        });
+
+    } catch (err) {
+        console.error('[Profile] history load failed:', err);
+        listEl.innerHTML = '<div class="history-empty">Could not load history</div>';
+    }
+}
+
+document.getElementById('profileCloseBtn').addEventListener('click', () => {
+    document.getElementById('profileOverlay').classList.remove('open');
+    document.body.style.overflow = '';
+});
+
+document.getElementById('profileLogoutBtn').addEventListener('click', () => {
+    if (!confirm('Sign out?\n\nYou\'ll need to enter your phone number and password again to place your next order.')) return;
+
+    clearSession();
+    cart = {};
+    Object.keys(menuMap).forEach(id => {
+        const el = document.getElementById('qty-' + id);
+        if (el) el.textContent = '0';
+        const card = document.getElementById('card-' + id);
+        if (card) card.classList.remove('in-cart');
+    });
+    updateCartBar();
+
+    document.getElementById('profileOverlay').classList.remove('open');
+    document.body.style.overflow = '';
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -839,23 +1434,12 @@ async function placeOrder() {
         }
 
         // ── BRIDGE: direct Firestore write (no Cloud Function) ────────────
-        // Requires Firestore rule: allow create on pending_table_orders
-        // if request.auth != null && request.resource.data.customer.uid == request.auth.uid
-        //
-        // TO RESTORE Cloud Function path:
-        //   const { getFunctions, httpsCallable } = await import(...)
-        //   const createOrder = httpsCallable(getFunctions(app,'asia-south1'), 'createCustomerOrder')
-        //   const result = await createOrder({ requestedTableId: tableName, items })
-        //   const assignedTable = result.data.tableId || tableName
         await addDoc(collection(db, 'pending_table_orders'), {
-            tableId:    tableName,
+            tableId: tableName,
             customer: {
-                // AI UPDATE [2026-07-29] session 20: prefer customerSession.uid
-                // (the stable stored profile uid) over auth.currentUser.uid.
-                // This ensures syncCustomerOrderCompletion() in cart.js writes
-                // history to the correct customer_order_history/{uid} path even
-                // after the anonymous auth session was reset between logins.
-                uid:   customerSession?.uid || auth.currentUser?.uid || '',
+                // Use stable profile uid so syncCustomerOrderCompletion() in
+                // cart.js writes history to the correct path every time.
+                uid:   customerSession?.uid   || auth.currentUser?.uid || '',
                 name:  customerSession?.name  || '',
                 phone: customerSession?.phone || '',
             },
@@ -865,17 +1449,7 @@ async function placeOrder() {
             createdAt:  serverTimestamp(),
         });
 
-        // Update lastLoginAt only — non-critical, fire-and-forget.
-        // AI UPDATE [2026-07-29] session 20: Removed uid from this update.
-        // Previously this wrote { lastLoginAt, uid: auth.currentUser.uid } which
-        // overwrote customers/{phone}.uid with the new anonymous auth uid every
-        // time an order was placed.  That broke the customer_order_history lookup
-        // because js/customers.js uses c.uid to build the Firestore path:
-        //   customer_order_history/{c.uid}/orders
-        // After the overwrite, that path pointed to an empty collection while all
-        // previous history remained under the original uid.  Fix: only update
-        // lastLoginAt.  The uid field was set correctly at registration and should
-        // never be changed by client code after that point.
+        // Update lastLoginAt only — do NOT update uid (set once at registration).
         if (customerSession?.phone) {
             setDoc(
                 doc(db, 'customers', customerSession.phone),

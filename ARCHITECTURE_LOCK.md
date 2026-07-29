@@ -99,6 +99,8 @@ The following systems are **production-stable**. Future AI agents **MUST NOT** m
 | **Firebase Integration** | `js/firebase-config.js` | 🔒 FROZEN |
 | **Firestore Collections** | All collection names (see Section 5) | 🔒 FROZEN |
 | **Customer Synchronization** | `customer.html`, `customers/` collection | 🔒 FROZEN |
+| **Customer Password Auth** | `customer.html` auth screens, `order-panel-updates/js/auth.js` | 🔒 FROZEN |
+| **Username Registry** | `usernames/{username}` collection | 🔒 FROZEN |
 
 **Rule:** If you are unsure whether a system is frozen, treat it as frozen and ask the user instead.
 
@@ -172,6 +174,8 @@ Before modifying any of the items below, a future AI agent **must verify** that 
 | Status values: `pending/accepted/kot/completed` | `js/cart.js`, `js/incoming-orders.js` | `js/order-status.js` |
 | `customer_order_history/{uid}/orders` shape | `js/cart.js` | `js/history.js`, `js/order-status.js` |
 | `customers/{phone}` document shape | `customer.html` | `js/auth.js` |
+| `usernames/{username}` document shape | `customer.html`, `order-panel-updates/js/auth.js` | `js/auth.js` |
+| Password hash format: SHA-256(password + ":" + phone) | `customer.html`, `order-panel-updates/js/auth.js` | `js/auth.js` |
 | `menu_items.inStock` field | `js/menu-management.js` | `js/menu.js` |
 | Anonymous Firebase Auth pattern | `js/incoming-orders.js`, `js/admin.js` | `js/auth.js` |
 | QR table ID format (`"Table N"`) | `js/tables.js`, `index.html` | `js/order.js` |
@@ -219,19 +223,32 @@ Schema changes require **explicit user approval**. Never rename collections, ren
 ```
 {
   name:          string      // Customer display name
-  phone:         string      // "+91XXXXXXXXXX" (also the document ID)
+  phone:         string      // "+91XXXXXXXXXX" (also the document ID) — permanent identity
+  username:      string      // @handle without @ (e.g. "arnavmishra") — unique, set at registration
+  passwordHash:  string      // SHA-256(password + ":" + phone) — set at registration
   phoneVerified: boolean     // Always false in bridge mode (OTP bypassed)
-  uid:           string      // Firebase anonymous UID (written by customer.html; kept current on every login)
+  uid:           string      // Firebase anonymous UID (set at registration, NEVER changed after)
   createdAt:     Timestamp   // Set on account creation
   updatedAt:     Timestamp   // Set on account creation (not currently updated after)
-  lastLoginAt:   Timestamp   // Updated on every order placement
+  lastLoginAt:   Timestamp   // Updated on every login / order placement
   // ── Pre-computed stats (session 18) — updated atomically by cart.js on order completion ──
   totalOrders:   number      // FieldValue.increment(1) on each Bill & Settle / Save & Exit
   lifetimeSpend: number      // FieldValue.increment(total) on each completion
   lastOrderAt:   Timestamp   // serverTimestamp() on each completion; null until first order
   // Note: field was previously stored as `authUid` (bug, fixed session 17). Read as uid || authUid for backward compat.
+  // Note: passwordHash is absent on pre-session-21 accounts. Treat absence as "needs registration".
 }
 ```
+
+#### `usernames/{username}` — Username uniqueness registry (added session 21)
+```
+{
+  phone: string              // "+91XXXXXXXXXX" — links back to customers document
+}
+```
+Document ID is the username (without @). Used to enforce global username uniqueness.
+Read by the registration form for real-time availability checks.
+Written once at account creation; username changes are a future feature.
 
 #### `menu_items/{itemId}` — Menu catalog
 ```
