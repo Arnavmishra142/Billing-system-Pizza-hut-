@@ -1,5 +1,5 @@
 import { db, functions } from './firebase-config.js';
-import { doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, collection, increment } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { doc, setDoc, updateDoc, serverTimestamp, getDocs, getDoc, query, where, collection, increment } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 
 // ===== AI UPDATE =====
@@ -239,6 +239,62 @@ function releaseTableLockInBackground(tableName, releaseReason) {
             });
     } catch (err) {
         console.warn('[LockRelease] Could not invoke Cloud Function (non-fatal):', err.message);
+    }
+}
+
+// ── Auto-cancel imported order when cart is emptied before saving ─────────────
+//
+// Called by Hold and Save & Exit when the cart is empty at exit time.
+// If the operator imported a customer order ("Open in POS") but removed every
+// item before billing, the order would be stuck as "accepted" in Firestore
+// forever — the customer would see "Order Confirmed" with no way to clear it.
+//
+// Reuses the existing "dismissed" status (same as the Dismiss button in
+// incoming-orders.js) so the customer panel immediately removes the order from
+// Active Orders, matching the behaviour of operator-dismissed orders.
+//
+// Guards:
+//   1. acceptedOrderIds_<table> must be non-empty (an order was imported).
+//   2. Firestore status must still be "pending" or "accepted" — if the order
+//      has already reached "kot", the kitchen has it; do not silently cancel.
+//
+// Fire-and-forget: navigation back to the table grid always proceeds
+// regardless of whether the Firestore writes succeed.
+// ─────────────────────────────────────────────────────────────────────────────
+// AI UPDATE [2026-07-29] session 23:
+//   Added — handles the missing edge case where all imported items are removed
+//   from the POS cart before Save/Bill.  Without this, status stayed "accepted"
+//   and the customer saw "Order Confirmed" forever.
+async function cancelImportedOrdersOnEmptyCart(tableName) {
+    const acceptedIds = JSON.parse(
+        localStorage.getItem(`acceptedOrderIds_${tableName}`) || '[]'
+    );
+    if (acceptedIds.length === 0) return; // No imported order — nothing to cancel
+
+    try {
+        await Promise.all(
+            acceptedIds.map(async id => {
+                const ref      = doc(db, 'pending_table_orders', id);
+                const snapshot = await getDoc(ref);
+                if (!snapshot.exists()) return;
+                const status = (snapshot.data().status || '').toLowerCase();
+                // Only cancel pre-KOT orders.  "kot" or "completed" means the
+                // kitchen / billing already owns the order — never touch those.
+                if (!['pending', 'accepted'].includes(status)) return;
+                return updateDoc(ref, { status: 'dismissed' })
+                    .catch(e => console.warn('[OrderCancel] Failed to dismiss order:', id, e));
+            })
+        );
+
+        // Clear the same localStorage convenience-cache keys that
+        // syncCustomerOrderCompletion clears on normal completion.
+        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
+            .forEach(key => localStorage.removeItem(`${key}_${tableName}`));
+
+        console.log(`[OrderCancel] Auto-cancelled empty imported order(s) for table "${tableName}"`);
+    } catch (err) {
+        // Non-fatal — the operator has already navigated back to the table grid.
+        console.warn('[OrderCancel] Auto-cancel failed (non-fatal):', err.message || err);
     }
 }
 
@@ -568,7 +624,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return tName; 
     };
 
-    if (holdBtn) holdBtn.addEventListener('click', () => backToTablesBtn.click());
+    if (holdBtn) holdBtn.addEventListener('click', () => {
+        // If the cart is empty and an order was imported via "Open in POS",
+        // auto-cancel it so the customer panel clears "Order Confirmed".
+        // Fire-and-forget — navigation proceeds immediately regardless.
+        if (currentCart.length === 0) {
+            cancelImportedOrdersOnEmptyCart(getCurrentTable());
+        }
+        backToTablesBtn.click();
+    });
 
     const triggerRawBTPrint = (text) => {
         const uri = "rawbt:" + encodeURIComponent(text);
@@ -806,6 +870,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // No-op for manual/walk-in orders (no activeCustomerUid in localStorage).
             if (cartSnapshot.length > 0) {
                 syncCustomerOrderCompletion(tableName, cartSnapshot, total, 'save_exit');
+            } else {
+                // Cart is empty — if an order was imported via "Open in POS" but
+                // the operator removed every item before saving, auto-cancel it.
+                // Reuses "dismissed" status so the customer panel clears
+                // "Order Confirmed" immediately (same as operator pressing Dismiss).
+                // AI UPDATE [2026-07-29] session 23: missing edge-case fix.
+                cancelImportedOrdersOnEmptyCart(tableName);
             }
 
             // ── Release customer table lock in background (non-blocking) ──────

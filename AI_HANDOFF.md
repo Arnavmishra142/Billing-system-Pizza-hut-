@@ -1,6 +1,69 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 22)
+> Last updated: 2026-07-29 (session 23)
+
+---
+
+## Bug Fixed (2026-07-29 — session 23)
+
+### Missing Edge Case: Imported Order Stuck as "Accepted" When Cart Emptied
+
+#### Root Cause
+
+When the operator clicks "Open in POS" on an incoming customer order:
+- Items are merged into the localStorage cart for that table.
+- The `pending_table_orders` document status is set to `"accepted"` in Firestore.
+- `acceptedOrderIds_<table>`, `activeCustomerUid_<table>`, etc. are stored in localStorage.
+
+The customer panel filters Active Orders on status `!== "dismissed"` and `!== "completed"`, so the customer sees "Order Confirmed" as long as the order is `"accepted"`.
+
+The **Bill & Settle** path is guarded with `if (currentCart.length === 0) return;` — it does nothing with an empty cart. The **Save & Exit** path calls `syncCustomerOrderCompletion` only `if (cartSnapshot.length > 0)`. The **Hold** button calls `backToTablesBtn.click()` unconditionally.
+
+**Result:** If the operator removed every item from the imported cart before pressing Save & Exit or Hold (back), no Firestore write was made. The order stayed `"accepted"` forever. The customer's Active Orders view never cleared, and "Order Confirmed" showed indefinitely.
+
+#### Files Changed
+
+| File | Change |
+|------|--------|
+| `js/cart.js` | Added `cancelImportedOrdersOnEmptyCart(tableName)`. Added `getDoc` to Firestore import. Modified `holdBtn` handler to call it when cart is empty. Modified `saveExitBtn` handler to call it in the empty-cart `else` branch. |
+| `sw.js` | Bumped `pos-static-v17` → `pos-static-v18` to bust cached `cart.js`. |
+
+#### What Was Done
+
+1. **`cancelImportedOrdersOnEmptyCart(tableName)`** added to `js/cart.js` (module-level, before `DOMContentLoaded`):
+   - Reads `acceptedOrderIds_<table>` from localStorage. If empty → no-op (no imported order for this table).
+   - For each accepted order ID, does a `getDoc` to check current Firestore status.
+   - **Only cancels** if status is still `"pending"` or `"accepted"`. Orders at `"kot"` or `"completed"` are never touched (kitchen already owns them).
+   - Sets status to `"dismissed"` — reusing the exact same status the Dismiss button writes. No new status value introduced.
+   - Clears the same localStorage keys (`activeOrderDocId`, `activeCustomerUid`, `activeSessionId`, `activeLockId`, `acceptedOrderIds`) that `syncCustomerOrderCompletion` clears on normal completion.
+   - Fire-and-forget: navigation proceeds immediately regardless of Firestore result.
+
+2. **`holdBtn` handler** modified:
+   - Was: `holdBtn.addEventListener('click', () => backToTablesBtn.click())`
+   - Now: checks `currentCart.length === 0`; if true, calls `cancelImportedOrdersOnEmptyCart(getCurrentTable())` fire-and-forget before navigating.
+
+3. **`saveExitBtn` handler** modified:
+   - Existing `if (cartSnapshot.length > 0)` branch is unchanged.
+   - Added `else` branch: calls `cancelImportedOrdersOnEmptyCart(tableName)` fire-and-forget.
+
+#### Why This Behaviour Is Now Correct
+
+- `"dismissed"` is already the status the operator uses to explicitly reject an order from the drawer. Reusing it means zero new shared-contract changes — the Customer Panel already filters on `dismissed` correctly.
+- The `getDoc` status guard ensures KOT'd orders (kitchen already notified) are **never** silently cancelled even if the operator later clears the cart.
+- No history is written (no `customer_order_history` entry). No stats are updated (`totalOrders`, `lifetimeSpend` unchanged). This exactly matches the Dismiss behaviour.
+- Active Orders on the customer panel updates in real time (Firestore `onSnapshot`) the moment `status: "dismissed"` is written — no customer page refresh needed.
+- Manual / walk-in orders are unaffected: `acceptedOrderIds_<table>` is never written for them, so `cancelImportedOrdersOnEmptyCart` is always a no-op for those.
+
+#### Verification Performed
+
+- Server started cleanly (`node server.js`) with `npm install` after changes.
+- Service worker cache bumped v17→v18 to ensure updated `cart.js` is served to browsers.
+- No new Firestore collections, document shapes, or shared status strings introduced.
+- Cross-repo contract unchanged — Customer Panel `order-status.js` already correctly hides `"dismissed"` orders.
+
+#### No Customer Panel Changes Required
+
+The Customer Panel already handles `"dismissed"` status by excluding it from Active Orders. No changes to `teamdovolve-hue/Order-` are needed.
 
 ---
 

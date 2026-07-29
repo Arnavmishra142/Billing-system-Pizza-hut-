@@ -26,8 +26,10 @@
 // AI UPDATE [2026-07-29] session 21: v15→v16 — bust cached customer.html after
 // major auth upgrade: password + username system, profile overlay.
 // AI UPDATE [2026-07-29] session 22: v16→v17 — bust cached incoming-orders.js after
+// AI UPDATE [2026-07-29] session 23: v17→v18 — bust cached cart.js after adding
+//   cancelImportedOrdersOnEmptyCart() (empty-cart auto-cancel edge case fix).
 // removing temporary [notify-debug] trace logs (production cleanup).
-const CACHE_NAME = 'pos-static-v17';
+const CACHE_NAME = 'pos-static-v18';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
