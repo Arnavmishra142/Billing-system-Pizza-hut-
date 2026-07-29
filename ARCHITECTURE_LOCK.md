@@ -221,7 +221,15 @@ Schema changes require **explicit user approval**. Never rename collections, ren
   name:          string      // Customer display name
   phone:         string      // "+91XXXXXXXXXX" (also the document ID)
   phoneVerified: boolean     // Always false in bridge mode (OTP bypassed)
-  uid:           string      // Firebase anonymous UID (optional, set by Customer Panel)
+  uid:           string      // Firebase anonymous UID (written by customer.html; kept current on every login)
+  createdAt:     Timestamp   // Set on account creation
+  updatedAt:     Timestamp   // Set on account creation (not currently updated after)
+  lastLoginAt:   Timestamp   // Updated on every order placement
+  // ── Pre-computed stats (session 18) — updated atomically by cart.js on order completion ──
+  totalOrders:   number      // FieldValue.increment(1) on each Bill & Settle / Save & Exit
+  lifetimeSpend: number      // FieldValue.increment(total) on each completion
+  lastOrderAt:   Timestamp   // serverTimestamp() on each completion; null until first order
+  // Note: field was previously stored as `authUid` (bug, fixed session 17). Read as uid || authUid for backward compat.
 }
 ```
 

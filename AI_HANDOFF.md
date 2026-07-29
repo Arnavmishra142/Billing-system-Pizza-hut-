@@ -1,6 +1,93 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 17)
+> Last updated: 2026-07-29 (session 18)
+
+---
+
+## Files Modified (2026-07-29 — session 18)
+
+### Customer Data Architecture Improvement
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/cart.js` | Billing Panel | Added `increment` to Firestore imports. `syncCustomerOrderCompletion` now accepts optional `billNumber` param (default `null`). History record gains `billNumber` and `orderStatus: 'completed'` fields. After writing the history doc, atomically updates `customers/{phone}` with `increment(totalOrders)`, `increment(lifetimeSpend)`, `lastOrderAt: serverTimestamp()`. Bill & Settle call site now passes `shortOrderId` as `billNumber`. |
+| `js/customers.js` | Billing Panel | `_fetchCustomers` rewritten: fast path reads pre-computed stats from profile (no history reads for the list); legacy customers without stats get a one-time migration (history fetched once, stats computed and saved to profile). Added `_loadCustomerHistory(c)` and `_buildOrdersHtml(orders)` helper functions. `_custOpenDetail` rewritten as async: opens overlay immediately with profile stats, lazy-loads order history in the background and updates `#custHistoryContainer` when ready. Added `updateDoc` to imports. |
+| `customer.html` | Billing Panel | New customer `setDoc` now initialises `totalOrders: 0`, `lifetimeSpend: 0`, `lastOrderAt: null` in the profile so the fast path is active from the very first order. |
+| `admin/sw.js` | Billing Panel | **v4→v5** — Bumped admin SW cache to force eviction of cached `customers.js`. |
+
+#### Root Cause
+
+The previous implementation (session 15–17) fetched the **complete order history for every customer** every time the admin panel's Customers tab was opened. This caused N Firestore subcollection reads per page open, scaling poorly with customer count. Additionally, stats (order count, lifetime spend, last order date) were recalculated from scratch every time instead of being stored persistently.
+
+#### Architecture Now
+
+**Profile stats (`customers/{phone}`)** — three new fields written atomically on every order completion:
+```
+totalOrders:   number     // incremented by FieldValue.increment(1)
+lifetimeSpend: number     // incremented by FieldValue.increment(total)
+lastOrderAt:   Timestamp  // set to serverTimestamp() on completion
+```
+
+**History record (`customer_order_history/{uid}/orders/{orderId}`)** — two new fields:
+```
+billNumber:  string | null   // short bill ID printed on receipt (Bill & Settle only)
+orderStatus: 'completed'     // always 'completed' (set at order completion)
+```
+
+**Admin CRM loading — two paths:**
+
+| Customer type | List load | Detail open |
+|---|---|---|
+| New customers (session 18+) | Reads `totalOrders`, `lifetimeSpend`, `lastOrderAt` from profile — **0 extra Firestore reads** | Fetches history subcollection once; cached for session |
+| Legacy customers (first load after session 18) | Fetches history once, computes stats, writes to profile — same reads as before | Same history fetch, already done |
+| Legacy customers (subsequent loads) | Fast path — reads from profile — **0 extra Firestore reads** | Fetches history subcollection; cached for session |
+
+#### Statistics update flow
+
+```
+Bill & Settle / Save & Exit pressed
+    │
+    ▼
+syncCustomerOrderCompletion() called (fire-and-forget)
+    │
+    ├── Marks pending_table_orders as 'completed' (existing, unchanged)
+    │
+    ├── Writes customer_order_history/{uid}/orders/ORDER_{ts} with:
+    │     orderId, billNumber, orderStatus, tableId, customerName,
+    │     customerPhone, items[], total, completedAt, completionReason, orderedAt
+    │
+    └── updateDoc(customers/{phone}, {
+              totalOrders:   increment(1),
+              lifetimeSpend: increment(total),
+              lastOrderAt:   serverTimestamp(),
+          })  ← atomic, non-blocking, non-fatal on failure
+```
+
+#### Future OTP compatibility
+
+No change needed. The `phoneVerified: false` field is already in all profiles (existing + new). When Fast2SMS DLT is approved:
+1. Restore `customerAuth` Cloud Function
+2. After successful OTP: `updateDoc(customers/{phone}, { phoneVerified: true })`
+3. **No schema migration. No customer recreation. No stats reset.**
+
+#### No Customer Panel changes required
+
+- `customer_order_history/{uid}/orders/` path is **unchanged** — Customer Panel reads it exactly as before
+- `customers/{phone}` document only **gains** new fields (additive) — no existing fields removed or renamed
+- No shared Firestore collection names, status values, or cross-repo contracts changed
+
+#### Firestore collections involved
+
+| Collection | Access | Notes |
+|-----------|--------|-------|
+| `customers/{phone}` | read (profile + stats), updateDoc (stats increment on completion), updateDoc (one-time migration) | New fields: `totalOrders`, `lifetimeSpend`, `lastOrderAt` |
+| `customer_order_history/{uid}/orders/{orderId}` | write (new: `billNumber`, `orderStatus` fields), read (detail view, lazy) | Path unchanged; two new optional fields in the record |
+
+#### Firestore rules
+
+No changes required. `customers` update is `if isOperator()` — both `cart.js` (operator anon session) and `customers.js` (admin panel anon session) satisfy this. ✓
+
+---
 
 ---
 

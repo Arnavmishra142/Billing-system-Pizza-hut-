@@ -758,6 +758,9 @@ document.getElementById('confirmCreateBtn').addEventListener('click', async () =
         // Field renamed authUid → uid to match ARCHITECTURE_LOCK schema spec and
         // customers.js reader.  Old documents that still have authUid are handled
         // by the backward-compat fallback in customers.js (c.uid || c.authUid).
+        // AI UPDATE [2026-07-29] session 18:
+        // totalOrders, lifetimeSpend, lastOrderAt initialised at 0/null so the
+        // admin CRM can use fast-path profile reads instead of history scans.
         await setDoc(doc(db, 'customers', _pendingPhone), {
             phone:         _pendingPhone,
             name:          _pendingName,
@@ -766,6 +769,10 @@ document.getElementById('confirmCreateBtn').addEventListener('click', async () =
             createdAt:     now,
             updatedAt:     now,
             lastLoginAt:   now,
+            // ── Pre-computed stats (incremented by cart.js on order completion) ──
+            totalOrders:   0,
+            lifetimeSpend: 0,
+            lastOrderAt:   null,
         });
 
         saveSession({

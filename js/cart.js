@@ -1,5 +1,5 @@
 import { db, functions } from './firebase-config.js';
-import { doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, collection } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { doc, setDoc, updateDoc, serverTimestamp, getDocs, query, where, collection, increment } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 
 // ===== AI UPDATE =====
@@ -82,7 +82,11 @@ import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebas
 //   Returns immediately without any Firestore write.  All existing billing
 //   logic is completely unaffected.
 // ─────────────────────────────────────────────────────────────────────────────
-async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, completionReason) {
+// AI UPDATE [2026-07-29] session 18:
+// Added optional billNumber parameter (passed from Bill & Settle shortOrderId).
+// After writing history, also updates customers/{phone} stats atomically using
+// increment() so the admin CRM can read pre-computed totals without re-scanning history.
+async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, completionReason, billNumber = null) {
     // ── Step 1: Find all still-active pending_table_orders for this table ──
     // Do this first so we can also recover the customerUid from Firestore
     // if localStorage doesn't have it (e.g. after a page refresh, or if the
@@ -164,6 +168,9 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
                 doc(db, 'customer_order_history', customerUid, 'orders', historyId),
                 {
                     orderId:          historyId,
+                    // AI UPDATE [2026-07-29] session 18: added billNumber + orderStatus
+                    billNumber:       billNumber || null,     // short ID printed on bill (Bill & Settle only)
+                    orderStatus:      'completed',
                     tableId:          tableName,
                     customerName,
                     customerPhone,
@@ -179,6 +186,19 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
                     orderedAt:        new Date().toISOString(),
                 }
             );
+
+            // ── Step 2b: Update pre-computed stats on the customer profile ───────
+            // Uses increment() for atomic, race-condition-free updates.
+            // The customers/{phone} profile is guaranteed to exist at this point
+            // because the customer must have registered before placing an order.
+            // Non-blocking — billing is already complete by this step.
+            if (customerPhone) {
+                updateDoc(doc(db, 'customers', customerPhone), {
+                    totalOrders:   increment(1),
+                    lifetimeSpend: increment(+total.toFixed(2)),
+                    lastOrderAt:   serverTimestamp(),
+                }).catch(e => console.warn('[OrderSync] Profile stats update failed (non-fatal):', e.message));
+            }
         }
 
         // ── Step 3: Clear localStorage convenience cache for this table ────────
@@ -742,7 +762,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // customer_order_history so the customer's history tab updates.
             // Only runs if this table had a Customer Panel order (no-op for
             // manual/walk-in bills — see syncCustomerOrderCompletion above).
-            syncCustomerOrderCompletion(tableName, cartSnapshot, total, 'bill_settle');
+            // AI UPDATE [2026-07-29] session 18: pass shortOrderId as billNumber
+            syncCustomerOrderCompletion(tableName, cartSnapshot, total, 'bill_settle', shortOrderId);
 
             // ── Release customer table lock in background (non-blocking) ──────
             releaseTableLockInBackground(tableName, 'bill_settle');

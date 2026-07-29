@@ -37,7 +37,7 @@
 
 import { db, auth } from './firebase-config.js';
 import {
-    collection, getDocs, doc, writeBatch
+    collection, getDocs, doc, writeBatch, updateDoc
 } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js';
 import { signInAnonymously, onAuthStateChanged }
     from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js';
@@ -74,45 +74,76 @@ export function destroyCustomerManagement() {
 }
 
 // ── Data fetching ─────────────────────────────────────────────────────────
+//
+// AI UPDATE [2026-07-29] session 18 — Architecture improvement:
+// Previous implementation fetched full order history for EVERY customer on
+// every admin panel open (N Firestore reads).  New approach:
+//
+//   FAST PATH  (new customers + already-migrated customers):
+//     Stats (totalOrders, lifetimeSpend, lastOrderAt) live directly in the
+//     customers/{phone} profile — written by cart.js syncCustomerOrderCompletion
+//     via FieldValue.increment() on each order completion.  No history reads
+//     needed for the list view.
+//
+//   MIGRATION PATH  (legacy customers without stats fields):
+//     Fetches history once, computes stats, writes them to the profile, and
+//     never repeats the scan (stats are now in the profile for fast-path use).
+//
+//   Order history is lazy-loaded per customer in _custOpenDetail (only when the
+//   operator actually opens a customer card — not on list load).
+//
 async function _fetchCustomers() {
-    const listEl = document.getElementById('customerCardList');
-    const countEl = document.getElementById('customerCount');
+    const listEl  = document.getElementById('customerCardList');
     try {
         const snap = await getDocs(collection(db, 'customers'));
-        const raw = [];
+        const raw  = [];
         snap.forEach(d => raw.push({ id: d.id, ...d.data() }));
 
-        // Enrich with order stats — fetch all customers in parallel
-        // AI UPDATE [2026-07-29] session 17:
-        // customer.html previously wrote the anonymous UID as `authUid` (bug); it now
-        // writes `uid` (schema-correct).  Read both so existing documents (with authUid)
-        // and new documents (with uid) are handled correctly without migration.
         const enriched = await Promise.all(raw.map(async c => {
+            // ── Fast path: stats already in profile ───────────────────────────
+            if (typeof c.totalOrders === 'number') {
+                return {
+                    ...c,
+                    orderCount:     c.totalOrders,
+                    lastOrderTs:    c.lastOrderAt?.toMillis?.() ?? 0,
+                    totalSpending:  c.lifetimeSpend || 0,
+                    orders:         [],     // lazy-loaded in _custOpenDetail
+                    _historyLoaded: false,
+                };
+            }
+
+            // ── Migration path: legacy customer without pre-computed stats ────
+            // Fetch history once, compute stats, save to profile for future loads.
             const resolvedUid = c.uid || c.authUid || '';
             if (!resolvedUid) {
-                return { ...c, orderCount: 0, lastOrderTs: 0, totalSpending: 0, orders: [] };
+                // No UID — can't read history; initialise stats at 0 so we skip this branch next time
+                updateDoc(doc(db, 'customers', c.id), {
+                    totalOrders: 0, lifetimeSpend: 0, lastOrderAt: null,
+                }).catch(() => {});
+                return { ...c, orderCount: 0, lastOrderTs: 0, totalSpending: 0, orders: [], _historyLoaded: true };
             }
+
             try {
                 const ordSnap = await getDocs(
                     collection(db, `customer_order_history/${resolvedUid}/orders`)
                 );
-                const orders = [];
-                let totalSpending = 0;
-                let lastOrderTs   = 0;
+                let totalSpending = 0, lastOrderTs = 0, orderCount = 0;
                 ordSnap.forEach(od => {
                     const data = od.data();
-                    orders.push({ id: od.id, ...data });
+                    orderCount++;
                     totalSpending += data.total || 0;
                     const ts = data.completedAt?.toMillis?.() ?? 0;
                     if (ts > lastOrderTs) lastOrderTs = ts;
                 });
-                // Newest-first
-                orders.sort(
-                    (a, b) => (b.completedAt?.toMillis?.() ?? 0) - (a.completedAt?.toMillis?.() ?? 0)
-                );
-                return { ...c, orderCount: orders.length, lastOrderTs, totalSpending, orders };
+                // Save computed stats to profile — non-blocking (one-time migration)
+                updateDoc(doc(db, 'customers', c.id), {
+                    totalOrders:   orderCount,
+                    lifetimeSpend: totalSpending,
+                    lastOrderAt:   lastOrderTs ? new Date(lastOrderTs) : null,
+                }).catch(() => {});
+                return { ...c, orderCount, lastOrderTs, totalSpending, orders: [], _historyLoaded: false };
             } catch {
-                return { ...c, orderCount: 0, lastOrderTs: 0, totalSpending: 0, orders: [] };
+                return { ...c, orderCount: 0, lastOrderTs: 0, totalSpending: 0, orders: [], _historyLoaded: false };
             }
         }));
 
@@ -125,6 +156,61 @@ async function _fetchCustomers() {
         if (listEl) listEl.innerHTML =
             `<div class="empty-state">⚠️ Failed to load customers.<br><small style="color:#8b949e">${err.message}</small></div>`;
     }
+}
+
+// ── Lazy-load order history for one customer ──────────────────────────────
+// Called by _custOpenDetail the first time a customer card is tapped.
+// Result is cached on the in-memory customer object (c.orders, c._historyLoaded).
+async function _loadCustomerHistory(c) {
+    const resolvedUid = c.uid || c.authUid || '';
+    if (!resolvedUid) { c.orders = []; c._historyLoaded = true; return; }
+    try {
+        const ordSnap = await getDocs(
+            collection(db, `customer_order_history/${resolvedUid}/orders`)
+        );
+        const orders = [];
+        ordSnap.forEach(od => orders.push({ id: od.id, ...od.data() }));
+        orders.sort((a, b) => (b.completedAt?.toMillis?.() ?? 0) - (a.completedAt?.toMillis?.() ?? 0));
+        c.orders = orders;
+    } catch {
+        c.orders = [];
+    }
+    c._historyLoaded = true;
+}
+
+// ── Build order history HTML ──────────────────────────────────────────────
+function _buildOrdersHtml(orders) {
+    if (!orders || orders.length === 0) {
+        return `<div class="empty-state">No orders yet.</div>`;
+    }
+    return `<div class="bills-list">` + orders.map(o => {
+        const ts = o.completedAt?.toMillis?.() ?? 0;
+        const orderLabel = [
+            o.orderId || o.id,
+            o.billNumber ? `Bill #${_esc(String(o.billNumber))}` : '',
+        ].filter(Boolean).join(' · ');
+        const statusLabel = o.completionReason === 'bill_settle' ? '✅ Billed & Settled'
+                          : o.completionReason === 'save_exit'   ? '✅ Saved'
+                          : '✅ Completed';
+        const itemsHtml = (o.items || []).map(it => `
+<div class="cust-ord-item-row">
+    <span class="name">${_esc(it.name)}</span>
+    <span class="qty">×${it.quantity || 1}</span>
+    <span class="sub">${_fmtRupee(it.subtotal)}</span>
+</div>`).join('');
+        return `
+<div class="bill-card" style="flex-direction:column;align-items:stretch;gap:10px;border-left:3px solid #1f6feb;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div class="bill-card-left">
+            <div class="bill-card-name" style="color:#58a6ff;font-size:0.88rem;">${_esc(orderLabel)}</div>
+            <div class="bill-card-time">${_esc(o.tableId || '—')} · ${_fmtDate(ts)}${ts ? ' · ' + _fmtTime(ts) : ''}</div>
+        </div>
+        <div class="bill-card-amt" style="flex-shrink:0;">${_fmtRupee(o.total)}</div>
+    </div>
+    ${itemsHtml ? `<div style="border-top:1px solid #21262d;padding-top:8px;">${itemsHtml}</div>` : ''}
+    <div style="font-size:0.75rem;font-weight:600;color:#3fb950;">${_esc(statusLabel)}</div>
+</div>`;
+    }).join('') + `</div>`;
 }
 
 // ── Rendering helpers ─────────────────────────────────────────────────────
@@ -220,7 +306,12 @@ window._custSearch = function(val) {
 };
 
 // ── Detail overlay — reuses modal-overlay/modal-box + existing CSS ────────
-window._custOpenDetail = function(phone) {
+// AI UPDATE [2026-07-29] session 18:
+// Now async — opens immediately with pre-computed stats from the profile, then
+// lazy-loads the full order history in the background.  On subsequent opens of
+// the same customer the history is already cached (c._historyLoaded = true) and
+// renders instantly.
+window._custOpenDetail = async function(phone) {
     const c = _customers.find(x => x.id === phone);
     if (!c) return;
 
@@ -230,36 +321,8 @@ window._custOpenDetail = function(phone) {
 
     const joinedTs = c.createdAt?.toMillis?.() ?? 0;
 
-    // Order history — each order uses bill-card style
-    let ordersHtml;
-    if (c.orders.length === 0) {
-        ordersHtml = `<div class="empty-state">No orders yet.</div>`;
-    } else {
-        ordersHtml = `<div class="bills-list">` + c.orders.map(o => {
-            const ts = o.completedAt?.toMillis?.() ?? 0;
-            const itemsHtml = (o.items || []).map(it => `
-<div class="cust-ord-item-row">
-    <span class="name">${_esc(it.name)}</span>
-    <span class="qty">×${it.quantity || 1}</span>
-    <span class="sub">${_fmtRupee(it.subtotal)}</span>
-</div>`).join('');
-
-            return `
-<div class="bill-card" style="flex-direction:column;align-items:stretch;gap:10px;border-left:3px solid #1f6feb;">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-        <div class="bill-card-left">
-            <div class="bill-card-name" style="color:#58a6ff;font-size:0.88rem;">${_esc(o.orderId || o.id)}</div>
-            <div class="bill-card-time">${_esc(o.tableId || '—')} · ${_fmtDate(ts)}${ts ? ' · ' + _fmtTime(ts) : ''}</div>
-        </div>
-        <div class="bill-card-amt" style="flex-shrink:0;">${_fmtRupee(o.total)}</div>
-    </div>
-    ${itemsHtml ? `<div style="border-top:1px solid #21262d;padding-top:8px;">${itemsHtml}</div>` : ''}
-    <div style="font-size:0.75rem;font-weight:600;color:#3fb950;">✅ Completed</div>
-</div>`;
-        }).join('') + `</div>`;
-    }
-
-    body.innerHTML = `
+    // Helper that builds the invariant header + stats HTML
+    const headerHtml = `
 <!-- Profile header -->
 <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #30363d;">
     <div class="cust-av cust-av-lg">${_avatarLetter(c.name)}</div>
@@ -290,12 +353,9 @@ window._custOpenDetail = function(phone) {
         <div class="stat-label">Last Order</div>
         <div class="stat-value" style="font-size:1.1rem;color:#c9d1d9;">${_fmtDate(c.lastOrderTs)}</div>
     </div>` : ''}
-</div>
+</div>`;
 
-<!-- Order history -->
-<div class="list-title" style="margin-top:4px;margin-bottom:12px;">Order History</div>
-${ordersHtml}
-
+    const deleteHtml = `
 <!-- Delete button -->
 <div style="padding:20px 0 4px;">
     <button class="btn btn-danger full-width" style="padding:14px;font-size:1rem;justify-content:center;"
@@ -304,7 +364,23 @@ ${ordersHtml}
     </button>
 </div>`;
 
+    // Phase 1 — open overlay immediately with stats + history placeholder
+    body.innerHTML = headerHtml + `
+<!-- Order history -->
+<div class="list-title" style="margin-top:4px;margin-bottom:12px;">Order History</div>
+<div id="custHistoryContainer">${
+    c._historyLoaded
+        ? _buildOrdersHtml(c.orders)
+        : '<div class="loading-state">Loading orders… ☁️</div>'
+}</div>` + deleteHtml;
     overlay.classList.remove('hidden');
+
+    // Phase 2 — fetch history if not yet loaded, then update the container
+    if (!c._historyLoaded) {
+        await _loadCustomerHistory(c);
+        const container = document.getElementById('custHistoryContainer');
+        if (container) container.innerHTML = _buildOrdersHtml(c.orders);
+    }
 };
 
 window._custCloseDetail = function() {
