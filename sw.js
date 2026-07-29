@@ -1,6 +1,6 @@
 // ============================================================
 //  POS Service Worker — Cache-first for static assets
-//  Version: 12 (bump this number whenever you deploy changes)
+//  Version: 13 (bump this number whenever you deploy changes)
 // ============================================================
 //
 // AI UPDATE [2026-07-29] session 13: Bumped v11 → v12.
@@ -20,7 +20,7 @@
 //   the browser notification/audio system has been replaced by server-side
 //   Pushover notifications. These files no longer exist in the project.
 //
-const CACHE_NAME = 'pos-static-v12';
+const CACHE_NAME = 'pos-static-v13';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

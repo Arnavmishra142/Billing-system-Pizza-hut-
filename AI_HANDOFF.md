@@ -1,6 +1,100 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 13)
+> Last updated: 2026-07-29 (session 14)
+
+---
+
+## Files Modified (2026-07-29 — session 14)
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/incoming-orders.js` | Billing Panel | **v11** — Root-cause fix for unreliable Pushover notifications. Removed `_sessionStartedAt` timestamp guard entirely. Restored `_initialLoadDone` as the sole new-order guard, but **no longer resets it in `startListening()`** — it stays `true` across all listener restarts. |
+| `sw.js` | Billing Panel | **v12→v13** — Bumped cache version to invalidate stale copies of updated JS. |
+
+### Root Cause — Pushover Notifications Unreliable (FIXED in v11)
+
+**The diagnosis:**
+
+The backend was confirmed working end-to-end via direct curl test:
+```
+POST /api/notify-order → {"ok":true,"receipt":"rpkwsz7c8sazt39hkjqrkis6aznz5n"}
+```
+Both consecutive test notifications delivered successfully with unique Pushover receipts.
+
+**The bug was in `js/incoming-orders.js` — the v9 timestamp guard:**
+
+v9 replaced `_initialLoadDone` with a clock-based comparison:
+```js
+const isGenuinelyNew = createdAtMs > (_sessionStartedAt - 10_000);
+// where:
+//   createdAtMs     = order.createdAt.toMillis()  ← Firestore SERVER clock
+//   _sessionStartedAt = Date.now()                ← CLIENT clock
+```
+
+**Failure scenario — client clock ahead of server by > 10 seconds:**
+```
+Client clock: Date.now() = T_server + 15000   (client 15s fast)
+_sessionStartedAt = T_server + 15000
+
+New order placed at server time T_server + 30:
+  createdAtMs = T_server + 30
+  threshold   = T_server + 15000 - 10000 = T_server + 5000
+  check: T_server + 30 > T_server + 5000  →  FALSE  ← NEW ORDER SILENCED
+```
+
+Crucially, the order ID was added to `_notified` **before** the timestamp check. So it was permanently deduplicated — it would never be notified on any subsequent snapshot. This caused all notifications to silently fail whenever the client clock drifted more than 10 seconds ahead of Firestore's server clock — common on mobile devices, after sleep, or when NTP hasn't synced recently.
+
+**The fix (v11) — clock-independent guard:**
+
+`_initialLoadDone` restored as the sole guard, with one key change:
+**`startListening()` no longer resets `_initialLoadDone = false`.**
+
+Why this works correctly across listener restarts:
+```
+Page load:
+  _initialLoadDone = false
+  First snapshot fires → all pre-existing orders: silenced (initial load)
+  _initialLoadDone = true
+
+Listener restarts (Firestore error / network drop):
+  startListening() called — _initialLoadDone stays TRUE
+  First snapshot of restarted listener:
+    Pre-existing orders → already in _notified → DEDUP skip ✅
+    New orders placed during restart window → NOT in _notified,
+      _initialLoadDone = true → NOTIFY ✅
+
+No clock dependency. Works regardless of client/server time difference.
+```
+
+**Why v5–v8 had the restart bug** (and why v11 doesn't):
+- v5–v8: `_initialLoadDone = false` reset in `startListening()` → new order in first snapshot of restarted listener was silenced
+- v11: `_initialLoadDone` never reset after first page load → `_notified` handles pre-existing dedup, `_initialLoadDone = true` allows new orders through
+
+### Verified notification flow (complete, working)
+
+```
+Customer places order on Customer Panel
+    ↓
+Firestore: pending_table_orders doc created
+    ↓
+js/incoming-orders.js: onSnapshot fires
+  docSnap.id not in _notified → _notified.add(id)
+  _initialLoadDone = true → proceed
+    ↓
+showToast() — on-screen toast notification
+notifyNewOrder(docSnap.id, data) — fire-and-forget
+    ↓
+POST /api/notify-order {orderId, tableId, customerName, customerPhone, items}
+    ↓
+server.js: builds rich multi-line message, POSTs to Pushover
+  priority: 2 (emergency), retry: 30s, expire: 300s, sound: "notification"
+    ↓
+Pushover API → {"status":1, "receipt":"..."} → operator's phone
+```
+
+### No Customer Panel changes required
+
+The bug was entirely within the Billing Panel's client-side notification guard logic.
 
 ---
 
