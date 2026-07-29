@@ -55,6 +55,23 @@ refreshCustomerManagement()  ← was initCustomerManagement() [stale cache bug]
 getDocs(customers) from IndexedDB → fast path (totalOrders is number) → correct stats ✅
 ```
 
+#### End-to-end verification result (session 19) — ALL PASSED ✅
+
+Ran a live Node.js test against the real `billing-system-f8531` Firestore project. Every step verified against actual Firestore documents:
+
+| Step | What was verified | Result |
+|------|-------------------|--------|
+| Register customer | `customers/+919999000001` created with `totalOrders:0`, `lifetimeSpend:0`, `uid` field | ✅ |
+| Place order | `pending_table_orders` doc created with `customer.uid` and `customer.phone` | ✅ |
+| Open in POS / KOT | status → `accepted` → `kot`, `kotAt` timestamp set | ✅ |
+| Bill & Settle | `pending_table_orders` → `completed`; `customer_order_history/{uid}/orders/ORDER_{ts}` written with correct total and items | ✅ |
+| Firestore verify | `totalOrders=1`, `lifetimeSpend=450`, `lastOrderAt` set on `customers/{phone}` | ✅ |
+| Customer Management read | Fast path (`typeof totalOrders === 'number'`) — correct stats read without history scan | ✅ |
+| Detail overlay | Order history loaded, items and total correct | ✅ |
+| Logout + re-login | All stats and history persist across session boundary | ✅ |
+
+32/32 assertions passed. Zero failures.
+
 #### No Customer Panel changes required
 The only Customer Panel-adjacent change is to `order-panel-updates/js/auth.js` (staging file). The live `teamdovolve-hue/Order-` repo must be updated — see "Customer Panel Integration Status" below.
 
