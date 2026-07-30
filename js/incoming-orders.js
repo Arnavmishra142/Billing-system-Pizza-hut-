@@ -5,6 +5,34 @@
 // which forwards a Pushover push notification to the operator's phone.
 
 // ===== AI UPDATE =====
+// Date: 2026-07-30
+// Feature: Complete emergency Pushover acknowledgement workflow.
+//
+// Problem: Emergency Pushover notifications (priority=2) re-notify every 30 s
+//   indefinitely (up to expire=3600 s) unless explicitly cancelled via the
+//   Pushover receipts/cancel API. There was no way for the operator to stop the
+//   emergency alerts once an order arrived.
+//
+// Implementation:
+//   1. notifyNewOrder() now returns the receipt string from the server response.
+//   2. Per-order receipt storage: _activeReceipts (Map: orderId → receipt).
+//      Multiple simultaneous orders each track their own receipt independently.
+//   3. In the Firestore snapshot callback, after notifyNewOrder() resolves, the
+//      receipt is stored and renderDrawer() is called to show the Acknowledge button.
+//   4. renderDrawer() shows a prominent "🔕 Acknowledge Order" button on each card
+//      that has an active receipt stored in _activeReceipts.
+//   5. acknowledgeOrder(orderId): calls POST /api/cancel-receipt on the Express
+//      server (which proxies to Pushover's cancel API, keeping the token
+//      server-side), clears the receipt from _activeReceipts, and re-renders.
+//   6. _cancellingReceipts (Set) prevents duplicate cancel requests if the operator
+//      clicks "Acknowledge Order" multiple times before the first request resolves.
+//   7. Orphan cleanup: on every snapshot, receipts for orders no longer in the
+//      pending list are deleted (order was accepted/dismissed before acknowledged).
+//
+// All important steps are logged with [incoming-orders] prefix.
+// =====================
+
+// ===== AI UPDATE =====
 // Date: 2026-07-29 (v11)
 // Bug fix: Pushover notifications unreliable — root cause was client/server clock drift.
 //
@@ -169,6 +197,17 @@ const drawerList  = document.getElementById('ordersDrawerList');
 // prevent re-notification of orders already processed this session.
 const _notified = new Set();
 
+// AI UPDATE [2026-07-30] — Per-order emergency receipt tracking.
+// _activeReceipts: Map from Firestore order doc ID → Pushover receipt string.
+//   Each order that triggers an emergency notification gets its own entry so that
+//   multiple simultaneous orders can be acknowledged independently.
+//   Entries are removed on successful cancel or when the order leaves the pending list.
+// _cancellingReceipts: Set of order IDs currently being cancelled (in-flight guard).
+//   Prevents duplicate POST /api/cancel-receipt calls if the operator clicks the
+//   Acknowledge button more than once before the first request resolves.
+const _activeReceipts     = new Map();   // orderId → receipt string
+const _cancellingReceipts = new Set();   // orderId → cancel in progress
+
 // AI UPDATE [2026-07-29] v11: _initialLoadDone is the primary (and only)
 // notification guard.  Starts false on page load.  Set to true after the first
 // snapshot is processed.  NEVER reset to false again — not even on listener
@@ -184,15 +223,19 @@ let _initialLoadDone = false;
 // AI UPDATE [2026-07-29] session 22: Removed temporary [notify-debug] trace logs.
 //   Notification chain confirmed working end-to-end in session 14. Only failure
 //   paths are logged (non-OK response, fetch error).
+// AI UPDATE [2026-07-30]: Returns the Pushover receipt string (or null on failure)
+//   so the caller can store it for later acknowledgement via POST /api/cancel-receipt.
 // Calls POST /api/notify-order on the local Express server (server.js), which
 // proxies to the Pushover API with the operator's credentials.
-// Fire-and-forget — a failure is logged but never disrupts the order flow.
+// A failure is logged but never disrupts the order flow.
 async function notifyNewOrder(orderId, data) {
     const tableId       = data.tableId           || 'Unknown Table';
     const customerName  = data.customer?.name    || '';
     const customerPhone = data.customer?.phone   || '';
     const items         = data.items             || [];
     const itemCount     = items.reduce((s, i) => s + (i.quantity || 1), 0);
+
+    console.log(`[incoming-orders] Sending emergency Pushover notification for order ${orderId} (${tableId})`);
 
     try {
         const res = await fetch('/api/notify-order', {
@@ -201,13 +244,71 @@ async function notifyNewOrder(orderId, data) {
             body:    JSON.stringify({ orderId, tableId, customerName, customerPhone, items, itemCount })
         });
 
+        console.log(`[incoming-orders] Pushover response status: ${res.status}`);
+
         if (!res.ok) {
             let body;
             try { body = await res.clone().json(); } catch(_) { body = await res.text(); }
             console.warn('[incoming-orders] Pushover endpoint error:', res.status, body);
+            return null;
         }
+
+        const json = await res.json();
+        console.log('[incoming-orders] Pushover response received:', json);
+
+        if (json.receipt) {
+            console.log(`[incoming-orders] Receipt extracted for order ${orderId}:`, json.receipt);
+            return json.receipt;
+        }
+
+        return null;
     } catch (err) {
         console.error('[incoming-orders] Pushover fetch failed:', err.name, err.message);
+        return null;
+    }
+}
+
+// ── Acknowledge (cancel) an active emergency notification ─────────────────────
+// AI UPDATE [2026-07-30]: Calls POST /api/cancel-receipt on the Express server,
+//   which proxies to Pushover's receipts/{receipt}/cancel.json API.
+//   The Pushover token never leaves the server — not exposed in browser source.
+//   _cancellingReceipts guards against duplicate in-flight cancel requests.
+async function acknowledgeOrder(orderId) {
+    const receipt = _activeReceipts.get(orderId);
+    if (!receipt) {
+        console.warn('[incoming-orders] acknowledgeOrder — no receipt found for order', orderId);
+        return;
+    }
+    if (_cancellingReceipts.has(orderId)) {
+        console.log('[incoming-orders] acknowledgeOrder — cancel already in progress for order', orderId);
+        return;
+    }
+
+    _cancellingReceipts.add(orderId);
+    console.log(`[incoming-orders] Acknowledge clicked — cancelling emergency receipt for order ${orderId} → receipt: ${receipt}`);
+
+    try {
+        const res = await fetch('/api/cancel-receipt', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ receipt })
+        });
+
+        console.log(`[incoming-orders] Cancel response status: ${res.status}`);
+        const data = await res.json();
+        console.log('[incoming-orders] Cancel response body:', data);
+
+        if (data.ok) {
+            _activeReceipts.delete(orderId);
+            console.log(`[incoming-orders] Receipt cleared — emergency notification cancelled for order ${orderId}`);
+        } else {
+            console.warn(`[incoming-orders] Cancel request succeeded but server reported failure for order ${orderId}:`, data);
+        }
+    } catch (err) {
+        console.error(`[incoming-orders] Cancel fetch failed for order ${orderId}:`, err.name, err.message);
+    } finally {
+        _cancellingReceipts.delete(orderId);
+        renderDrawer(_pendingOrders);
     }
 }
 
@@ -268,6 +369,13 @@ async function notifyNewOrder(orderId, data) {
             border: none; border-radius: 8px; padding: 9px 14px;
             font-size: 0.85rem; cursor: pointer; opacity: 0.7;
         }
+        .oc-btn-ack {
+            width: 100%; background: linear-gradient(135deg, #ef4444, #f87171);
+            color: #fff; border: none; border-radius: 8px;
+            padding: 10px; font-weight: 700; font-size: 0.9rem; cursor: pointer;
+            margin-top: 8px; letter-spacing: 0.02em;
+        }
+        .oc-btn-ack:disabled { opacity: 0.55; cursor: not-allowed; }
     `;
     document.head.appendChild(s);
 })();
@@ -381,6 +489,9 @@ function renderDrawer(orders) {
         const count   = await getCustomerOrderCount(customer.phone);
         const ordinal = toOrdinal(count);
 
+        // AI UPDATE [2026-07-30] — show Acknowledge button when an active receipt exists.
+        const hasActiveReceipt = _activeReceipts.has(id);
+
         const card = document.createElement('div');
         card.className = 'order-card-item';
         card.innerHTML = `
@@ -400,6 +511,7 @@ function renderDrawer(orders) {
                 <button class="oc-btn-accept">✅ Open in POS</button>
                 <button class="oc-btn-dismiss">Dismiss</button>
             </div>
+            ${hasActiveReceipt ? `<button class="oc-btn-ack">🔕 Acknowledge Order</button>` : ''}
         `;
 
         // Accept → load items into POS cart then open the table
@@ -489,6 +601,18 @@ function renderDrawer(orders) {
             } catch(e) {}
         });
 
+        // AI UPDATE [2026-07-30] — Acknowledge Order button: cancel the active emergency
+        // notification via POST /api/cancel-receipt (server proxies to Pushover, token
+        // never leaves server).  Button is disabled immediately to prevent duplicate clicks.
+        const ackBtn = card.querySelector('.oc-btn-ack');
+        if (ackBtn) {
+            ackBtn.addEventListener('click', () => {
+                ackBtn.disabled     = true;
+                ackBtn.textContent  = '⏳ Acknowledging…';
+                acknowledgeOrder(id);
+            });
+        }
+
         return card;
     });
 
@@ -567,7 +691,15 @@ function startListening() {
                 // AI UPDATE [2026-07-29] v10: Pass docSnap.id as orderId for rich notification.
                 // AI UPDATE [2026-07-29] v11: Timestamp guard removed; _initialLoadDone guard restored.
                 // AI UPDATE [2026-07-29] session 22: [notify-debug] trace logs removed.
-                notifyNewOrder(docSnap.id, data);
+                // AI UPDATE [2026-07-30]: Capture returned receipt; store in _activeReceipts;
+                //   re-render drawer to show Acknowledge button for this order.
+                notifyNewOrder(docSnap.id, data).then(receipt => {
+                    if (receipt) {
+                        console.log(`[incoming-orders] Receipt stored for order ${docSnap.id}:`, receipt);
+                        _activeReceipts.set(docSnap.id, receipt);
+                        renderDrawer(_pendingOrders);
+                    }
+                });
             }
         });
 
@@ -575,6 +707,18 @@ function startListening() {
         // IMPORTANT: this is set AFTER iterating the snapshot so that ALL docs in
         // the first snapshot are processed with _initialLoadDone = false (silenced).
         _initialLoadDone = true;
+
+        // AI UPDATE [2026-07-30] — Orphan cleanup: if an order was accepted or
+        // dismissed before the operator acknowledged its emergency notification,
+        // its receipt entry must be removed so no stale Acknowledge button appears
+        // after the card disappears.
+        const pendingIds = new Set(pending.map(o => o.id));
+        for (const orderId of _activeReceipts.keys()) {
+            if (!pendingIds.has(orderId)) {
+                console.log(`[incoming-orders] Orphaned receipt cleaned up for removed order ${orderId}`);
+                _activeReceipts.delete(orderId);
+            }
+        }
 
         _pendingOrders = pending;
         setBadge(pending.length);

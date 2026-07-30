@@ -1,6 +1,64 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-29 (session 24)
+> Last updated: 2026-07-30
+
+---
+
+## Feature Implemented (2026-07-30)
+
+### Complete Emergency Pushover Acknowledgement Workflow
+
+#### Root Cause
+
+Emergency Pushover notifications (priority=2) re-notify every `retry` seconds (30 s) until either the `expire` window closes or the notification is explicitly cancelled via the Pushover receipts cancel API. Previously:
+- `expire` was set to 300 s (5 min) — too short for a real restaurant scenario.
+- `notifyNewOrder()` was fire-and-forget; the returned `receipt` string was discarded.
+- There was no way for the operator to stop the emergency alerts once an order arrived.
+- No "Acknowledge Order" button existed in the UI.
+
+#### Implementation Details
+
+**`server.js`** — two changes:
+1. `expire` bumped from `300` → `3600` (1 hour) in `POST /api/notify-order`.
+2. New endpoint `POST /api/cancel-receipt` added. Accepts `{ receipt: string }`, validates the receipt string, then proxies `POST https://api.pushover.net/1/receipts/{receipt}/cancel.json` with the server-side `PUSHOVER_TOKEN`. The token is **never** exposed to the browser. Returns `{ ok: true }` on success.
+
+**`js/incoming-orders.js`** — multiple changes:
+1. **State**: Added `_activeReceipts = new Map()` (orderId → receipt string) and `_cancellingReceipts = new Set()` (in-flight dedup guard).
+2. **`notifyNewOrder()`**: Changed from fire-and-forget to returning the Pushover receipt string (or `null` on failure). Added detailed logging at every step (request sent, response status, response body, receipt extracted).
+3. **Snapshot callback**: Changed `notifyNewOrder(id, data)` bare call to `.then(receipt => { … })` — on receipt arrival, stores it in `_activeReceipts` and calls `renderDrawer(_pendingOrders)` to show the Acknowledge button.
+4. **Orphan cleanup**: After each snapshot, any `_activeReceipts` entries whose orderId is no longer in the pending list (order was accepted/dismissed before acknowledgement) are deleted.
+5. **`acknowledgeOrder(orderId)`**: New async function. Guards against missing receipt and duplicate requests. Calls `POST /api/cancel-receipt`. On success, deletes from `_activeReceipts`. Always calls `renderDrawer(_pendingOrders)` in `finally`. Full logging at every step.
+6. **`renderDrawer()`**: Each card now checks `_activeReceipts.has(id)`; if true, renders a `<button class="oc-btn-ack">🔕 Acknowledge Order</button>` below the action row. Button click disables itself immediately (prevents double-click), then calls `acknowledgeOrder(id)`.
+7. **CSS**: `.oc-btn-ack` and `.oc-btn-ack:disabled` styles added in `injectDrawerCSS()`.
+
+**`sw.js`**: Bumped `pos-static-v18` → `pos-static-v19` to bust cached `incoming-orders.js`.
+
+#### Verification Checklist
+
+| Check | Status |
+|-------|--------|
+| Emergency notification sent (priority=2, retry=30, expire=3600) | ✓ |
+| Receipt string returned from server and captured by client | ✓ |
+| Receipt stored per-order in `_activeReceipts` Map | ✓ |
+| Acknowledge button appears only when active receipt exists | ✓ |
+| Clicking Acknowledge calls `/api/cancel-receipt` server-side | ✓ |
+| Receipt cleared and button hidden after successful cancel | ✓ |
+| Multiple simultaneous orders tracked independently | ✓ |
+| No duplicate cancel requests (disabled button + `_cancellingReceipts` guard) | ✓ |
+| Orphan receipt cleanup on order accept/dismiss | ✓ |
+| Pushover token never sent to browser | ✓ |
+| No unrelated functionality modified | ✓ |
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `server.js` | Billing Panel | `expire` 300→3600; new `POST /api/cancel-receipt` endpoint |
+| `js/incoming-orders.js` | Billing Panel | Receipt capture, per-order Map, Acknowledge button, `acknowledgeOrder()`, orphan cleanup, logging |
+| `sw.js` | Billing Panel | Bumped `pos-static-v18` → `pos-static-v19` |
+| `AI_HANDOFF.md` | Billing Panel | Updated with session state |
+
+---
 
 ---
 

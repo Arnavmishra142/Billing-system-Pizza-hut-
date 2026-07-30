@@ -29,7 +29,10 @@
 // AI UPDATE [2026-07-29] session 23: v17→v18 — bust cached cart.js after adding
 //   cancelImportedOrdersOnEmptyCart() (empty-cart auto-cancel edge case fix).
 // removing temporary [notify-debug] trace logs (production cleanup).
-const CACHE_NAME = 'pos-static-v18';
+// AI UPDATE [2026-07-30]: v18→v19 — bust cached incoming-orders.js after adding
+//   complete emergency acknowledgement workflow: receipt capture, Acknowledge button,
+//   acknowledgeOrder() cancel flow, orphan cleanup.
+const CACHE_NAME = 'pos-static-v19';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

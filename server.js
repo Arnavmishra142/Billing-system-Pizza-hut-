@@ -23,6 +23,13 @@
 //   Priority bumped to 2 (emergency) so the device is alerted immediately even
 //   in Do Not Disturb / quiet hours.  retry=30 s, expire=300 s (Pushover
 //   emergency priority requires both fields).
+//
+// AI UPDATE [2026-07-30]:
+//   POST /api/notify-order: expire bumped 300 s → 3600 s (1 hour) per task spec.
+//   POST /api/cancel-receipt: new endpoint — proxies cancel request to Pushover's
+//     receipts/{receipt}/cancel.json API.  Keeps PUSHOVER_TOKEN server-side so it
+//     is never exposed in browser source.  Called by js/incoming-orders.js when
+//     the operator clicks "Acknowledge Order".
 
 'use strict';
 
@@ -125,7 +132,7 @@ app.post('/api/notify-order', async (req, res) => {
                 sound:    'notification',
                 priority: 2,    // Emergency: highest priority, bypasses DND/quiet hours
                 retry:    30,   // Resend every 30 s until acknowledged (required for priority 2)
-                expire:   300   // Stop retrying after 5 min (required for priority 2)
+                expire:   3600  // Stop retrying after 1 hour (required for priority 2)
             })
         });
 
@@ -140,6 +147,53 @@ app.post('/api/notify-order', async (req, res) => {
         }
     } catch (err) {
         console.error('[notify] Pushover request failed:', err.message);
+        res.status(500).json({ ok: false, error: err.message });
+    }
+});
+
+// ── POST /api/cancel-receipt ──────────────────────────────────────────────────
+// Called by js/incoming-orders.js when the operator clicks "Acknowledge Order".
+// Proxies the cancel request to Pushover's receipts/{receipt}/cancel.json API.
+// PUSHOVER_TOKEN is kept server-side — never exposed in browser source.
+//
+// AI UPDATE [2026-07-30]:
+//   New endpoint — part of the complete emergency acknowledgement workflow.
+//   Request body: { receipt: string }
+//   On success: Pushover stops re-notifying; returns { ok: true }
+//   On failure: returns { ok: false, error/errors }
+app.post('/api/cancel-receipt', async (req, res) => {
+    const { receipt } = req.body || {};
+
+    if (!receipt || typeof receipt !== 'string' || !/^[a-zA-Z0-9]+$/.test(receipt)) {
+        console.warn('[cancel] Invalid or missing receipt in request body');
+        return res.status(400).json({ ok: false, error: 'Invalid or missing receipt' });
+    }
+
+    console.log(`[cancel] Cancel request received for receipt: ${receipt}`);
+
+    try {
+        const response = await fetch(
+            `https://api.pushover.net/1/receipts/${receipt}/cancel.json`,
+            {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ token: PUSHOVER_TOKEN })
+            }
+        );
+
+        console.log(`[cancel] Pushover cancel response status: ${response.status}`);
+        const result = await response.json();
+        console.log('[cancel] Pushover cancel response body:', result);
+
+        if (result.status === 1) {
+            console.log(`[cancel] Emergency notification cancelled ✓ receipt: ${receipt}`);
+            res.json({ ok: true });
+        } else {
+            console.error('[cancel] Pushover cancel API error:', result);
+            res.status(500).json({ ok: false, errors: result.errors });
+        }
+    } catch (err) {
+        console.error('[cancel] Cancel request failed:', err.message);
         res.status(500).json({ ok: false, error: err.message });
     }
 });
