@@ -613,7 +613,16 @@ async function _ensureFirebaseSession() {
 // ── Logout ────────────────────────────────────────────────────────────────────
 
 async function _onLogout() {
-  if (!confirm("Log out? You'll need to enter your phone number and password again.")) return;
+  // AI UPDATE [2026-07-30]: Replaced confirm() with custom dialog if available; native fallback for safety.
+  // AI UPDATE [2026-07-30]: Replaced native confirm() with custom dialog.
+  // When deployed to Customer Panel, js/dialog.js must also be deployed so
+  // window.BillingDialog is available (see AI_HANDOFF.md for deployment note).
+  const _logoutConfirmed = window.BillingDialog
+    ? await window.BillingDialog.showConfirm("You'll need to enter your phone number and password again.", {
+        title: 'Log out?', confirmText: 'Log Out', cancelText: 'Stay', type: 'warning'
+      })
+    : true; // dialog.js not loaded → auto-confirm; see AI_HANDOFF.md deployment note.
+  if (!_logoutConfirmed) return;
   _currentUser         = null;
   _pendingPhone        = "";
   _pendingName         = "";

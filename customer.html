@@ -708,6 +708,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { getAuth, signInAnonymously }
     from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+// AI UPDATE [2026-07-30]: Import custom dialog system — replaces confirm()/alert().
+import { showAlert, showConfirm } from './js/dialog.js';
 
 // ── Firebase init ───────────────────────────────────────────────────────────
 const app = initializeApp({
@@ -1383,8 +1385,13 @@ document.getElementById('profileCloseBtn').addEventListener('click', () => {
     document.body.style.overflow = '';
 });
 
-document.getElementById('profileLogoutBtn').addEventListener('click', () => {
-    if (!confirm('Sign out?\n\nYou\'ll need to enter your phone number and password again to place your next order.')) return;
+// AI UPDATE [2026-07-30]: Made async; replaced confirm() with custom dialog.
+document.getElementById('profileLogoutBtn').addEventListener('click', async () => {
+    const _logoutOk = await showConfirm(
+        "You'll need to enter your phone number and password again to place your next order.",
+        { title: 'Sign out?', confirmText: 'Sign Out', cancelText: 'Stay', type: 'warning' }
+    );
+    if (!_logoutOk) return;
 
     clearSession();
     cart = {};
@@ -1467,11 +1474,12 @@ async function placeOrder() {
         console.error('[PlaceOrder]', err);
         btn.textContent = 'Place Order →';
         btn.disabled = false;
+        // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
         const msg =
             err.code === 'permission-denied'
                 ? 'Permission denied. Please ask staff for assistance.'
                 : 'Order failed. Please check your connection and try again.';
-        alert(msg);
+        await showAlert(msg, 'error', 'Order Failed');
     }
 }
 

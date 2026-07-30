@@ -1,8 +1,10 @@
 // AI UPDATE [2026-07-29] session 15:
 // Added Customers tab support to switchTab(). Imports initCustomerManagement
 // and refreshCustomerManagement from js/customers.js.
+// AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert()/confirm().
 import { db, storage, auth, functions } from './firebase-config.js';
 import { initCustomerManagement, refreshCustomerManagement } from './customers.js';
+import { showAlert, showConfirm } from './dialog.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
     getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot
@@ -292,14 +294,19 @@ window.loadSalesData = async function(filterType, filterValue) {
 };
 
 window.deleteSale = async function(saleId) {
-    if (!confirm("Delete this bill?")) return;
+    // AI UPDATE [2026-07-30]: Replaced confirm()/alert() with custom dialogs.
+    if (!await showConfirm("This bill will be permanently removed from sales history.", {
+        title: 'Delete this bill?', confirmText: 'Delete', type: 'error'
+    })) return;
     try {
         await deleteDoc(doc(db, "sales_history", saleId));
         const activeFilter = document.querySelector('#salesSection .filter-pill.active');
         const customDate   = document.getElementById('customDateSearch').value;
         if (customDate) loadSalesData('date', customDate);
         else loadSalesData('days', parseInt(activeFilter?.dataset.val || '1'));
-    } catch (e) { alert("Delete failed. Check internet."); }
+    } catch (e) {
+        await showAlert("Delete failed. Check internet.", 'error', 'Delete Failed');
+    }
 };
 
 // Filter pills in sales section
@@ -449,11 +456,15 @@ function renderMenuCards() {
 
 window.toggleStock = async function(id, status) {
     try { await updateDoc(doc(db, "menu_items", id), { inStock: status }); }
-    catch(e) { alert("Stock update failed!"); }
+    // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
+    catch(e) { await showAlert("Stock update failed!", 'error', 'Update Failed'); }
 };
 
 window.deleteMenuItem = async function(id) {
-    if (!confirm("Delete this item permanently?")) return;
+    // AI UPDATE [2026-07-30]: Replaced confirm() with custom dialog.
+    if (!await showConfirm("This menu item will be permanently removed from the database.", {
+        title: 'Delete item permanently?', confirmText: 'Delete', type: 'error'
+    })) return;
     await deleteDoc(doc(db, "menu_items", id));
     // The live onSnapshot listener fires automatically after the delete —
     // no need to call loadMenuData() here; doing so would unnecessarily
@@ -536,11 +547,12 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
     const price    = document.getElementById('itemPriceInput').value.trim();
     let category   = document.getElementById('itemCategoryInput').value;
 
+    // AI UPDATE [2026-07-30]: Replaced alert() with custom dialogs.
     if (category === 'NEW_CATEGORY') {
         category = document.getElementById('newCategoryInput').value.trim();
-        if (!category) { alert("Enter category name!"); return; }
+        if (!category) { await showAlert("Enter category name!", 'warning', 'Missing Field'); return; }
     }
-    if (!name || !price) { alert("Name and Price are required!"); return; }
+    if (!name || !price) { await showAlert("Name and Price are required!", 'warning', 'Missing Fields'); return; }
 
     btn.textContent = "Saving... ⏳";
     btn.disabled    = true;
@@ -568,7 +580,8 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
         // listener and recreate it unnecessarily.
     } catch (e) {
         console.error(e);
-        alert("Save failed! Check internet.");
+        // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
+        await showAlert("Save failed! Check internet.", 'error', 'Save Failed');
     } finally {
         btn.textContent = currentEditId ? "Update Item" : "Save Item";
         btn.disabled    = false;
@@ -729,11 +742,16 @@ document.getElementById('refreshExpenseBtn').addEventListener('click', (e) => {
 });
 
 window.deleteExpense = async function(id) {
-    if (!confirm("Delete this expense?")) return;
+    // AI UPDATE [2026-07-30]: Replaced confirm()/alert() with custom dialogs.
+    if (!await showConfirm("This expense will be permanently removed.", {
+        title: 'Delete this expense?', confirmText: 'Delete', type: 'error'
+    })) return;
     try {
         await deleteDoc(doc(db, "daily_expenses", id));
         // The live onSnapshot fires automatically after the delete — no need to
         // call loadAdminExpenses() here; doing so would tear down and recreate
         // the listener unnecessarily.
-    } catch (e) { alert("Delete failed. Check internet."); }
+    } catch (e) {
+        await showAlert("Delete failed. Check internet.", 'error', 'Delete Failed');
+    }
 };

@@ -3,6 +3,8 @@ import { doc, setDoc, updateDoc, serverTimestamp, getDocs, getDoc, query, where,
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 // AI UPDATE [2026-07-30]: Import receipt builder for ESC/POS bill printing.
 import { initReceiptPrinter, buildBillReceipt } from './receipt-builder.js';
+// AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert()/confirm().
+import { showAlert, showConfirm } from './dialog.js';
 
 // ===== AI UPDATE =====
 // Date: 2026-07-28
@@ -794,7 +796,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 .map(item => ({name: item.name, printQty: item.qty - (item.printedQty || 0)}));
 
         if (itemsToPrint.length === 0) {
-            alert("Koi naya item nahi hai! Puraana order print karne ke liye 'PRINT FULL K.O.T' dabayein.");
+            // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
+            await showAlert(
+                "Koi naya item nahi hai! Puraana order print karne ke liye 'PRINT FULL K.O.T' dabayein.",
+                'warning',
+                'No New Items'
+            );
             return;
         }
 
@@ -1007,13 +1014,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // Does NOT affect revenue, statistics, or order counts.
     const cancelOrderBtn = document.getElementById('cancelOrderBtn');
     if (cancelOrderBtn) {
-        cancelOrderBtn.addEventListener('click', () => {
-            if (!confirm(
-                'Cancel this entire order?\n\n' +
-                'All items will be cleared and the customer will immediately ' +
-                'lose the active order on their screen.\n\n' +
-                'This cannot be undone.'
-            )) return;
+        // AI UPDATE [2026-07-30]: Replaced confirm() with custom dialog.
+        cancelOrderBtn.addEventListener('click', async () => {
+            const _cancelConfirmed = await showConfirm(
+                'All items will be cleared and the customer will immediately lose the active order on their screen.\n\nThis cannot be undone.',
+                {
+                    title:       'Cancel this entire order?',
+                    confirmText: 'Yes, Cancel Order',
+                    cancelText:  'Keep Order',
+                    type:        'error',
+                }
+            );
+            if (!_cancelConfirmed) return;
 
             const tableName = getCurrentTable();
 

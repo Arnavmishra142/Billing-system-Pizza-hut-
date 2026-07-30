@@ -1,5 +1,6 @@
 // js/customers.js
 // Customer Management Panel — list, view, and delete customers.
+// AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert().
 //
 // AI UPDATE [2026-07-29] session 17:
 //   BUG FIX — Customer statistics always showed 0 orders / ₹0 / empty history.
@@ -35,6 +36,7 @@
 // Billing records (sales_history) are intentionally NOT touched — they must
 // survive customer deletion per the architecture spec.
 
+import { showAlert } from './dialog.js';
 import { db, auth } from './firebase-config.js';
 import {
     collection, getDocs, doc, writeBatch, updateDoc
@@ -457,7 +459,8 @@ window._custExecuteDelete = async function() {
     } catch (err) {
         console.error('[customers] Delete failed:', err);
         if (btn) { btn.disabled = false; btn.textContent = 'Delete Permanently'; }
-        alert('Delete failed: ' + err.message);
+        // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
+        await showAlert('Delete failed: ' + err.message, 'error', 'Delete Failed');
     }
 };
 

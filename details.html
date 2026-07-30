@@ -284,6 +284,8 @@
             } catch(e) {}
         })();
     </script>
+    <!-- AI UPDATE [2026-07-30]: Load custom dialog system; sets window.BillingDialog for inline scripts. -->
+    <script type="module" src="js/dialog.js"></script>
 </head>
 <body>
 
@@ -319,9 +321,10 @@
     }
 
     // ── Print bill (same rawbt logic as reprintGhostBill in index.html) ──
-    function printBill(bill) {
+    // AI UPDATE [2026-07-30]: Made async; replaced alert() with custom dialog (window.BillingDialog).
+    async function printBill(bill) {
         if (!Array.isArray(bill.items) || bill.items.length === 0) {
-            alert("Is bill ke items save nahi hue the, print nahi ho sakta.");
+            await window.BillingDialog.showAlert("Is bill ke items save nahi hue the, print nahi ho sakta.", 'warning', 'Cannot Print');
             return;
         }
         const centerText = (text) => {

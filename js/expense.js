@@ -14,6 +14,8 @@
 //   • All three write paths (add, update, delete) call _waitForAuth() first.
 // =====================
 
+// AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert()/confirm().
+import { showAlert, showConfirm } from './dialog.js';
 import { db, auth } from './firebase-config.js';
 import {
     collection, addDoc, deleteDoc, doc, updateDoc,
@@ -218,8 +220,11 @@ async function loadExpenseData() {
 }
 
 // ── Delete expense — optimistic ──
+// AI UPDATE [2026-07-30]: Replaced confirm()/alert() with custom dialogs.
 async function deleteExpense(expId) {
-    if (!confirm("Yeh expense delete karna hai?")) return;
+    if (!await showConfirm("Yeh expense permanently delete ho jaayega.", {
+        title: 'Expense delete karna hai?', confirmText: 'Delete', type: 'error'
+    })) return;
 
     // If currently editing this item, cancel edit mode
     if (editingId === expId) cancelEdit();
@@ -234,7 +239,7 @@ async function deleteExpense(expId) {
     // Auth guard — Firestore write requires a signed-in operator.
     const user = await _waitForAuth();
     if (!user) {
-        alert("Sign-in nahi hua. Page reload karo aur phir try karo.");
+        await showAlert("Sign-in nahi hua. Page reload karo aur phir try karo.", 'error', 'Auth Error');
         await loadExpenseData();
         return;
     }
@@ -243,7 +248,7 @@ async function deleteExpense(expId) {
         await deleteDoc(doc(db, "daily_expenses", expId));
     } catch (e) {
         console.error("Delete failed:", e);
-        alert("Delete nahi hua. Internet check karo.");
+        await showAlert("Delete nahi hua. Internet check karo.", 'error', 'Delete Failed');
         await loadExpenseData();
     }
 }
@@ -257,8 +262,9 @@ document.getElementById('saveExpenseBtn').addEventListener('click', async () => 
     const amount = amountEl.value;
     const note   = noteEl.value.trim();
 
+    // AI UPDATE [2026-07-30]: Replaced alert() with custom dialogs.
     if (!amount || !note) {
-        alert("Amount aur Note dono daalna zaroori hai!");
+        await showAlert("Amount aur Note dono daalna zaroori hai!", 'warning', 'Missing Fields');
         return;
     }
 
@@ -281,7 +287,7 @@ document.getElementById('saveExpenseBtn').addEventListener('click', async () => 
             // Auth guard — write requires a signed-in operator.
             const user = await _waitForAuth();
             if (!user) {
-                alert("Sign-in nahi hua. Page reload karo aur phir try karo.");
+                await showAlert("Sign-in nahi hua. Page reload karo aur phir try karo.", 'error', 'Auth Error');
                 await loadExpenseData();
                 return;
             }
@@ -292,7 +298,7 @@ document.getElementById('saveExpenseBtn').addEventListener('click', async () => 
                 });
             } catch (e) {
                 console.error("Update failed:", e);
-                alert("Update nahi hua. Internet check karo.");
+                await showAlert("Update nahi hua. Internet check karo.", 'error', 'Update Failed');
                 await loadExpenseData();
             }
         }
@@ -310,7 +316,7 @@ document.getElementById('saveExpenseBtn').addEventListener('click', async () => 
     if (!user) {
         btn.disabled  = false;
         btn.innerText = "Save Expense";
-        alert("Sign-in nahi hua. Page reload karo aur phir try karo.");
+        await showAlert("Sign-in nahi hua. Page reload karo aur phir try karo.", 'error', 'Auth Error');
         return;
     }
 
@@ -343,7 +349,8 @@ document.getElementById('saveExpenseBtn').addEventListener('click', async () => 
         allExpenses = allExpenses.filter(e => e.id !== tempItem.id);
         renderTodayExpenses(null);
         saveExpensesToLS(allExpenses);
-        alert("Save nahi hua. Internet check karo.");
+        // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
+        await showAlert("Save nahi hua. Internet check karo.", 'error', 'Save Failed');
     } finally {
         btn.disabled  = false;
         btn.innerText = "Save Expense";

@@ -55,19 +55,29 @@
         <h2>🍕 Firebase Menu Uploader</h2>
         <p>Live progress & errors will appear below.</p>
         
-        <!-- Button me inline fallback alert laga diya hai -->
-        <button id="uploadBtn" onclick="if(!window.isReady) alert('Script is still loading or failed. Check the black box below for errors!')">Loading Firebase... ⏳</button>
+        <!-- AI UPDATE [2026-07-30]: Removed inline alert(); handled via module click handler below. -->
+        <button id="uploadBtn" disabled>Loading Firebase... ⏳</button>
         
         <progress id="progressBar" value="0" max="100"></progress>
         <div id="logBox"></div>
     </div>
 
     <script type="module">
+        // AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert().
+        import { showAlert } from './js/dialog.js';
+
         const uploadBtn = document.getElementById('uploadBtn');
         const progressBar = document.getElementById('progressBar');
         const logBox = document.getElementById('logBox');
 
         window.isReady = false; // Flag for button state
+
+        // Show error if user somehow clicks before Firebase is ready
+        uploadBtn.addEventListener('click', async () => {
+            if (!window.isReady) {
+                await showAlert('Script is still loading or failed. Check the log box below for errors!', 'warning', 'Not Ready');
+            }
+        });
 
         function logToScreen(message, type = "success") {
             const div = document.createElement('div');
@@ -114,7 +124,7 @@
                 // Button ko activate karo
                 window.isReady = true;
                 uploadBtn.innerText = "Start Full Menu Upload";
-                uploadBtn.onclick = null; // Remove inline fallback alert
+                uploadBtn.disabled = false;
 
                 const menuItems = [
                     // --- SANDWICH ---

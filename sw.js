@@ -42,7 +42,9 @@
 //   js/receipt-builder.js after ESC/POS receipt upgrade (esc-pos-encoder library).
 // AI UPDATE [2026-07-30]: Bumped v22 → v23 to bust cached cart.js and index.html
 //   after adding Cancel Order button and cancelOrderInPOS() flow.
-const CACHE_NAME = 'pos-static-v23';
+// AI UPDATE [2026-07-30]: Bumped v23 → v24 to cache new js/dialog.js and bust
+//   all modified JS/HTML files after replacing all browser-native dialogs.
+const CACHE_NAME = 'pos-static-v24';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
@@ -51,6 +53,7 @@ const STATIC_ASSETS = [
     '/customer.html',
     '/css/style.css',
     '/js/firebase-config.js',
+    '/js/dialog.js',
     '/js/menu.js',
     '/js/cart.js',
     '/js/receipt-builder.js',

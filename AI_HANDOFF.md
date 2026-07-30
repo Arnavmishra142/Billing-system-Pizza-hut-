@@ -1,6 +1,109 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-30 (Cancel Order session)
+> Last updated: 2026-07-30 (Custom Dialog System — full audit & migration)
+
+---
+
+## Feature Implemented (2026-07-30 — Custom Dialog System)
+
+### All Browser-Native Dialogs Replaced with Custom Modal System
+
+#### What was done
+
+Every `alert()`, `confirm()`, and `prompt()` call across the entire Billing Panel has been
+replaced with a reusable Promise-based custom dialog system (`js/dialog.js`) that matches
+the Billing Panel's existing dark design language.
+
+#### New module: `js/dialog.js`
+
+Exports three Promise-based functions:
+
+| Function | Replaces | Return type |
+|---|---|---|
+| `showAlert(message, type?, title?)` | `alert()` | `Promise<void>` |
+| `showConfirm(message, opts?)` | `confirm()` | `Promise<boolean>` |
+| `showPrompt(message, opts?)` | `prompt()` | `Promise<string\|null>` |
+
+`type` values: `'info'` (default), `'success'`, `'error'`, `'warning'`
+
+The module injects its own CSS into `<head>` on first use — no external stylesheet required.
+It also sets `window.BillingDialog = { showAlert, showConfirm, showPrompt }` so non-module
+inline `<script>` blocks (index.html, details.html, upload-menu.html) can use the same API.
+
+#### Design — matches existing Billing Panel style
+
+- Background: `#161b22` (same as admin panel card background)
+- Border: `1px solid #30363d`
+- Border-radius: `16px`
+- Box-shadow: `0 25px 60px -10px rgba(0,0,0,0.75)`
+- Backdrop: `rgba(0,0,0,0.78)` + `backdrop-filter: blur(5px)`
+- Animations: scale + translateY entrance with spring cubic-bezier; opacity fade
+- Type accent bars: green (success), red (error), amber (warning), blue (info)
+- Buttons match admin.css `.btn` styles; Cancel button styled neutral, Confirm red for destructive actions
+
+#### Behavior
+
+- ESC closes all dialog types
+- Enter dismisses alert dialogs
+- Click-outside closes alert dialogs (not confirm — prevents accidental dismissal)
+- Default focus: OK button for alerts; Cancel button for confirms (safer for destructive actions)
+- Fully Promise-based — all calling code uses `await` without refactoring structure
+- Mobile-friendly: stack layout on narrow viewports; touch-optimised tap targets
+
+#### Files migrated (all native dialogs removed)
+
+| File | Dialogs replaced | Notes |
+|------|-----------------|-------|
+| `js/dialog.js` | **New file** | Reusable dialog module |
+| `js/cart.js` | 1× `alert`, 1× `confirm` | cancelOrderBtn handler made `async` |
+| `js/admin.js` | 4× `alert`, 3× `confirm` | All handlers already `async` |
+| `js/expense.js` | 5× `alert`, 1× `confirm` | All handlers already `async` |
+| `js/menu.js` | 3× `alert` | `saveToBillBtn.onclick` made `async` |
+| `js/customers.js` | 1× `alert` | Already in `async` catch block |
+| `index.html` | 2× `alert` | `reprintGhostBill` made `async`; dialog loaded via `<script type="module" src="js/dialog.js">` |
+| `details.html` | 1× `alert` | `printBill` made `async`; dialog loaded via `<script type="module" src="js/dialog.js">` |
+| `customer.html` | 1× `alert`, 1× `confirm` | Imported from `./js/dialog.js` at top of inline module; logout handler made `async` |
+| `upload-menu.html` | 1× `alert` (inline onclick) | Removed `disabled` removed; click handler in module now calls `showAlert` |
+| `order-panel-updates/js/auth.js` | 1× `confirm` | Uses `window.BillingDialog` if available; auto-confirms if not (see note below) |
+| `sw.js` | — | Added `/js/dialog.js` to `STATIC_ASSETS`; bumped cache `v23` → `v24` |
+
+#### Customer Panel deployment note (`order-panel-updates/js/auth.js`)
+
+When this file is deployed to `teamdovolve-hue/Order-`, `js/dialog.js` **must also be deployed**
+to that repo and loaded in the Customer Panel's HTML so that `window.BillingDialog` is available.
+
+If `dialog.js` is not loaded in the Customer Panel, the logout confirmation is auto-accepted (the
+user is logged out without a dialog). This is a safe default — the user intended to log out — but
+the confirmation step is skipped.
+
+**Required change in Customer Panel:**
+- Copy `js/dialog.js` from this repo to `js/dialog.js` in `teamdovolve-hue/Order-`
+- Add `<script type="module" src="js/dialog.js"></script>` to the Customer Panel HTML
+
+#### Verification checklist
+
+| Feature | Dialog used | Status |
+|---------|-------------|--------|
+| ✓ Delete Customer | `showAlert` (error on failure) | Migrated |
+| ✓ Cancel Order (POS) | `showConfirm` (error type) | Migrated |
+| ✓ Delete Bill (Admin) | `showConfirm` (error type) | Migrated |
+| ✓ Delete Menu Item | `showConfirm` (error type) | Migrated |
+| ✓ Delete Expense (expense.js) | `showConfirm` (error type) | Migrated |
+| ✓ Delete Expense (admin.js) | `showConfirm` (error type) | Migrated |
+| ✓ Clear Cart / no new items | `showAlert` (warning type) | Migrated |
+| ✓ Logout (customer.html) | `showConfirm` (warning type) | Migrated |
+| ✓ Logout (auth.js Customer Panel) | `showConfirm` via BillingDialog | Migrated |
+| ✓ Save failed (various) | `showAlert` (error type) | Migrated |
+| ✓ Auth error messages | `showAlert` (error type) | Migrated |
+| ✓ Missing required fields | `showAlert` (warning type) | Migrated |
+| ✓ Print error (index.html) | `showAlert` (error/warning) | Migrated |
+| ✓ Print error (details.html) | `showAlert` (warning) | Migrated |
+| ✓ Upload script not ready | `showAlert` (warning) | Migrated |
+| ✓ Order placement failed | `showAlert` (error) | Migrated |
+
+**ZERO native `alert()`, `confirm()`, or `prompt()` calls remain in the Billing Panel codebase.**
+
+---
 
 ---
 

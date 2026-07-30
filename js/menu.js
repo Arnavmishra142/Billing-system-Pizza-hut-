@@ -1,3 +1,5 @@
+// AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert().
+import { showAlert } from './dialog.js';
 import { db } from './firebase-config.js';
 import {
     collection, getDocs, addDoc,
@@ -563,8 +565,9 @@ function setupQuickAddPopups() {
         const price = document.getElementById('globalItemPrice').value.trim();
         const cat = document.getElementById('globalItemCategory').value.trim() || 'Custom Item';
 
+        // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
         if(!name || !price) {
-            alert("Name aur Price zaroori hai!");
+            await showAlert("Name aur Price zaroori hai!", 'warning', 'Missing Fields');
             return;
         }
 
@@ -591,7 +594,8 @@ function setupQuickAddPopups() {
 
         } catch(e) {
             console.error("Save error:", e);
-            alert("Save nahi hua!");
+            // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
+            await showAlert("Save nahi hua!", 'error', 'Save Failed');
         } finally {
             btn.innerText = "Save to Menu";
             btn.disabled = false;
@@ -601,12 +605,13 @@ function setupQuickAddPopups() {
     const saveToBillBtn = document.getElementById('saveToBillBtn'); 
     
     if (saveToBillBtn) {
-        saveToBillBtn.onclick = () => {
+        // AI UPDATE [2026-07-30]: Made async to support custom dialog (replaces alert()).
+        saveToBillBtn.onclick = async () => {
             const name = document.getElementById('tempItemName').value.trim(); 
             const price = document.getElementById('tempItemPrice').value.trim(); 
 
             if (!name || !price) {
-                alert("Bhai naam aur price dono daalna zaroori hai!");
+                await showAlert("Bhai naam aur price dono daalna zaroori hai!", 'warning', 'Missing Fields');
                 return;
             }
 
