@@ -326,6 +326,12 @@
     
     <div id="printArea"></div>
 
+    <!-- AI UPDATE [2026-07-30]: esc-pos-encoder (Niels Leenheer) — browser-compatible
+         ESC/POS library used by js/receipt-builder.js for professional bill receipts.
+         UMD build exposes window.EscPosEncoder. Loaded before module scripts so it is
+         available when cart.js calls buildBillReceipt() on first Bill & Settle. -->
+    <script src="https://unpkg.com/esc-pos-encoder@latest/dist/esc-pos-encoder.umd.js"></script>
+
     <script type="module" src="js/firebase-config.js"></script>
     <script type="module" src="js/tables.js"></script>
     <script type="module" src="js/menu.js"></script>

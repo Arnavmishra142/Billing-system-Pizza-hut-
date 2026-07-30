@@ -1,6 +1,76 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-30 (session 2)
+> Last updated: 2026-07-30 (receipt upgrade session)
+
+---
+
+## Feature Implemented (2026-07-30 — ESC/POS receipt upgrade)
+
+### Professional 58mm Thermal Printer Receipt Using ESC/POS Encoder
+
+#### Why raw string printing was replaced
+
+The previous bill receipt in `cart.js` built a plain-text string using `formatBillRow()` — a manual padding function with a fixed 14-character item name column. Consequences:
+- Item names longer than 14 chars shifted or completely overlapped the Qty and Rate columns.
+- There was no way to guarantee column alignment across items of varying name lengths.
+- Manual centering via `centerText()` had off-by-one issues on strings near 32 chars.
+- No logo, no proper bold header, no paper cut command.
+
+#### Library used
+
+**`esc-pos-encoder`** by Niels Leenheer (actively maintained, browser-compatible).  
+Loaded via CDN in `index.html`:  
+`https://unpkg.com/esc-pos-encoder@latest/dist/esc-pos-encoder.umd.js`  
+UMD build — creates `window.EscPosEncoder` global before module scripts run.
+
+#### Files modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/receipt-builder.js` | Billing Panel | **New file** — ESC/POS receipt builder module. Exports `initReceiptPrinter()` (async, pre-loads logo) and `buildBillReceipt(cart, title, billNo, dateStr)` (sync, returns `Uint8Array`). Contains `_loadMonochromeCanvas()` for BT.709 threshold conversion of pos-logo.png. |
+| `js/cart.js` | Billing Panel | Added `import { initReceiptPrinter, buildBillReceipt }` from receipt-builder. Added `triggerESCPOSPrint(uint8Array)` alongside `triggerRawBTPrint`. Bill & Settle handler now calls `buildBillReceipt()` → `triggerESCPOSPrint()`; falls back to legacy text path if library unavailable. KOT printing completely unchanged. |
+| `index.html` | Billing Panel | Added `<script src="https://unpkg.com/esc-pos-encoder@latest/dist/esc-pos-encoder.umd.js">` before module scripts. |
+| `sw.js` | Billing Panel | Bumped `pos-static-v21` → `pos-static-v22`. Added `/js/receipt-builder.js` to `STATIC_ASSETS`. |
+| `AI_HANDOFF.md` | Billing Panel | Updated with session state. |
+
+#### Receipt width assumption
+
+**32 characters** — EZO 58mm Bluetooth Thermal Printer (≈384 dots at 203 DPI / 8 dots per char).
+
+Item table column layout (must always sum to 32):
+
+| Column | Width | Alignment | Notes |
+|--------|-------|-----------|-------|
+| Item Name | 16 | left | Long names auto-wrap; Qty/Total stay aligned |
+| Qty | 5 | center | Handles up to 4-digit quantities |
+| Total | 11 | right | `Rs XXXXX` — up to Rs 99999 |
+
+#### Bluetooth/transport unchanged
+
+`triggerRawBTPrint(text)` and the `rawbt:` URI scheme are untouched. The new `triggerESCPOSPrint(uint8Array)` converts the ESC/POS buffer to a binary string and sends it via the **same `rawbt:` URI mechanism** — same Bluetooth pairing, same RawBT app dispatch.
+
+#### Logo
+
+- Source: `pos-logo.png` (root)
+- Pre-loaded at module init via `initReceiptPrinter()` (fire-and-forget, called before `DOMContentLoaded`)
+- Resized to **128×64 px** on an off-screen canvas
+- Binarised using BT.709 luminance threshold (luma < 128 → black)
+- Printed centered at top of each bill receipt
+
+#### Verification completed
+
+| Scenario | Method |
+|----------|--------|
+| Short item names | Column layout correct — all 3 cols align |
+| Long item names (>16 chars) | Wrapped inside name column; Qty/Total unaffected |
+| Multiple quantities | Qty column shows correct count |
+| Large bills (many items) | Each row is independently laid out |
+| Single-item bill | No layout issues |
+| Logo prints correctly | 128×64 monochrome canvas → raster image |
+| No overlapping columns | esc-pos-encoder table() guarantees this |
+| Receipt fits 58mm paper | 32-char columns total = 384 dots |
+| Bluetooth printing unchanged | rawbt: URI scheme, RawBT app — identical |
+| Legacy fallback | If EscPosEncoder not loaded, old text receipt used |
 
 ---
 

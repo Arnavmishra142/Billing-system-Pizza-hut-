@@ -1,6 +1,8 @@
 import { db, functions } from './firebase-config.js';
 import { doc, setDoc, updateDoc, serverTimestamp, getDocs, getDoc, query, where, collection, increment } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
+// AI UPDATE [2026-07-30]: Import receipt builder for ESC/POS bill printing.
+import { initReceiptPrinter, buildBillReceipt } from './receipt-builder.js';
 
 // ===== AI UPDATE =====
 // Date: 2026-07-28
@@ -330,6 +332,10 @@ function _showReleaseError(message) {
     setTimeout(() => banner.remove(), 6000);
 }
 
+// AI UPDATE [2026-07-30]: Pre-load the shop logo for thermal receipt printing.
+// Fire-and-forget — printing falls back gracefully if logo isn't ready yet.
+initReceiptPrinter();
+
 document.addEventListener('DOMContentLoaded', () => {
     const cartItemsContainer = document.getElementById('cartItems');
     const cartTotalElement = document.getElementById('cartTotal');
@@ -634,8 +640,32 @@ document.addEventListener('DOMContentLoaded', () => {
         backToTablesBtn.click();
     });
 
+    // ── triggerRawBTPrint — original text-based rawbt: transport (KOT + fallback) ──
+    // Kept unchanged. Used by KOT printing and as fallback when the ESC/POS
+    // encoder is unavailable.
     const triggerRawBTPrint = (text) => {
         const uri = "rawbt:" + encodeURIComponent(text);
+        const a = document.createElement('a');
+        a.href = uri;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
+    // ── triggerESCPOSPrint — binary ESC/POS rawbt: transport (bill receipts) ────
+    // AI UPDATE [2026-07-30]: New function for sending a Uint8Array ESC/POS buffer
+    // through the same rawbt: URI scheme.  The Uint8Array is converted to a binary
+    // string before URL-encoding so RawBT receives the exact bytes the encoder
+    // produced (including all ESC/POS control sequences for alignment, bold,
+    // image raster data, paper cut, etc.).
+    // The Bluetooth pairing, connection, and RawBT dispatch are unchanged.
+    const triggerESCPOSPrint = (uint8Array) => {
+        let binaryStr = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+            binaryStr += String.fromCharCode(uint8Array[i]);
+        }
+        const uri = 'rawbt:' + encodeURIComponent(binaryStr);
         const a = document.createElement('a');
         a.href = uri;
         a.style.display = 'none';
@@ -773,32 +803,48 @@ document.addEventListener('DOMContentLoaded', () => {
             const cartSnapshot = currentCart.slice();
 
             // ── Build and print bill immediately (no network wait) ────────────
-            const BOLD_ON = '\x1B\x45\x01';
-            const BOLD_OFF = '\x1B\x45\x00';
+            // AI UPDATE [2026-07-30]: Replace manual string-based bill generation
+            // with ESC/POS encoder (esc-pos-encoder library via CDN in index.html).
+            // buildBillReceipt() returns a Uint8Array; sent via triggerESCPOSPrint().
+            // Falls back to the legacy text receipt if the library is unavailable.
             let shortOrderId = String(Date.now()).slice(-5);
-            let billText = BOLD_ON;
-            billText += centerText("NEW PIZZA HUT AND LIVE CAKE") + "\n";
-            billText += centerText("in front of SBI bank ke tik") + "\n";
-            billText += centerText("samne salempur Deoria, UP") + "\n";
-            billText += centerText("FSSAI: 30230324113093042") + "\n";
-            billText += centerText("Phone: 9628548655") + "\n\n";
-            billText += `Bill No: ${shortOrderId}\n`;
-            billText += `Created On: ${getFormattedDate()}\n`;
-            billText += `Bill To: ${getDisplayTitle()}\n\n`;
-            billText += "Item Name      Qty Rate  Total\n\n";
-            let totalQty = 0;
-            currentCart.forEach(item => {
-                totalQty += item.qty;
-                billText += formatBillRow(item.name, item.qty, item.price, item.price * item.qty);
-            });
-            billText += "\n";
-            billText += `Total Items: ${currentCart.length}\n`;
-            billText += `Total Quantity: ${totalQty}\n`;
-            billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n";
-            billText += centerText(`TOTAL: Rs ${total}`) + "\n\n";
-            billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
+            const escposBuffer = buildBillReceipt(
+                currentCart,
+                getDisplayTitle(),
+                shortOrderId,
+                getFormattedDate()
+            );
 
-            triggerRawBTPrint(billText);
+            if (escposBuffer) {
+                // ── ESC/POS path: proper column alignment, logo, bold totals ──
+                triggerESCPOSPrint(escposBuffer);
+            } else {
+                // ── Legacy fallback: plain text (library unavailable) ─────────
+                const BOLD_ON  = '\x1B\x45\x01';
+                const BOLD_OFF = '\x1B\x45\x00';
+                let billText = BOLD_ON;
+                billText += centerText("NEW PIZZA HUT AND LIVE CAKE") + "\n";
+                billText += centerText("in front of SBI bank ke tik") + "\n";
+                billText += centerText("samne salempur Deoria, UP") + "\n";
+                billText += centerText("FSSAI: 30230324113093042") + "\n";
+                billText += centerText("Phone: 9628548655") + "\n\n";
+                billText += `Bill No: ${shortOrderId}\n`;
+                billText += `Created On: ${getFormattedDate()}\n`;
+                billText += `Bill To: ${getDisplayTitle()}\n\n`;
+                billText += "Item Name      Qty Rate  Total\n\n";
+                let legacyTotalQty = 0;
+                currentCart.forEach(item => {
+                    legacyTotalQty += item.qty;
+                    billText += formatBillRow(item.name, item.qty, item.price, item.price * item.qty);
+                });
+                billText += "\n";
+                billText += `Total Items: ${currentCart.length}\n`;
+                billText += `Total Quantity: ${legacyTotalQty}\n`;
+                billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n";
+                billText += centerText(`TOTAL: Rs ${total}`) + "\n\n";
+                billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
+                triggerRawBTPrint(billText);
+            }
 
             // ── Clear cart and navigate back immediately ───────────────────────
             saveLocalCart([]);

@@ -38,7 +38,9 @@
 //   through the Cloudflare Worker and work on GitHub Pages.
 // AI UPDATE [2026-07-30]: Bumped v20 → v21 to bust cached firebase-config.js after
 //   Worker URL updated to pizza-billing-functions.mishrarnav142.workers.dev
-const CACHE_NAME = 'pos-static-v21';
+// AI UPDATE [2026-07-30]: Bumped v21 → v22 to bust cached cart.js and add new
+//   js/receipt-builder.js after ESC/POS receipt upgrade (esc-pos-encoder library).
+const CACHE_NAME = 'pos-static-v22';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
@@ -49,6 +51,7 @@ const STATIC_ASSETS = [
     '/js/firebase-config.js',
     '/js/menu.js',
     '/js/cart.js',
+    '/js/receipt-builder.js',
     '/js/tables.js',
     '/js/admin.js',
     '/js/expense.js',
