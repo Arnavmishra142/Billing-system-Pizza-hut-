@@ -131,7 +131,7 @@ app.post('/api/notify-order', async (req, res) => {
                 message:  msg,
                 sound:    'notification',
                 priority: 2,    // Emergency: highest priority, bypasses DND/quiet hours
-                retry:    30,   // Resend every 30 s until acknowledged (required for priority 2)
+                retry:    5,    // Resend every 5 s until acknowledged (required for priority 2)
                 expire:   3600  // Stop retrying after 1 hour (required for priority 2)
             })
         });
