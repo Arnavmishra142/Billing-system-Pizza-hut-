@@ -227,6 +227,11 @@
                         <button class="btn btn-save-exit" id="saveExitBtn">SAVE & EXIT</button>
                         <button class="btn btn-checkout" id="checkoutBtn">Bill & Settle</button>
                     </div>
+                    <!-- AI UPDATE [2026-07-30]: CANCEL ORDER button — clears cart,
+                         sets Firestore status to 'dismissed' so customer immediately
+                         loses the active order, and releases the table lock.
+                         Does NOT write to sales_history or customer_order_history. -->
+                    <button class="btn btn-cancel-order" id="cancelOrderBtn">❌ CANCEL ORDER</button>
                 </div>
             </aside>
         </div>

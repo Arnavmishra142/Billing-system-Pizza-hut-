@@ -40,7 +40,9 @@
 //   Worker URL updated to pizza-billing-functions.mishrarnav142.workers.dev
 // AI UPDATE [2026-07-30]: Bumped v21 → v22 to bust cached cart.js and add new
 //   js/receipt-builder.js after ESC/POS receipt upgrade (esc-pos-encoder library).
-const CACHE_NAME = 'pos-static-v22';
+// AI UPDATE [2026-07-30]: Bumped v22 → v23 to bust cached cart.js and index.html
+//   after adding Cancel Order button and cancelOrderInPOS() flow.
+const CACHE_NAME = 'pos-static-v23';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

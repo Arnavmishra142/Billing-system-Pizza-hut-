@@ -300,6 +300,68 @@ async function cancelImportedOrdersOnEmptyCart(tableName) {
     }
 }
 
+// ── Cancel Order — operator explicitly cancels while in POS ──────────────────
+//
+// AI UPDATE [2026-07-30]:
+// Added to handle the case where the operator opens an order in POS but decides
+// not to process it.  Without this, the customer's Active Orders card would be
+// stuck forever showing "Order Confirmed" or "Preparing 🍕".
+//
+// Differences from cancelImportedOrdersOnEmptyCart():
+//   - Also cancels 'kot'-status orders (operator decides to abort even after
+//     KOT was printed and kitchen was notified).
+//   - Only skips 'completed' orders (already billed — must never be un-billed).
+//   - Triggered by an explicit CANCEL ORDER button press, not by an empty-cart
+//     edge-case on Save & Exit.
+//
+// Firestore documents updated:
+//   - pending_table_orders/{id}  →  { status: 'dismissed' }
+//     for every doc in acceptedOrderIds_<tableName> whose status is not 'completed'.
+//     'dismissed' is the existing shared contract: the Customer Panel's onSnapshot
+//     listener removes any Active Order card when it sees this status.
+//
+// Does NOT write to:
+//   - sales_history          (not a completed sale)
+//   - customer_order_history (customer sees no record)
+//   - ghost history / saveToGhostHistory
+//
+// Fire-and-forget: navigation back to the table grid has already happened before
+// this function runs.  A Firestore failure is logged but never blocks the UI.
+// ─────────────────────────────────────────────────────────────────────────────
+async function cancelOrderInPOS(tableName) {
+    const acceptedIds = JSON.parse(
+        localStorage.getItem(`acceptedOrderIds_${tableName}`) || '[]'
+    );
+
+    try {
+        if (acceptedIds.length > 0) {
+            await Promise.all(
+                acceptedIds.map(async id => {
+                    const ref      = doc(db, 'pending_table_orders', id);
+                    const snapshot = await getDoc(ref);
+                    if (!snapshot.exists()) return;
+                    const status = (snapshot.data().status || '').toLowerCase();
+                    // Skip only 'completed' — pending, accepted, and kot are all
+                    // valid targets for an explicit operator cancel.
+                    if (status === 'completed') return;
+                    return updateDoc(ref, { status: 'dismissed' })
+                        .catch(e => console.warn('[CancelOrder] dismiss failed for', id, e));
+                })
+            );
+        }
+
+        // Clear all localStorage convenience-cache keys — same set as
+        // syncCustomerOrderCompletion and cancelImportedOrdersOnEmptyCart.
+        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
+            .forEach(key => localStorage.removeItem(`${key}_${tableName}`));
+
+        console.log(`[CancelOrder] Order explicitly cancelled for table "${tableName}".`);
+    } catch (err) {
+        // Non-fatal — UI has already returned to the table grid.
+        console.warn('[CancelOrder] Firestore cancel failed (non-fatal):', err.message || err);
+    }
+}
+
 // ── Error banner helper ───────────────────────────────────────────────────────
 // Shows a temporary error message near the action buttons.
 // Auto-removes after 6 seconds.  Uses the dark POS colour palette.
@@ -927,6 +989,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // ── Release customer table lock in background (non-blocking) ──────
             releaseTableLockInBackground(tableName, 'save_exit');
+        });
+    }
+
+    // ── Cancel Order ───────────────────────────────────────────────────────────
+    // AI UPDATE [2026-07-30]: New handler for the CANCEL ORDER button.
+    //
+    // Flow:
+    //   1. confirm() guard — prevents accidental cancellation.
+    //   2. Cart wiped instantly (UI + localStorage) — operator sees empty POS.
+    //   3. Navigate back to the table grid immediately — UI is unblocked.
+    //   4. Firestore: cancelOrderInPOS() sets status='dismissed' on all accepted
+    //      order docs (fire-and-forget — navigation already happened).
+    //   5. releaseTableLockInBackground() cleans up the customer table lock.
+    //
+    // Does NOT write to sales_history, customer_order_history, or ghost history.
+    // Does NOT affect revenue, statistics, or order counts.
+    const cancelOrderBtn = document.getElementById('cancelOrderBtn');
+    if (cancelOrderBtn) {
+        cancelOrderBtn.addEventListener('click', () => {
+            if (!confirm(
+                'Cancel this entire order?\n\n' +
+                'All items will be cleared and the customer will immediately ' +
+                'lose the active order on their screen.\n\n' +
+                'This cannot be undone.'
+            )) return;
+
+            const tableName = getCurrentTable();
+
+            // Step 1: Wipe cart immediately (UI + localStorage)
+            saveLocalCart([]);
+            currentCart = [];
+            renderCart();
+
+            // Step 2: Navigate back to the table grid immediately
+            if (backToTablesBtn) backToTablesBtn.click();
+
+            // Step 3: Update Firestore + release lock (fire-and-forget)
+            // These run after navigation so the UI is never blocked.
+            cancelOrderInPOS(tableName);
+            releaseTableLockInBackground(tableName, 'cancel_order');
         });
     }
 });

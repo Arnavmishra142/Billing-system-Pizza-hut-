@@ -1,6 +1,64 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-30 (receipt upgrade session)
+> Last updated: 2026-07-30 (Cancel Order session)
+
+---
+
+## Feature Implemented (2026-07-30 — Cancel Order)
+
+### Dedicated CANCEL ORDER Button in POS
+
+#### Why this was added
+
+Once an order was opened in POS via "Open in POS", the operator had no clean way to abort it. Removing items one by one and pressing Save & Exit (with an empty cart) would trigger `cancelImportedOrdersOnEmptyCart()` — but only for pre-KOT orders. If the operator simply pressed Back without clearing the cart, or had a KOT-status order, the customer's screen remained stuck showing "Order Confirmed" or "Preparing 🍕" forever with no way to clear it without restarting.
+
+#### How it works
+
+One button press performs the complete cancellation flow:
+
+1. **Cart cleared instantly** — `saveLocalCart([])` + `currentCart = []` + `renderCart()` — all items vanish from the POS screen immediately.
+2. **Navigate back** — `backToTablesBtn.click()` — UI returns to the table grid without waiting for any network call.
+3. **Firestore update (fire-and-forget)** — `cancelOrderInPOS(tableName)` sets `status: 'dismissed'` on every `pending_table_orders` doc in `acceptedOrderIds_<table>`. The Customer Panel's `onSnapshot` listener removes the Active Order card in real-time as soon as Firestore propagates.
+4. **Table lock released (fire-and-forget)** — `releaseTableLockInBackground(tableName, 'cancel_order')`.
+
+#### Firestore documents updated
+
+| Collection | Document | Field change |
+|---|---|---|
+| `pending_table_orders` | Every doc ID listed in `acceptedOrderIds_<tableName>` (localStorage) | `status: 'dismissed'` |
+
+Status guard: skips any doc already at `'completed'` (a billed order must never be un-billed). Cancels `pending`, `accepted`, **and** `kot` status orders — the operator explicitly chose to cancel even if the kitchen was already notified.
+
+#### Firestore documents NOT written
+
+- `sales_history` — not a completed sale
+- `customer_order_history` — customer sees no history entry
+- Ghost history / `saveToGhostHistory` — no billing record
+
+#### Files modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `index.html` | Billing Panel | Added `<button id="cancelOrderBtn" class="btn btn-cancel-order">❌ CANCEL ORDER</button>` inside `.billing-section`, below the `.action-grid` row |
+| `css/style.css` | Billing Panel | Added `.btn-cancel-order` styles — full-width, orange (#ea580c), margin-top: 8px. Orange is distinct from SAVE & EXIT (red), Bill & Settle (green), KOT (indigo), Hold (amber) |
+| `js/cart.js` | Billing Panel | Added `cancelOrderInPOS(tableName)` async function (extends `cancelImportedOrdersOnEmptyCart` — also handles `kot` status); added `cancelOrderBtn` click handler inside `DOMContentLoaded` |
+| `sw.js` | Billing Panel | Bumped `pos-static-v22` → `pos-static-v23` to bust cached `cart.js` and `index.html` |
+| `AI_HANDOFF.md` | Billing Panel | Updated with session state |
+
+#### Verification checklist
+
+| Scenario | Expected result |
+|---|---|
+| Normal billing (Bill & Settle) | Unchanged — no interaction with cancelOrderBtn |
+| Save & Exit | Unchanged |
+| KOT | Unchanged |
+| Incoming Orders | Unchanged |
+| Cancel Order — Customer Panel order present | `status: 'dismissed'` written; Customer loses Active Order in real-time |
+| Cancel Order — manual/walk-in order | Cart cleared, navigate back; no Firestore write (acceptedIds is empty — correct) |
+| Cancel Order — KOT already printed | `status: 'dismissed'` written even for `kot` status; Customer loses Preparing view |
+| Cancel Order — accidentally clicked | `confirm()` dialog shown; operator can abort |
+| Revenue / statistics | Unchanged — no sales_history or customer_order_history write |
+| No orphan docs | acceptedOrderIds cleared; localStorage keys removed |
 
 ---
 

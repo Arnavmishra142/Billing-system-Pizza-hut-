@@ -851,6 +851,19 @@ body {
 }
 .btn-save-exit:hover { background: linear-gradient(135deg, #b91c1c, #991b1b); }
 
+/* AI UPDATE [2026-07-30]: CANCEL ORDER button — full-width, below the main action
+   row. Orange distinguishes it from SAVE & EXIT (red) and Bill & Settle (green). */
+.btn-cancel-order {
+    width: 100%;
+    margin-top: 8px;
+    background: #ea580c;
+    font-size: 0.95rem;
+    letter-spacing: 0.03em;
+}
+.btn-cancel-order:hover { background: #c2410c; }
+.light-mode .btn-cancel-order          { background: #ea580c !important; }
+.light-mode .btn-cancel-order:hover    { background: #c2410c !important; }
+
 /* =========================================
    CHECKOUT MODAL
    ========================================= */
