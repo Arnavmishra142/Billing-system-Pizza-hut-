@@ -1,6 +1,61 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-30
+> Last updated: 2026-07-30 (session 2)
+
+---
+
+## Fix Implemented (2026-07-30 — session 2)
+
+### Pushover Notifications Work on Replit Preview but Not GitHub Pages
+
+#### Root Cause
+
+`js/incoming-orders.js` called `fetch('/api/notify-order', ...)` and `fetch('/api/cancel-receipt', ...)` — relative URLs that resolved to Express routes in `server.js`. The Express server only runs on Replit. On GitHub Pages (static host) these POSTs returned 404, silently swallowed by the `try/catch` in both `notifyNewOrder()` and `acknowledgeOrder()`.
+
+The service worker was not involved — it explicitly skips non-GET requests (`if (e.request.method !== 'GET') return;`), so the fetch went straight to the static host.
+
+#### How the Fix Works
+
+The project already has a Cloudflare Worker (`cloudflare-worker/src/index.js`) that implements all backend functions in Cloudflare's free tier. `firebase-config.js` sets `functions.customDomain` to the Worker URL, so all `httpsCallable(functions, ...)` calls route through the Worker on every deployment (Replit Preview and GitHub Pages alike).
+
+The fix adds `notifyOrder` and `cancelReceipt` handlers to the Worker and updates `incoming-orders.js` to call them via `httpsCallable` instead of bare `fetch`.
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `cloudflare-worker/src/index.js` | Billing Panel | Added `PUSHOVER_TOKEN` / `PUSHOVER_USER` constants; added `handleNotifyOrder` and `handleCancelReceipt` handler functions; added `case 'notifyOrder'` and `case 'cancelReceipt'` branches to the main `switch` |
+| `js/incoming-orders.js` | Billing Panel | Added `functions` to firebase-config import; added `httpsCallable` import from Firebase Functions CDN; replaced `fetch('/api/notify-order', ...)` in `notifyNewOrder()` with `httpsCallable(functions, 'notifyOrder')`; replaced `fetch('/api/cancel-receipt', ...)` in `acknowledgeOrder()` with `httpsCallable(functions, 'cancelReceipt')` |
+| `functions/index.js` | Billing Panel | Added `notifyOrder` and `cancelReceipt` exports as reference/Blaze-plan fallback (Worker is the active backend) |
+| `sw.js` | Billing Panel | Bumped `pos-static-v19` → `pos-static-v20` to bust cached `incoming-orders.js` |
+| `AI_HANDOFF.md` | Billing Panel | Updated with session state |
+
+#### Deployment Required — Cloudflare Worker
+
+**The Cloudflare Worker must be redeployed for this fix to take effect on GitHub Pages.**
+
+From the `cloudflare-worker/` directory:
+```bash
+wrangler deploy
+```
+
+The existing GitHub Actions workflow (`.github/workflows/`) only deploys Firebase Functions and Firestore rules — it does not deploy the Worker. The Worker must be deployed manually or a new workflow must be added.
+
+The Express routes in `server.js` (`POST /api/notify-order` and `POST /api/cancel-receipt`) are preserved and unchanged — they are now unused by `incoming-orders.js` but kept for reference.
+
+#### Verification Checklist
+
+| Check | Status |
+|-------|--------|
+| Worker handles `notifyOrder` — sends Pushover, returns receipt | ✓ code |
+| Worker handles `cancelReceipt` — cancels Pushover receipt | ✓ code |
+| `incoming-orders.js` uses `httpsCallable` — works on static hosts | ✓ code |
+| Pushover token never sent to browser | ✓ (Worker is server-side) |
+| Replit Preview still works (Worker is used there too via customDomain) | ✓ code |
+| sw.js cache bumped to bust stale `incoming-orders.js` | ✓ |
+| **Worker deployed via `wrangler deploy`** | ⚠️ pending — user must deploy |
+
+---
 
 ---
 

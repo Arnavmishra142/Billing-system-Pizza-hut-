@@ -25,6 +25,20 @@
  *                         Verifies the billingOperator claim, atomically releases the
  *                         session and marks active orders completed.
  *
+ *   notifyOrder         — Sends a Pushover emergency notification for a new order.
+ *                         Returns { receipt } for later cancellation.
+ *                         Requires any authenticated Firebase user (anonymous ok).
+ *                         AI UPDATE [2026-07-30]: Added so GitHub Pages (static host)
+ *                         can trigger Pushover without a Replit Express server.
+ *                         NOTE: The Cloudflare Worker (cloudflare-worker/src/index.js)
+ *                         is the active backend for this function — this entry is for
+ *                         reference and Blaze-plan fallback only.
+ *
+ *   cancelReceipt       — Cancels an active Pushover emergency notification by receipt.
+ *                         Returns { ok: true } on success.
+ *                         Requires any authenticated Firebase user (anonymous ok).
+ *                         AI UPDATE [2026-07-30]: Added alongside notifyOrder.
+ *
  * Deploy:
  *   cd functions && npm install
  *   firebase deploy --only functions,firestore
@@ -606,6 +620,108 @@ exports.createCustomerOrder = onCall({ region: 'asia-south1' }, async (request) 
 // Uses composite index on customer_table_sessions (activeTableId + lockStatus)
 // — deployed via: firebase deploy --only firestore:indexes
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// notifyOrder
+//
+// Sends a Pushover emergency notification for a new customer order.
+// Returns { receipt } so the billing panel can cancel it via cancelReceipt.
+// Requires any authenticated Firebase user (anonymous session is fine).
+//
+// AI UPDATE [2026-07-30]: Added — the Cloudflare Worker is the active backend
+// (cloudflare-worker/src/index.js handleNotifyOrder); this entry is for
+// reference and Blaze-plan fallback only.
+//
+// Request:  { orderId, tableId, customerName, customerPhone, items, itemCount }
+// Response: { receipt: "<pushover-receipt-string>" }
+// ─────────────────────────────────────────────────────────────────────────────
+exports.notifyOrder = onCall({ region: 'asia-south1' }, async (request) => {
+    if (!request.auth?.uid) {
+        throw new HttpsError('unauthenticated', 'Caller must be authenticated.');
+    }
+
+    const {
+        orderId,
+        tableId       = 'Unknown Table',
+        customerName  = '',
+        customerPhone = '',
+        items         = [],
+        itemCount,
+    } = request.data || {};
+
+    const PUSHOVER_TOKEN = 'a8dwxwd298zj8uu5fotos3h8rhsu2c';
+    const PUSHOVER_USER  = 'u8cgozgvay9w3gmwp34p1od9ytir89';
+
+    const title  = '🔔 New Order — New Pizza Hut & Live Cake';
+    const lines  = ['New Order Received', ''];
+    if (customerName)  lines.push(`Customer: ${customerName}`);
+    if (customerPhone) lines.push(`Phone: ${customerPhone}`);
+    if (tableId)       lines.push(`Table: ${tableId}`);
+    if (orderId)       lines.push(`Order #: ${orderId}`);
+    if (Array.isArray(items) && items.length > 0) {
+        lines.push('', 'Items:');
+        items.forEach(i => lines.push(`• ${i.name || 'Unknown Item'} ×${i.quantity || 1}`));
+    } else if (itemCount) {
+        lines.push('', `Items: ${itemCount} item${itemCount !== 1 ? 's' : ''}`);
+    }
+
+    const res    = await fetch('https://api.pushover.net/1/messages.json', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+            token: PUSHOVER_TOKEN, user: PUSHOVER_USER,
+            title, message: lines.join('\n'), sound: 'notification',
+            priority: 2, retry: 30, expire: 3600,
+        }),
+    });
+    const result = await res.json();
+    if (result.status !== 1) {
+        throw new HttpsError('internal',
+            `Pushover delivery failed: ${(result.errors || []).join(', ')}`);
+    }
+    return { receipt: result.receipt };
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cancelReceipt
+//
+// Cancels an active Pushover emergency notification by receipt ID.
+// Called when the operator clicks "Acknowledge Order".
+//
+// AI UPDATE [2026-07-30]: Added — the Cloudflare Worker is the active backend
+// (cloudflare-worker/src/index.js handleCancelReceipt); this entry is for
+// reference and Blaze-plan fallback only.
+//
+// Request:  { receipt: "<pushover-receipt-string>" }
+// Response: { ok: true }
+// ─────────────────────────────────────────────────────────────────────────────
+exports.cancelReceipt = onCall({ region: 'asia-south1' }, async (request) => {
+    if (!request.auth?.uid) {
+        throw new HttpsError('unauthenticated', 'Caller must be authenticated.');
+    }
+
+    const { receipt } = request.data || {};
+    if (!receipt || typeof receipt !== 'string' || !/^[a-zA-Z0-9]+$/.test(receipt)) {
+        throw new HttpsError('invalid-argument', 'Invalid or missing receipt.');
+    }
+
+    const PUSHOVER_TOKEN = 'a8dwxwd298zj8uu5fotos3h8rhsu2c';
+
+    const res    = await fetch(
+        `https://api.pushover.net/1/receipts/${receipt}/cancel.json`,
+        {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ token: PUSHOVER_TOKEN }),
+        }
+    );
+    const result = await res.json();
+    if (result.status !== 1) {
+        throw new HttpsError('internal',
+            `Pushover cancel failed: ${(result.errors || []).join(', ')}`);
+    }
+    return { ok: true };
+});
+
 exports.releaseTableLock = onCall({ region: 'asia-south1' }, async (request) => {
     requireBillingOperator(request.auth);
 

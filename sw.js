@@ -32,7 +32,11 @@
 // AI UPDATE [2026-07-30]: v18→v19 — bust cached incoming-orders.js after adding
 //   complete emergency acknowledgement workflow: receipt capture, Acknowledge button,
 //   acknowledgeOrder() cancel flow, orphan cleanup.
-const CACHE_NAME = 'pos-static-v19';
+// AI UPDATE [2026-07-30]: v19→v20 — bust cached incoming-orders.js after switching
+//   Pushover calls from fetch('/api/notify-order') to httpsCallable(functions,
+//   'notifyOrder') / httpsCallable(functions, 'cancelReceipt') so they route
+//   through the Cloudflare Worker and work on GitHub Pages.
+const CACHE_NAME = 'pos-static-v20';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

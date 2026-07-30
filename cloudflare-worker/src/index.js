@@ -24,6 +24,12 @@
 const REQUIRE_PHONE_VERIFICATION = false;   // flip to true when OTP/DLT approved
 const OPERATOR_UID               = 'billing-operator-main';
 
+// ── Pushover credentials (server-side only — never sent to browser) ───────────
+// AI UPDATE [2026-07-30]: Added for notifyOrder / cancelReceipt functions.
+// Hardcoded here consistent with server.js (values already in repo).
+const PUSHOVER_TOKEN = 'a8dwxwd298zj8uu5fotos3h8rhsu2c';
+const PUSHOVER_USER  = 'u8cgozgvay9w3gmwp34p1od9ytir89';
+
 // ── Error ──────────────────────────────────────────────────────────────────────
 class FnError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -913,6 +919,107 @@ async function handleReleaseTableLock(data, authCtx, db, fbAuth, env) {
   return { released: true, tableId, releaseReason };
 }
 
+// ── notifyOrder ───────────────────────────────────────────────────────────────
+// AI UPDATE [2026-07-30]: Sends a Pushover emergency notification for a new
+// customer order and returns the receipt string so the billing panel can later
+// cancel the alert via cancelReceipt.
+// Requires any authenticated Firebase user (anonymous session is fine).
+// No Firestore access needed — pure Pushover API call.
+async function handleNotifyOrder(data, authCtx) {
+  if (!authCtx?.uid) throw new FnError('unauthenticated', 'Caller must be authenticated.');
+
+  const {
+    orderId,
+    tableId       = 'Unknown Table',
+    customerName  = '',
+    customerPhone = '',
+    items         = [],
+    itemCount,
+  } = data || {};
+
+  const title = '🔔 New Order — New Pizza Hut & Live Cake';
+
+  const lines = ['New Order Received', ''];
+  if (customerName)  lines.push(`Customer: ${customerName}`);
+  if (customerPhone) lines.push(`Phone: ${customerPhone}`);
+  if (tableId)       lines.push(`Table: ${tableId}`);
+  if (orderId)       lines.push(`Order #: ${orderId}`);
+
+  if (Array.isArray(items) && items.length > 0) {
+    lines.push('', 'Items:');
+    items.forEach(item => {
+      lines.push(`• ${item.name || 'Unknown Item'} ×${item.quantity || 1}`);
+    });
+  } else if (itemCount) {
+    lines.push('', `Items: ${itemCount} item${itemCount !== 1 ? 's' : ''}`);
+  }
+
+  const message = lines.join('\n');
+
+  console.log(`[notifyOrder] Sending emergency Pushover for order ${orderId} (${tableId})`);
+
+  const res = await fetch('https://api.pushover.net/1/messages.json', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      token:    PUSHOVER_TOKEN,
+      user:     PUSHOVER_USER,
+      title,
+      message,
+      sound:    'notification',
+      priority: 2,
+      retry:    30,
+      expire:   3600,
+    }),
+  });
+
+  const result = await res.json();
+  console.log(`[notifyOrder] Pushover response:`, result);
+
+  if (result.status !== 1) {
+    throw new FnError('internal',
+      `Pushover delivery failed: ${(result.errors || ['unknown error']).join(', ')}`);
+  }
+
+  console.log(`[notifyOrder] Delivered ✓ receipt: ${result.receipt}`);
+  return { receipt: result.receipt };
+}
+
+// ── cancelReceipt ─────────────────────────────────────────────────────────────
+// AI UPDATE [2026-07-30]: Cancels an active Pushover emergency notification by
+// receipt ID. Called when the operator clicks "Acknowledge Order".
+// Requires any authenticated Firebase user (anonymous session is fine).
+async function handleCancelReceipt(data, authCtx) {
+  if (!authCtx?.uid) throw new FnError('unauthenticated', 'Caller must be authenticated.');
+
+  const { receipt } = data || {};
+  if (!receipt || typeof receipt !== 'string' || !/^[a-zA-Z0-9]+$/.test(receipt)) {
+    throw new FnError('invalid-argument', 'Invalid or missing receipt.');
+  }
+
+  console.log(`[cancelReceipt] Cancelling emergency receipt: ${receipt}`);
+
+  const res = await fetch(
+    `https://api.pushover.net/1/receipts/${receipt}/cancel.json`,
+    {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ token: PUSHOVER_TOKEN }),
+    }
+  );
+
+  const result = await res.json();
+  console.log(`[cancelReceipt] Pushover response:`, result);
+
+  if (result.status !== 1) {
+    throw new FnError('internal',
+      `Pushover cancel failed: ${(result.errors || ['unknown error']).join(', ')}`);
+  }
+
+  console.log(`[cancelReceipt] Cancelled ✓ receipt: ${receipt}`);
+  return { ok: true };
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -973,6 +1080,23 @@ export default {
           if (!rawToken) throw new FnError('unauthenticated', 'Caller must be authenticated.');
           const authCtx = await verifyIdToken(rawToken, projectId);
           result = await handleReleaseTableLock(data, authCtx, db, fbAuth, env);
+          break;
+        }
+
+        // AI UPDATE [2026-07-30]: Pushover notification functions.
+        // These run entirely in the Worker — no Firestore access needed.
+        // Requires any authenticated Firebase user (anonymous session is fine).
+        case 'notifyOrder': {
+          if (!rawToken) throw new FnError('unauthenticated', 'Caller must be authenticated.');
+          const authCtx = await verifyIdToken(rawToken, projectId);
+          result = await handleNotifyOrder(data, authCtx);
+          break;
+        }
+
+        case 'cancelReceipt': {
+          if (!rawToken) throw new FnError('unauthenticated', 'Caller must be authenticated.');
+          const authCtx = await verifyIdToken(rawToken, projectId);
+          result = await handleCancelReceipt(data, authCtx);
           break;
         }
 

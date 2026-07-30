@@ -146,7 +146,7 @@
 //   counts stay accurate across reconnects.
 // =====================
 
-import { db, auth } from './firebase-config.js';
+import { db, auth, functions } from './firebase-config.js';
 import {
     collection,
     onSnapshot,
@@ -159,6 +159,10 @@ import {
     enableNetwork
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+// AI UPDATE [2026-07-30]: httpsCallable used to route Pushover calls through the
+// Cloudflare Worker (functions.customDomain) instead of the Replit Express server,
+// so notifications work on GitHub Pages (static host) as well as Replit Preview.
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 
 // ── Order-count cache: keyed by phone number ──────────────────────────────────
 // getCustomerOrderCount is called for every order on every renderDrawer() call.
@@ -224,10 +228,12 @@ let _initialLoadDone = false;
 //   Notification chain confirmed working end-to-end in session 14. Only failure
 //   paths are logged (non-OK response, fetch error).
 // AI UPDATE [2026-07-30]: Returns the Pushover receipt string (or null on failure)
-//   so the caller can store it for later acknowledgement via POST /api/cancel-receipt.
-// Calls POST /api/notify-order on the local Express server (server.js), which
-// proxies to the Pushover API with the operator's credentials.
-// A failure is logged but never disrupts the order flow.
+//   so the caller can store it for later acknowledgement via cancelReceipt.
+// AI UPDATE [2026-07-30]: Switched from fetch('/api/notify-order') to
+//   httpsCallable(functions, 'notifyOrder') so the call routes through the
+//   Cloudflare Worker (functions.customDomain) and works on GitHub Pages (static
+//   host) as well as Replit Preview.  The Express /api/notify-order route in
+//   server.js is preserved but no longer called by this module.
 async function notifyNewOrder(orderId, data) {
     const tableId       = data.tableId           || 'Unknown Table';
     const customerName  = data.customer?.name    || '';
@@ -238,40 +244,28 @@ async function notifyNewOrder(orderId, data) {
     console.log(`[incoming-orders] Sending emergency Pushover notification for order ${orderId} (${tableId})`);
 
     try {
-        const res = await fetch('/api/notify-order', {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ orderId, tableId, customerName, customerPhone, items, itemCount })
-        });
+        const fn     = httpsCallable(functions, 'notifyOrder');
+        const result = await fn({ orderId, tableId, customerName, customerPhone, items, itemCount });
 
-        console.log(`[incoming-orders] Pushover response status: ${res.status}`);
+        console.log('[incoming-orders] Pushover response received:', result.data);
 
-        if (!res.ok) {
-            let body;
-            try { body = await res.clone().json(); } catch(_) { body = await res.text(); }
-            console.warn('[incoming-orders] Pushover endpoint error:', res.status, body);
-            return null;
-        }
-
-        const json = await res.json();
-        console.log('[incoming-orders] Pushover response received:', json);
-
-        if (json.receipt) {
-            console.log(`[incoming-orders] Receipt extracted for order ${orderId}:`, json.receipt);
-            return json.receipt;
+        const receipt = result.data?.receipt;
+        if (receipt) {
+            console.log(`[incoming-orders] Receipt extracted for order ${orderId}:`, receipt);
+            return receipt;
         }
 
         return null;
     } catch (err) {
-        console.error('[incoming-orders] Pushover fetch failed:', err.name, err.message);
+        console.error('[incoming-orders] Pushover callable failed:', err.code, err.message);
         return null;
     }
 }
 
 // ── Acknowledge (cancel) an active emergency notification ─────────────────────
-// AI UPDATE [2026-07-30]: Calls POST /api/cancel-receipt on the Express server,
-//   which proxies to Pushover's receipts/{receipt}/cancel.json API.
-//   The Pushover token never leaves the server — not exposed in browser source.
+// AI UPDATE [2026-07-30]: Calls httpsCallable(functions, 'cancelReceipt') —
+//   routes through the Cloudflare Worker (functions.customDomain) so the
+//   Pushover token stays server-side and the call works on GitHub Pages.
 //   _cancellingReceipts guards against duplicate in-flight cancel requests.
 async function acknowledgeOrder(orderId) {
     const receipt = _activeReceipts.get(orderId);
@@ -288,24 +282,20 @@ async function acknowledgeOrder(orderId) {
     console.log(`[incoming-orders] Acknowledge clicked — cancelling emergency receipt for order ${orderId} → receipt: ${receipt}`);
 
     try {
-        const res = await fetch('/api/cancel-receipt', {
-            method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify({ receipt })
-        });
+        const fn     = httpsCallable(functions, 'cancelReceipt');
+        console.log(`[incoming-orders] Cancel request sent for order ${orderId}`);
+        const result = await fn({ receipt });
 
-        console.log(`[incoming-orders] Cancel response status: ${res.status}`);
-        const data = await res.json();
-        console.log('[incoming-orders] Cancel response body:', data);
+        console.log('[incoming-orders] Cancel response body:', result.data);
 
-        if (data.ok) {
+        if (result.data?.ok) {
             _activeReceipts.delete(orderId);
             console.log(`[incoming-orders] Receipt cleared — emergency notification cancelled for order ${orderId}`);
         } else {
-            console.warn(`[incoming-orders] Cancel request succeeded but server reported failure for order ${orderId}:`, data);
+            console.warn(`[incoming-orders] Cancel returned unexpected response for order ${orderId}:`, result.data);
         }
     } catch (err) {
-        console.error(`[incoming-orders] Cancel fetch failed for order ${orderId}:`, err.name, err.message);
+        console.error(`[incoming-orders] Cancel callable failed for order ${orderId}:`, err.code, err.message);
     } finally {
         _cancellingReceipts.delete(orderId);
         renderDrawer(_pendingOrders);
