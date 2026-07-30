@@ -34,5 +34,8 @@ export const storage = getStorage(app);
 export const auth = getAuth(app);
 
 // Firebase Functions — routed through Cloudflare Worker (free tier, no Blaze plan required)
+// AI UPDATE [2026-07-30]: Worker URL updated from young-moon-f3b7.realarnavm.workers.dev to
+//   pizza-billing-functions.mishrarnav142.workers.dev after first-time Cloudflare deployment.
+//   Account: mishrarnav142 · Worker: pizza-billing-functions · Version: 2eb1a992
 export const functions = getFunctions(app, 'asia-south1');
-functions.customDomain = 'https://young-moon-f3b7.realarnavm.workers.dev';
+functions.customDomain = 'https://pizza-billing-functions.mishrarnav142.workers.dev';

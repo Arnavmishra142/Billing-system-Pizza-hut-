@@ -36,7 +36,9 @@
 //   Pushover calls from fetch('/api/notify-order') to httpsCallable(functions,
 //   'notifyOrder') / httpsCallable(functions, 'cancelReceipt') so they route
 //   through the Cloudflare Worker and work on GitHub Pages.
-const CACHE_NAME = 'pos-static-v20';
+// AI UPDATE [2026-07-30]: Bumped v20 → v21 to bust cached firebase-config.js after
+//   Worker URL updated to pizza-billing-functions.mishrarnav142.workers.dev
+const CACHE_NAME = 'pos-static-v21';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
