@@ -1,6 +1,104 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-31 (Feature — Pushover notification ON/OFF toggle in Incoming Orders drawer)
+> Last updated: 2026-07-31 (Bug Fix — Three fixes to Acknowledge Order / Pushover cancel flow)
+
+---
+
+## Bug Fixes (2026-07-31 — Acknowledge Order / Pushover cancel: three remaining issues)
+
+### Overview
+
+After the 2026-07-31 form-encoded fix to `handleCancelReceipt`, three additional issues remained that prevented reliable emergency notification cancellation:
+
+1. **Worker not deployed** — the form-encoded fix existed in source but was never deployed to the live Cloudflare Worker.
+2. **Orphan cleanup** — accepting or dismissing an order silently dropped the receipt from `_activeReceipts` without calling the Pushover cancel API, leaving the notification running for up to 1 hour.
+3. **Receipt lost on reload** — `_activeReceipts` was an in-memory Map; any page reload destroyed all receipts and the Acknowledge button never reappeared.
+
+---
+
+### Fix 1 — Cloudflare Worker Deployment (MANUAL STEP REQUIRED)
+
+The code fix already in `cloudflare-worker/src/index.js` (form-encoded body for `handleCancelReceipt`) must be deployed.
+
+**⚠️ The CLOUDFLARE_API_TOKEN stored in Replit env vars is invalid for this Cloudflare account. The operator must deploy manually:**
+
+```bash
+cd cloudflare-worker
+npx wrangler deploy
+```
+
+This requires the operator to be authenticated with the correct Cloudflare account (`mishrarnav142`, account ID `8a39f7ded493ff634b7d52955e8eed1e`, worker: `pizza-billing-functions`). Running `wrangler login` will open a browser auth flow, or a valid `CLOUDFLARE_API_TOKEN` environment variable can be set.
+
+**Until this step is done, `cancelReceipt` calls through the Worker will continue to fail.**
+
+---
+
+### Fix 2 — Orphan Cleanup Now Calls `acknowledgeOrder()` Instead of Silent Delete
+
+**Root Cause:** The orphan cleanup loop in the `onSnapshot` callback called `_activeReceipts.delete(orderId)` when an order left the pending list. This removed the receipt from memory without ever hitting the Pushover cancel API. The emergency notification kept repeating every 30 s for the full `expire=3600s` window even after the operator clicked "Open in POS" or "Dismiss".
+
+**Fix:** Replaced `_activeReceipts.delete(orderId)` in the orphan cleanup with `acknowledgeOrder(orderId)` (fire-and-forget). `acknowledgeOrder` already guards against duplicate calls via `_cancellingReceipts` and calls `_saveActiveReceipts()` on success.
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/incoming-orders.js` | Billing Panel | Orphan cleanup loop: `_activeReceipts.delete()` → `acknowledgeOrder()` |
+| `sw.js` | Billing Panel | Bumped `pos-static-v26` → `pos-static-v27` |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+---
+
+### Fix 3 — `_activeReceipts` Persisted to localStorage
+
+**Root Cause:** `_activeReceipts` was declared as `new Map()` — purely in-memory. Any page reload (accidental refresh, mobile browser backgrounding, network blip) destroyed all stored receipts. On the next page load, the `onSnapshot` callback saw the orders already in `_notified` (pre-existing), so no new notification fired, no new receipt was obtained, and the Acknowledge button never appeared. The only way to stop the notification was via the Pushover app.
+
+**Fix:**
+- Added `_RECEIPTS_LS_KEY = 'pos_active_receipts'` constant.
+- Added `_loadActiveReceipts()`: reads from localStorage on module load (JSON → Map). Returns empty Map on any parse error.
+- Added `_saveActiveReceipts()`: serialises Map → JSON → localStorage. Wrapped in try/catch.
+- `_activeReceipts` now initialised via `_loadActiveReceipts()`.
+- `_saveActiveReceipts()` called after every mutation: receipt set in snapshot callback, receipt deleted in `acknowledgeOrder()`.
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/incoming-orders.js` | Billing Panel | `_loadActiveReceipts()`, `_saveActiveReceipts()`, `_RECEIPTS_LS_KEY`; `_activeReceipts` initialised from localStorage; `_saveActiveReceipts()` called after every mutation |
+| `sw.js` | Billing Panel | Bumped `pos-static-v26` → `pos-static-v27` (covers both Fix 2 and Fix 3) |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+---
+
+### Fix 4 — `server.js` `retry: 5` Corrected to `retry: 30` (Dead Code)
+
+**Root Cause:** The Express `/api/notify-order` route (which is no longer called by any client — the Cloudflare Worker is used instead) had `retry: 5`, below Pushover's minimum of 30 s for priority=2. Corrected to `retry: 30` for accuracy in case the route is re-enabled.
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `server.js` | Billing Panel | `retry: 5` → `retry: 30` with AI UPDATE comment |
+
+---
+
+### Verification Checklist
+
+| Check | Status |
+|-------|--------|
+| New customer order sends Pushover emergency notification | ✅ unchanged |
+| Receipt returned and stored in `_activeReceipts` | ✅ unchanged |
+| Receipt persisted to localStorage (survives reload) | ✅ Fix 3 |
+| Acknowledge button reappears after page reload | ✅ Fix 3 |
+| Click Acknowledge → `acknowledgeOrder()` → Worker cancel | ✅ code correct; requires Worker deploy |
+| Open in POS → emergency notification auto-cancelled | ✅ Fix 2 |
+| Dismiss order → emergency notification auto-cancelled | ✅ Fix 2 |
+| No duplicate cancel calls (guarded by `_cancellingReceipts`) | ✅ unchanged |
+| Notification ON/OFF toggle | ✅ unchanged |
+| All other incoming order behaviours | ✅ unchanged |
+| **Cloudflare Worker deployed with form-encoded fix** | ⚠️ MANUAL STEP — run `wrangler deploy` |
+
+---
 
 ---
 

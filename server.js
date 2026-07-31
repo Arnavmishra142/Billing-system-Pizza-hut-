@@ -131,7 +131,11 @@ app.post('/api/notify-order', async (req, res) => {
                 message:  msg,
                 sound:    'notification',
                 priority: 2,    // Emergency: highest priority, bypasses DND/quiet hours
-                retry:    5,    // Resend every 5 s until acknowledged (required for priority 2)
+                // AI UPDATE [2026-07-31]: retry corrected 5 → 30. Pushover requires
+                // retry ≥ 30 s for priority=2. This route is currently unused (client
+                // routes through the Cloudflare Worker via httpsCallable), but fixed
+                // for correctness in case it is re-enabled.
+                retry:    30,   // Resend every 30 s — Pushover minimum for priority 2
                 expire:   3600  // Stop retrying after 1 hour (required for priority 2)
             })
         });

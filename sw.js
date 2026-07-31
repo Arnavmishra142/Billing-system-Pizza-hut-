@@ -48,7 +48,14 @@
 //   js/dialog.js after regression fixes (printKOT async + pointer-events fix).
 // AI UPDATE [2026-07-31]: Bumped v25 → v26 to bust cached js/incoming-orders.js
 //   after adding Pushover notification ON/OFF toggle.
-const CACHE_NAME = 'pos-static-v26';
+// AI UPDATE [2026-07-31]: Bumped v26 → v27 to bust cached js/incoming-orders.js
+//   after three fixes to the acknowledgement flow:
+//   1. _activeReceipts persisted to localStorage (survives page reload).
+//   2. Orphan cleanup now calls acknowledgeOrder() instead of silently deleting
+//      receipts — emergency notification is now auto-cancelled when operator
+//      clicks "Open in POS" or "Dismiss".
+//   3. _saveActiveReceipts() called after every receipt mutation.
+const CACHE_NAME = 'pos-static-v27';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

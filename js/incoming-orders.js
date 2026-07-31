@@ -5,6 +5,29 @@
 // which forwards a Pushover push notification to the operator's phone.
 
 // ===== AI UPDATE =====
+// Date: 2026-07-31 — Three fixes to the Acknowledge Order / emergency cancel flow.
+//
+// Fix 1 — Cloudflare Worker form-encoded fix (code-only; Worker deploy is pending):
+//   The handleCancelReceipt fix (JSON → form-encoded body for Pushover cancel API)
+//   was written on 2026-07-31 in cloudflare-worker/src/index.js but the live Worker
+//   has not yet been redeployed. Run `cd cloudflare-worker && wrangler deploy` to
+//   make cancel calls work end-to-end. Tracked as a separate task.
+//
+// Fix 2 — Orphan cleanup now calls acknowledgeOrder() instead of silently deleting:
+//   When an order left the pending list ("Open in POS" or "Dismiss"), the receipt
+//   was removed from _activeReceipts without hitting the Pushover cancel API.
+//   The emergency notification kept repeating for the full expire=3600s window.
+//   Now acknowledgeOrder() is called fire-and-forget so it is auto-cancelled.
+//   Race guard added: if notifyNewOrder() resolves AFTER the order has already left
+//   the pending list, the receipt is cancelled immediately instead of being stored.
+//
+// Fix 3 — _activeReceipts persisted to localStorage (key: 'pos_active_receipts'):
+//   _activeReceipts was an in-memory Map. A page reload dropped all receipts,
+//   making the Acknowledge button permanently disappear. Now receipts survive
+//   reloads and the button reappears on the next page load.
+// =====================
+
+// ===== AI UPDATE =====
 // Date: 2026-07-30
 // Feature: Complete emergency Pushover acknowledgement workflow.
 //
@@ -209,8 +232,31 @@ const _notified = new Set();
 // _cancellingReceipts: Set of order IDs currently being cancelled (in-flight guard).
 //   Prevents duplicate POST /api/cancel-receipt calls if the operator clicks the
 //   Acknowledge button more than once before the first request resolves.
-const _activeReceipts     = new Map();   // orderId → receipt string
-const _cancellingReceipts = new Set();   // orderId → cancel in progress
+
+// AI UPDATE [2026-07-31]: Persist active receipts to localStorage so they survive
+//   page reloads. If the operator reloads the page while an emergency notification
+//   is active, the receipt is restored and the Acknowledge button reappears.
+const _RECEIPTS_LS_KEY = 'pos_active_receipts';
+
+function _loadActiveReceipts() {
+    try {
+        const saved = localStorage.getItem(_RECEIPTS_LS_KEY);
+        if (saved) return new Map(Object.entries(JSON.parse(saved)));
+    } catch (_) {}
+    return new Map();
+}
+
+function _saveActiveReceipts() {
+    try {
+        localStorage.setItem(
+            _RECEIPTS_LS_KEY,
+            JSON.stringify(Object.fromEntries(_activeReceipts))
+        );
+    } catch (_) {}
+}
+
+const _activeReceipts     = _loadActiveReceipts();  // orderId → receipt string (persisted)
+const _cancellingReceipts = new Set();               // orderId → cancel in progress
 
 // AI UPDATE [2026-07-31] — Notification ON/OFF toggle.
 // Operator preference persisted in localStorage so it survives page refresh.
@@ -298,6 +344,7 @@ async function acknowledgeOrder(orderId) {
 
         if (result.data?.ok) {
             _activeReceipts.delete(orderId);
+            _saveActiveReceipts();
             console.log(`[incoming-orders] Receipt cleared — emergency notification cancelled for order ${orderId}`);
         } else {
             console.warn(`[incoming-orders] Cancel returned unexpected response for order ${orderId}:`, result.data);
@@ -762,9 +809,25 @@ function startListening() {
                 if (_notificationsEnabled) {
                     notifyNewOrder(docSnap.id, data).then(receipt => {
                         if (receipt) {
-                            console.log(`[incoming-orders] Receipt stored for order ${docSnap.id}:`, receipt);
+                            // AI UPDATE [2026-07-31]: Race guard — store the receipt first,
+                            // then check whether the order is still in the pending list.
+                            // If notifyNewOrder() resolved AFTER the order was accepted or
+                            // dismissed (the operator acted while the Worker call was in-flight),
+                            // the orphan cleanup has already run and will not run again for this
+                            // orderId.  Without this guard the receipt would be stored in
+                            // _activeReceipts permanently with no future cleanup, and the
+                            // emergency notification would run to its full expire=3600s window.
+                            // Fix: store the receipt, then immediately cancel if no longer pending.
                             _activeReceipts.set(docSnap.id, receipt);
-                            renderDrawer(_pendingOrders);
+                            const stillPending = _pendingOrders.some(o => o.id === docSnap.id);
+                            if (stillPending) {
+                                console.log(`[incoming-orders] Receipt stored for order ${docSnap.id}:`, receipt);
+                                _saveActiveReceipts();
+                                renderDrawer(_pendingOrders);
+                            } else {
+                                console.log(`[incoming-orders] Order ${docSnap.id} already left pending while notify was in-flight — auto-cancelling`);
+                                acknowledgeOrder(docSnap.id);  // clears receipt, saves, no re-render needed
+                            }
                         }
                     });
                 } else {
@@ -780,13 +843,19 @@ function startListening() {
 
         // AI UPDATE [2026-07-30] — Orphan cleanup: if an order was accepted or
         // dismissed before the operator acknowledged its emergency notification,
-        // its receipt entry must be removed so no stale Acknowledge button appears
-        // after the card disappears.
+        // cancel the Pushover notification automatically so the phone stops ringing.
+        // AI UPDATE [2026-07-31]: Changed from silent _activeReceipts.delete() to
+        //   calling acknowledgeOrder(). Previously the receipt was removed from the
+        //   Map without ever hitting the Pushover cancel API, so the emergency
+        //   notification kept repeating for the full expire=3600s window even after
+        //   the operator accepted the order ("Open in POS") or dismissed it.
+        //   acknowledgeOrder() is fire-and-forget here (not awaited); it guards
+        //   internally against duplicate calls via _cancellingReceipts.
         const pendingIds = new Set(pending.map(o => o.id));
         for (const orderId of _activeReceipts.keys()) {
             if (!pendingIds.has(orderId)) {
-                console.log(`[incoming-orders] Orphaned receipt cleaned up for removed order ${orderId}`);
-                _activeReceipts.delete(orderId);
+                console.log(`[incoming-orders] Order ${orderId} left pending — auto-cancelling emergency notification`);
+                acknowledgeOrder(orderId);  // fire-and-forget; clears receipt + saves on success
             }
         }
 
