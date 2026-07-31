@@ -44,7 +44,9 @@
 //   after adding Cancel Order button and cancelOrderInPOS() flow.
 // AI UPDATE [2026-07-30]: Bumped v23 → v24 to cache new js/dialog.js and bust
 //   all modified JS/HTML files after replacing all browser-native dialogs.
-const CACHE_NAME = 'pos-static-v24';
+// AI UPDATE [2026-07-31]: Bumped v24 → v25 to bust cached js/cart.js and
+//   js/dialog.js after regression fixes (printKOT async + pointer-events fix).
+const CACHE_NAME = 'pos-static-v25';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

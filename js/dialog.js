@@ -25,6 +25,13 @@
 // ── Inject CSS once ────────────────────────────────────────────────────────────
 const DIALOG_CSS = `
 /* ── Billing Panel Custom Dialog System ──────────────────────────────────── */
+/* AI UPDATE [2026-07-31]: Added pointer-events: none on .bp-overlay by default.
+   Without this, the overlay (z-index 10000) intercepts ALL clicks during its
+   180ms closing animation — including clicks on the orders drawer (z-index 5000)
+   and its Acknowledge Order button. By setting pointer-events: none except when
+   .bp-visible, the overlay is never "click-opaque" while invisible or animating
+   in/out. Click-outside-to-close for alert dialogs still works because it only
+   activates once .bp-visible is present (pointer-events: auto). */
 .bp-overlay {
     position: fixed;
     inset: 0;
@@ -38,9 +45,11 @@ const DIALOG_CSS = `
     -webkit-backdrop-filter: blur(5px);
     opacity: 0;
     transition: opacity 0.18s ease;
+    pointer-events: none;
 }
 .bp-overlay.bp-visible {
     opacity: 1;
+    pointer-events: auto;
 }
 
 /* Dialog box */

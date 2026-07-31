@@ -786,7 +786,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return res;
     };
 
-    const printKOT = (isFullKot = false) => {
+    // AI UPDATE [2026-07-31]: Made async — required because the dialog session added
+    // await showAlert() inside this function but forgot to make it async first.
+    // A non-async arrow function with await inside is a SyntaxError in an ES module,
+    // which caused the entire cart.js module to fail to parse — breaking ALL cart
+    // functionality (add-to-cart, load-table-cart, KOT, Bill & Settle, Save & Exit,
+    // Cancel Order, and incoming-order cart population). Making the function async
+    // is the minimal, safe fix: it does not change any other behaviour.
+    const printKOT = async (isFullKot = false) => {
         if (!currentCart || currentCart.length === 0) return;
         
         const itemsToPrint = isFullKot 

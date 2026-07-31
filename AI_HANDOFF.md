@@ -1,6 +1,137 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-30 (Custom Dialog System — full audit & migration)
+> Last updated: 2026-07-31 (Regression fix — dialog session broke cart + acknowledge button)
+
+---
+
+## Bug Fix (2026-07-31 — Dialog Regression)
+
+### Two regressions introduced by the Custom Dialog System session (2026-07-30)
+
+#### BUG 1 — `js/cart.js` SyntaxError: entire POS cart module failed to load
+
+**Root cause**
+
+The dialog session added `await showAlert(...)` inside `printKOT` but did NOT make
+`printKOT` itself `async`. `printKOT` was declared as a regular (non-async) arrow function:
+
+```js
+// BROKEN — non-async function with await inside is a SyntaxError in an ES module
+const printKOT = (isFullKot = false) => {
+    ...
+    await showAlert("Koi naya item nahi hai!...", 'warning', 'No New Items');
+```
+
+In ES modules (strict mode), `await` in a non-async function is a hard **SyntaxError**.
+The browser refuses to parse the entire file at load time. The `<script type="module"
+src="js/cart.js">` element fails silently. Every event listener inside cart.js is
+never registered:
+
+| Broken listener | Effect |
+|---|---|
+| `add-to-cart` | Clicking menu items does nothing |
+| `add-custom-item-to-bill` | Custom items not added |
+| `set-cart-quantity` | Qty badge changes silently dropped |
+| `load-table-cart` | Opening POS does not restore cart |
+| `pos-opened` | POS screen buttons not configured |
+| KOT button | No KOT print |
+| Bill & Settle | No checkout |
+| Save & Exit | No save |
+| Cancel Order | No cancel |
+| `cart-updated` → `syncItemBadges` (via menu.js) | Also fine — that listener is in menu.js |
+
+**Why incoming orders also failed**  
+`incoming-orders.js` writes cart items to localStorage and then calls
+`window._posOpenTable(tableName)`. Without cart.js loaded, the `load-table-cart`
+listener doesn't exist, so opening the POS screen shows an empty cart even though
+localStorage was correctly populated.
+
+**Fix**
+
+One character change in `js/cart.js`:
+
+```js
+// FIXED
+const printKOT = async (isFullKot = false) => {
+```
+
+`printKOT` was already called with `.then()` / `await` in its callers? No — callers use
+direct invocation (`printKOT(false)`), not `await`. Making the function async does NOT
+change any external behaviour: the returned Promise is simply discarded by callers, which
+is identical to the previous synchronous return. The `await showAlert()` inside now
+resolves correctly before the `return` that follows it.
+
+---
+
+#### BUG 2 — `js/dialog.js` overlay intercepts clicks during close animation
+
+**Root cause**
+
+The `.bp-overlay` CSS had no `pointer-events` rule. CSS default is `pointer-events: auto`.
+The overlay has `z-index: 10000` and `position: fixed; inset: 0` — covering the entire
+viewport. When the dialog closes, `_close()` removes the `bp-visible` class, which starts
+a 180ms opacity transition (1 → 0). During those 180ms the overlay is still in the DOM
+with `pointer-events: auto`. Any click during this window hits the invisible overlay
+instead of the element beneath it.
+
+The Acknowledge Order button sits inside the orders drawer at `z-index: 5000`. If the
+operator triggered any billing panel dialog (e.g., the "Cannot Print" alert from
+`reprintGhostBill`) and then immediately tried to click Acknowledge, the click would be
+swallowed by the closing dialog overlay. The button's click handler never fires.
+Result: button appears to do nothing.
+
+Additionally, during the open animation (between `document.body.appendChild(overlay)`
+and `overlay.classList.add('bp-visible')`), there is a brief reflow window where the
+overlay is in the DOM with `opacity: 0` and `pointer-events: auto` before the visible
+state starts — another narrow but possible click-intercept window.
+
+**Fix**
+
+Two lines added to the injected CSS in `js/dialog.js`:
+
+```css
+.bp-overlay {
+    ...
+    pointer-events: none;   /* ← added: never intercept clicks while invisible/animating */
+}
+.bp-overlay.bp-visible {
+    opacity: 1;
+    pointer-events: auto;   /* ← added: clicks work only while dialog is fully shown */
+}
+```
+
+The click-outside-to-close handler for alert dialogs (`overlay.addEventListener('click',
+e => { if (e.target === overlay) done(); })`) is added only after `_open()` is called,
+and the overlay only has `pointer-events: auto` while `bp-visible` is present — so
+click-outside continues to work correctly. No other behaviour changes.
+
+---
+
+#### Files modified
+
+| File | Change |
+|------|--------|
+| `js/cart.js` | `printKOT` arrow function changed from regular to `async` (line ~796). Added AI UPDATE comment. |
+| `js/dialog.js` | Added `pointer-events: none` to `.bp-overlay` and `pointer-events: auto` to `.bp-overlay.bp-visible` in the injected CSS. Added AI UPDATE comment. |
+| `sw.js` | Bumped cache `pos-static-v24` → `pos-static-v25` to bust both modified files. |
+| `AI_HANDOFF.md` | This update. |
+
+#### Verification checklist (post-fix)
+
+| Item | Expected |
+|------|----------|
+| ✓ `cart.js` module loads | `[receipt] Shop logo pre-loaded` in console confirms module parsed |
+| ✓ Manual menu item addition | Clicking item card dispatches `add-to-cart` → cart updates |
+| ✓ Incoming Orders → Open in POS | Cart populated from localStorage on POS open |
+| ✓ KOT | `printKOT` is async, `await showAlert` works correctly |
+| ✓ Bill & Settle | Checkout handler registered |
+| ✓ Save & Exit | Save handler registered |
+| ✓ Cancel Order | Custom confirm dialog still works |
+| ✓ Acknowledge Order | No dialog overlay blocks clicks; `acknowledgeOrder()` can fire |
+| ✓ All custom dialogs | Alert/confirm/prompt all work; pointer-events fix doesn't break them |
+| ✓ Delete Customer | Unchanged |
+
+---
 
 ---
 
