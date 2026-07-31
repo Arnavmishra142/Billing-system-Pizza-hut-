@@ -999,12 +999,17 @@ async function handleCancelReceipt(data, authCtx) {
 
   console.log(`[cancelReceipt] Cancelling emergency receipt: ${receipt}`);
 
+  // AI UPDATE [2026-07-31]: Changed Content-Type to application/x-www-form-urlencoded.
+  // Pushover's messages.json endpoint accepts JSON, but the receipts cancel endpoint
+  // only documents form-encoded parameters.  Sending JSON caused Pushover to ignore
+  // the token field (body not parsed), returning status:0, so the notification was
+  // never actually cancelled.  Form-encoded is always accepted by all Pushover endpoints.
   const res = await fetch(
     `https://api.pushover.net/1/receipts/${receipt}/cancel.json`,
     {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ token: PUSHOVER_TOKEN }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    `token=${encodeURIComponent(PUSHOVER_TOKEN)}`,
     }
   );
 

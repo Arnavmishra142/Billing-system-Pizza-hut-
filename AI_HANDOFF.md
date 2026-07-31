@@ -1,6 +1,77 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-31 (Regression fix — dialog session broke cart + acknowledge button)
+> Last updated: 2026-07-31 (Bug fix — Acknowledge Order did not stop Pushover emergency notification)
+
+---
+
+## Bug Fix (2026-07-31 — Acknowledge Order / Pushover cancel not working)
+
+### Clicking "Acknowledge Order" did not stop the active Emergency Pushover notification
+
+#### Root Cause
+
+Pushover's **receipts cancel endpoint** (`POST /1/receipts/{receipt}/cancel.json`) only accepts `application/x-www-form-urlencoded` parameters — unlike the messages endpoint, it does **not** document or accept `application/json`.
+
+Both implementations (Express `server.js` and Cloudflare Worker `cloudflare-worker/src/index.js`) were sending the cancel request with:
+```js
+headers: { 'Content-Type': 'application/json' },
+body:    JSON.stringify({ token: PUSHOVER_TOKEN })
+```
+
+Because the cancel endpoint doesn't parse JSON bodies, the `token` field was ignored by Pushover, which returned `{ status: 0, errors: [...] }`. This caused the Worker (and Express) to throw/return an error. The client's `catch` block fired, `_activeReceipts` was NOT cleared (only cleared on `result.data?.ok === true`), so the button reappeared and the notification kept repeating indefinitely.
+
+The messages endpoint (`messages.json`) explicitly documents JSON support, which is why `notifyOrder` worked correctly while `cancelReceipt` silently failed.
+
+#### Why `notifyOrder` worked but `cancelReceipt` didn't
+
+| Endpoint | Accepts JSON | Evidence |
+|----------|-------------|---------|
+| `POST /1/messages.json` | ✅ Yes — explicitly documented | Notifications received reliably |
+| `POST /1/receipts/{id}/cancel.json` | ❌ No — form-encoded only | Cancel returned `status: 0`, token ignored |
+
+#### Fix
+
+Changed the cancel API call in **both files** from JSON to form-encoded:
+
+```js
+// BEFORE (broken)
+headers: { 'Content-Type': 'application/json' },
+body:    JSON.stringify({ token: PUSHOVER_TOKEN })
+
+// AFTER (fixed)
+headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+body:    `token=${encodeURIComponent(PUSHOVER_TOKEN)}`
+```
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `server.js` | Billing Panel | `POST /api/cancel-receipt`: changed Pushover cancel call from JSON to form-encoded. Added AI UPDATE comment. |
+| `cloudflare-worker/src/index.js` | Billing Panel | `handleCancelReceipt()`: same fix — form-encoded body for Pushover cancel API. Added AI UPDATE comment. |
+| `AI_HANDOFF.md` | Billing Panel | This update. |
+
+#### ⚠️ Deployment Required — Cloudflare Worker
+
+The `cloudflare-worker/src/index.js` fix only takes effect on GitHub Pages after the Worker is redeployed:
+
+```bash
+cd cloudflare-worker
+wrangler deploy
+```
+
+The Express fix in `server.js` takes effect immediately on Replit (no restart needed — server restarts automatically on file change).
+
+#### Verification Checklist
+
+| Check | Status |
+|-------|--------|
+| Express `/api/cancel-receipt` sends form-encoded body | ✅ fixed |
+| Worker `handleCancelReceipt` sends form-encoded body | ✅ fixed |
+| No other files modified | ✅ |
+| Worker deployment required for GitHub Pages | ⚠️ user must run `wrangler deploy` |
+
+---
 
 ---
 
