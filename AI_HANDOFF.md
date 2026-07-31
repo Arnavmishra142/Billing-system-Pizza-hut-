@@ -20,16 +20,13 @@ After the 2026-07-31 form-encoded fix to `handleCancelReceipt`, three additional
 
 The code fix already in `cloudflare-worker/src/index.js` (form-encoded body for `handleCancelReceipt`) must be deployed.
 
-**⚠️ The CLOUDFLARE_API_TOKEN stored in Replit env vars is invalid for this Cloudflare account. The operator must deploy manually:**
+**✅ Deployed 2026-07-31 — Worker version `18e3256c-3efc-4106-a0a2-199adea48c30` is live.**
 
-```bash
-cd cloudflare-worker
-npx wrangler deploy
+```
+https://pizza-billing-functions.mishrarnav142.workers.dev
 ```
 
-This requires the operator to be authenticated with the correct Cloudflare account (`mishrarnav142`, account ID `8a39f7ded493ff634b7d52955e8eed1e`, worker: `pizza-billing-functions`). Running `wrangler login` will open a browser auth flow, or a valid `CLOUDFLARE_API_TOKEN` environment variable can be set.
-
-**Until this step is done, `cancelReceipt` calls through the Worker will continue to fail.**
+`handleCancelReceipt` now sends `application/x-www-form-urlencoded` to the Pushover cancel endpoint. Cancel calls succeed.
 
 ---
 
