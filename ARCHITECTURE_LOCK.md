@@ -271,6 +271,17 @@ Written once at account creation; username changes are a future feature.
 }
 ```
 
+#### `settings/restaurant_status` — Global Online Ordering toggle (added 2026-07-31)
+```
+{
+  onlineOrderingEnabled: boolean  // true or absent = ON; false = OFF
+}
+```
+Written by the Billing Panel (`js/menu-management.js` toggle).
+Read by the Customer Panel (`js/restaurant-status.js` via `onSnapshot`).
+When this document does not yet exist, the default is **ON** (backward compatible).
+**Do NOT store menu-item availability in this document.** This is global restaurant status only.
+
 #### `sales_history/{docId}` — Completed/billed orders
 ```
 {
@@ -370,7 +381,7 @@ export function stopOrderStatus()   // Called by Customer Panel app.js on logout
 
 ### `sw.js` — Service Worker
 ```
-Current cache version: v10
+Current cache version: v28
 // If JS files are updated, bump the cache version string.
 // Failure to do so causes the browser to serve stale cached JS.
 // See memory: sw-stale-cache.md

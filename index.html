@@ -671,7 +671,12 @@
         </div>
 
         <!-- Menu tab content -->
+        <!-- AI UPDATE [2026-07-31]: Added #menuMgmtGlobalToggle container at top of Menu tab.
+             Rendered dynamically by js/menu-management.js to show the Global Online Ordering
+             toggle. This is the Billing Panel control for settings/restaurant_status in Firestore.
+             Customer Panel listens to the same document and shows/hides the offline screen. -->
         <div id="menuTabContent" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
+            <div id="menuMgmtGlobalToggle"></div>
             <div class="mm-search-wrap">
                 <span class="mm-search-icon">🔍</span>
                 <input id="menuMgmtSearch" type="search" placeholder="Search menu items…" autocomplete="off">

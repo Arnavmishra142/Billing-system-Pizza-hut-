@@ -4,6 +4,25 @@
 // settings/pizza_sizes. All other items are toggled individually via inStock.
 
 // ===== AI UPDATE =====
+// Date: 2026-07-31
+// Feature: Global Online Ordering Toggle
+// Summary:
+// - Added a global "Online Ordering: ON/OFF" toggle at the top of the Menu tab.
+// - State is stored in settings/restaurant_status { onlineOrderingEnabled: boolean }.
+// - The settings collection already allows read:if true, write:if isOperator() —
+//   no Firestore rules changes were needed.
+// - When absent, the field defaults to true (backward compatible — nothing breaks
+//   for existing restaurants after deployment).
+// - A realtime onSnapshot listener (_startRestaurantStatusListener) keeps the toggle
+//   in sync across multiple operator devices without page refresh.
+// - The Customer Panel (teamdovolve-hue/Order-) reads the same document via
+//   order-panel-updates/js/restaurant-status.js and shows an offline screen when OFF.
+// - Files changed: js/menu-management.js (this file), index.html (added
+//   #menuMgmtGlobalToggle container), order-panel-updates/js/restaurant-status.js (new),
+//   sw.js (cache bump), ARCHITECTURE_LOCK.md, AI_HANDOFF.md.
+// =====================
+
+// ===== AI UPDATE =====
 // Date: 2026-07-28
 // Feature: Menu Management Toggle — Auth Guard Fix
 // Summary:
@@ -63,15 +82,21 @@ import {
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let _allItems          = [];
-let _pizzaSizes        = { regular: true, medium: true, large: true };
-let _search            = '';
-let _activeCat         = 'All';
-let _unsubItems        = null;
-let _unsubPizzaSizes   = null;
-let _initted           = false;
-let _toggling          = new Set(); // item IDs currently saving
-let _pizzaSizeSaving   = new Set(); // size keys currently saving ('regular'|'medium'|'large')
+let _allItems               = [];
+let _pizzaSizes             = { regular: true, medium: true, large: true };
+let _search                 = '';
+let _activeCat              = 'All';
+let _unsubItems             = null;
+let _unsubPizzaSizes        = null;
+// AI UPDATE [2026-07-31]: Global Online Ordering state.
+// _orderingEnabled mirrors settings/restaurant_status.onlineOrderingEnabled.
+// Defaults to true so nothing breaks if the document doesn't exist yet.
+let _orderingEnabled        = true;
+let _unsubRestaurantStatus  = null;
+let _orderingToggleSaving   = false;
+let _initted                = false;
+let _toggling               = new Set(); // item IDs currently saving
+let _pizzaSizeSaving        = new Set(); // size keys currently saving ('regular'|'medium'|'large')
 
 // ── Pizza helpers ─────────────────────────────────────────────────────────────
 function _isPizzaVariant(item) {
@@ -294,6 +319,99 @@ function _getPizzaSize(item) {
         }
         .mm-empty-icon { font-size: 2.5rem; margin-bottom: 10px; }
 
+        /* ── Global Online Ordering toggle banner ── */
+        /* AI UPDATE [2026-07-31]: Styles for the persistent toggle that controls
+           settings/restaurant_status.onlineOrderingEnabled in Firestore. */
+        #mmGlobalToggleBanner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            margin: 10px 16px 4px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.04);
+            flex-shrink: 0;
+            gap: 12px;
+            transition: background 0.25s, border-color 0.25s;
+        }
+        #mmGlobalToggleBanner.mm-ordering-off {
+            background: rgba(239,68,68,0.08);
+            border-color: rgba(239,68,68,0.25);
+        }
+        #mmGlobalToggleBanner.mm-ordering-on {
+            background: rgba(16,185,129,0.07);
+            border-color: rgba(16,185,129,0.2);
+        }
+        .mm-gto-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+        .mm-gto-icon {
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+        .mm-gto-label {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: rgba(255,255,255,0.85);
+            white-space: nowrap;
+        }
+        .mm-gto-status {
+            font-size: 0.76rem;
+            font-weight: 600;
+            margin-top: 1px;
+            transition: color 0.25s;
+        }
+        .mm-gto-status.on  { color: #10b981; }
+        .mm-gto-status.off { color: #ef4444; }
+
+        /* ── Big toggle for the global switch (larger than item toggles) ── */
+        .mm-gto-toggle { position: relative; width: 54px; height: 28px; flex-shrink: 0; }
+        .mm-gto-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .mm-gto-slider {
+            position: absolute; inset: 0;
+            background: rgba(255,255,255,0.12);
+            border-radius: 28px;
+            cursor: pointer;
+            transition: background 0.25s;
+        }
+        .mm-gto-slider::before {
+            content: '';
+            position: absolute;
+            width: 22px; height: 22px;
+            background: rgba(255,255,255,0.55);
+            border-radius: 50%;
+            top: 3px; left: 3px;
+            transition: transform 0.25s, background 0.25s;
+        }
+        .mm-gto-toggle input:checked + .mm-gto-slider { background: #10b981; }
+        .mm-gto-toggle input:checked + .mm-gto-slider::before {
+            background: #fff;
+            transform: translateX(26px);
+        }
+        .mm-gto-toggle.saving .mm-gto-slider { opacity: 0.6; cursor: not-allowed; }
+
+        /* ── Light mode overrides for global toggle ── */
+        .light-mode #mmGlobalToggleBanner {
+            background: rgba(0,0,0,0.04);
+            border-color: rgba(0,0,0,0.1);
+        }
+        .light-mode #mmGlobalToggleBanner.mm-ordering-off {
+            background: rgba(239,68,68,0.06);
+            border-color: rgba(239,68,68,0.2);
+        }
+        .light-mode #mmGlobalToggleBanner.mm-ordering-on {
+            background: rgba(16,185,129,0.06);
+            border-color: rgba(16,185,129,0.18);
+        }
+        .light-mode .mm-gto-label { color: #1e293b; }
+        .light-mode .mm-gto-slider { background: rgba(0,0,0,0.15); }
+        .light-mode .mm-gto-slider::before { background: rgba(0,0,0,0.4); }
+        .light-mode .mm-gto-toggle input:checked + .mm-gto-slider::before { background: #fff; }
+
         /* ── Light mode overrides ── */
         .light-mode #menuMgmtSearch {
             background: rgba(0,0,0,0.05);
@@ -329,13 +447,15 @@ function _getPizzaSize(item) {
 
 export function initMenuManagement() {
     if (!_initted) {
-        // First call — set up search bar and start both listeners.
+        // First call — set up search bar and start all listeners.
         _initted = true;
         _setupSearch();
+        _renderGlobalToggle(); // AI UPDATE [2026-07-31]: render global ordering toggle
         _showLoading();
         _startItemsListener();
         _startPizzaSizesListener();
-    } else if (!_unsubItems || !_unsubPizzaSizes) {
+        _startRestaurantStatusListener(); // AI UPDATE [2026-07-31]: global ordering
+    } else if (!_unsubItems || !_unsubPizzaSizes || !_unsubRestaurantStatus) {
         // Listeners were dropped (network error / auth expiry) — restart them.
         // Don't re-setup search (already wired) and avoid a loading flash if we
         // already have cached items to display.
@@ -346,6 +466,10 @@ export function initMenuManagement() {
         if (!_unsubPizzaSizes) {
             _startPizzaSizesListener();
         }
+        // AI UPDATE [2026-07-31]: restart global ordering listener if dropped
+        if (!_unsubRestaurantStatus) {
+            _startRestaurantStatusListener();
+        }
     } else {
         // Listeners are alive — just re-render with current data.
         _render();
@@ -353,15 +477,132 @@ export function initMenuManagement() {
 }
 
 export function destroyMenuManagement() {
-    if (_unsubItems)      { _unsubItems();      _unsubItems      = null; }
-    if (_unsubPizzaSizes) { _unsubPizzaSizes(); _unsubPizzaSizes = null; }
-    _initted          = false;
-    _allItems         = [];
-    _pizzaSizes       = { regular: true, medium: true, large: true };
-    _search           = '';
-    _activeCat        = 'All';
+    if (_unsubItems)             { _unsubItems();             _unsubItems             = null; }
+    if (_unsubPizzaSizes)        { _unsubPizzaSizes();        _unsubPizzaSizes        = null; }
+    // AI UPDATE [2026-07-31]: unsubscribe global ordering listener on tab close
+    if (_unsubRestaurantStatus)  { _unsubRestaurantStatus();  _unsubRestaurantStatus  = null; }
+    _initted              = false;
+    _allItems             = [];
+    _pizzaSizes           = { regular: true, medium: true, large: true };
+    _orderingEnabled      = true;
+    _orderingToggleSaving = false;
+    _search               = '';
+    _activeCat            = 'All';
     _toggling.clear();
     _pizzaSizeSaving.clear();
+}
+
+// ── Global Online Ordering listener ───────────────────────────────────────────
+//
+// AI UPDATE [2026-07-31]: Listens to settings/restaurant_status for the global
+// onlineOrderingEnabled flag. When the document does not exist, defaults to true
+// (backward compatible). Calls _renderGlobalToggle() on every change so the
+// toggle UI stays in sync with Firestore in real time.
+//
+// This listener starts on the first initMenuManagement() call and is torn down
+// by destroyMenuManagement(). If the listener errors it marks itself null and
+// auto-retries after 5 s, matching the pattern used by _startItemsListener().
+
+function _startRestaurantStatusListener() {
+    if (_unsubRestaurantStatus) { _unsubRestaurantStatus(); _unsubRestaurantStatus = null; }
+    _unsubRestaurantStatus = onSnapshot(
+        doc(db, 'settings', 'restaurant_status'),
+        (snap) => {
+            _orderingEnabled = snap.exists()
+                ? (snap.data().onlineOrderingEnabled !== false)
+                : true; // default ON when document absent
+            _renderGlobalToggle();
+        },
+        (err) => {
+            console.error('[menu-mgmt] restaurant_status listener error:', err);
+            _unsubRestaurantStatus = null;
+            setTimeout(() => {
+                if (!_unsubRestaurantStatus && _initted) _startRestaurantStatusListener();
+            }, 5000);
+        }
+    );
+}
+
+// ── Global toggle write ───────────────────────────────────────────────────────
+//
+// AI UPDATE [2026-07-31]: Writes the new onlineOrderingEnabled value to
+// settings/restaurant_status using setDoc with merge:true so the document is
+// created on first use without overwriting any other fields that may exist.
+// The same auth guard as _toggle() is used — writes require a signed-in user.
+// Optimistic UI: flips _orderingEnabled immediately and re-renders; rolls back
+// on error so the toggle snaps back and an error toast is shown.
+
+async function _toggleOnlineOrdering() {
+    if (_orderingToggleSaving) return;
+
+    if (!auth.currentUser) {
+        const user = await _waitForAuth(5000);
+        if (!user) {
+            _showToastError('Could not sign in. Please reload the page and try again.');
+            return;
+        }
+    }
+
+    const wasOn = _orderingEnabled;
+    _orderingEnabled      = !wasOn;
+    _orderingToggleSaving = true;
+    _renderGlobalToggle();
+
+    try {
+        await setDoc(
+            doc(db, 'settings', 'restaurant_status'),
+            { onlineOrderingEnabled: !wasOn },
+            { merge: true }
+        );
+        console.log(`[menu-mgmt] Online ordering set to ${!wasOn ? 'ON' : 'OFF'}`);
+    } catch (e) {
+        console.error('[menu-mgmt] Global ordering toggle failed:', e);
+        _orderingEnabled = wasOn; // roll back
+        _showToastError('Could not update Online Ordering status. Please try again.');
+    } finally {
+        _orderingToggleSaving = false;
+        _renderGlobalToggle();
+    }
+}
+
+// ── Global toggle render ──────────────────────────────────────────────────────
+//
+// AI UPDATE [2026-07-31]: Renders the Global Online Ordering toggle banner into
+// #menuMgmtGlobalToggle (added to index.html). This element is above the search
+// bar and category pills — it is always visible in the Menu tab regardless of
+// the active category or search term. The toggle is wired on every render call
+// because innerHTML replacement removes previous event listeners.
+
+function _renderGlobalToggle() {
+    const el = document.getElementById('menuMgmtGlobalToggle');
+    if (!el) return;
+
+    const isOn    = _orderingEnabled;
+    const saving  = _orderingToggleSaving;
+    const stateClass  = isOn ? 'mm-ordering-on' : 'mm-ordering-off';
+    const statusClass = isOn ? 'on' : 'off';
+    const statusText  = isOn ? 'ON — Accepting online orders' : 'OFF — Orders paused on Customer Panel';
+    const icon        = isOn ? '🟢' : '🔴';
+
+    el.innerHTML = `
+        <div id="mmGlobalToggleBanner" class="${stateClass}">
+            <div class="mm-gto-left">
+                <span class="mm-gto-icon">${icon}</span>
+                <div>
+                    <div class="mm-gto-label">Online Ordering</div>
+                    <div class="mm-gto-status ${statusClass}">${statusText}</div>
+                </div>
+            </div>
+            <label class="mm-gto-toggle ${saving ? 'saving' : ''}"
+                   title="${isOn ? 'Turn OFF — customers will see an offline screen' : 'Turn ON — resume accepting online orders'}">
+                <input type="checkbox" ${isOn ? 'checked' : ''} id="mmGlobalOrderingChk" ${saving ? 'disabled' : ''}>
+                <span class="mm-gto-slider"></span>
+            </label>
+        </div>
+    `;
+
+    const chk = el.querySelector('#mmGlobalOrderingChk');
+    if (chk) chk.addEventListener('change', _toggleOnlineOrdering);
 }
 
 // ── Firestore listeners ───────────────────────────────────────────────────────

@@ -1,6 +1,152 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-31 (Bug Fix — Three fixes to Acknowledge Order / Pushover cancel flow)
+> Last updated: 2026-07-31 (Feature — Global Online Ordering Toggle)
+
+---
+
+## Feature Implemented (2026-07-31 — Global Online Ordering Toggle)
+
+### Overview
+
+Added a Global Online Ordering Toggle to the Billing Panel's Menu Management tab. When set to OFF, the Customer Panel immediately shows a branded offline screen to all connected customers in real time — no page refresh required. When set back to ON, ordering resumes automatically.
+
+### Why This Was Added
+
+Operators sometimes need to stop accepting customer-panel orders entirely (kitchen overload, rush hour, maintenance, staff shortage) without manually disabling every menu item. This is a global restaurant-level switch separate from per-item `inStock` availability.
+
+### Data Model
+
+| Collection | Document | Field | Default |
+|-----------|----------|-------|---------|
+| `settings` | `restaurant_status` | `onlineOrderingEnabled: boolean` | `true` (absent = ON) |
+
+The `settings` collection already had `read: if true` and `write: if isOperator()` Firestore rules — **no rules changes were needed**. The document is created on first toggle using `setDoc({ merge: true })`.
+
+### Real-Time Sync Architecture
+
+```
+Operator toggles in Billing Panel Menu tab
+    │
+    ▼
+setDoc(settings/restaurant_status, { onlineOrderingEnabled: false }, { merge: true })
+    │
+    ▼
+Firestore propagates to all connected devices (typically < 1 second)
+    │
+    ├── Billing Panel: onSnapshot in _startRestaurantStatusListener() updates toggle UI
+    │
+    └── Customer Panel: onSnapshot in restaurant-status.js shows #orderingOfflineScreen
+             overlay and hides main content — ordering blocked immediately
+```
+
+### Billing Panel Changes
+
+**`js/menu-management.js`:**
+- New state: `_orderingEnabled`, `_unsubRestaurantStatus`, `_orderingToggleSaving`
+- New CSS: `#mmGlobalToggleBanner`, `.mm-gto-*` styles + light-mode overrides (injected in IIFE)
+- New function: `_startRestaurantStatusListener()` — onSnapshot on `settings/restaurant_status`; follows the established listener error-recovery pattern (null on error, auto-retry 5 s)
+- New function: `_toggleOnlineOrdering()` — writes to Firestore with optimistic UI + rollback on error; same `_waitForAuth()` guard as `_toggle()`
+- New function: `_renderGlobalToggle()` — renders toggle banner into `#menuMgmtGlobalToggle` above the search bar
+- `initMenuManagement()` — calls `_renderGlobalToggle()` and `_startRestaurantStatusListener()` on first init; restarts listener if dropped
+- `destroyMenuManagement()` — unsubscribes `_unsubRestaurantStatus`; resets `_orderingEnabled` and `_orderingToggleSaving`
+
+**`index.html`:**
+- Added `<div id="menuMgmtGlobalToggle"></div>` inside `#menuTabContent`, above `.mm-search-wrap`
+
+**`sw.js`:**
+- Cache version bumped: `pos-static-v27` → `pos-static-v28`
+
+### Customer Panel Changes (REQUIRED — teamdovolve-hue/Order-)
+
+⚠️ **The Customer Panel requires manual updates in the separate repo.** The staging file is ready at `order-panel-updates/js/restaurant-status.js`. Apply the following:
+
+#### Step 1 — Copy the new module
+Copy `order-panel-updates/js/restaurant-status.js` → `js/restaurant-status.js` in `teamdovolve-hue/Order-`.
+
+#### Step 2 — Add CSS to Customer Panel's stylesheet (or `<style>` in index.html)
+```css
+#orderingOfflineScreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 24px;
+  background: var(--bg, #0f0f1a);
+  color: var(--text, #f1f5f9);
+}
+#orderingOfflineScreen.hidden { display: none; }
+.oos-icon   { font-size: 4rem; margin-bottom: 16px; }
+.oos-title  { font-size: 1.35rem; font-weight: 800; margin-bottom: 10px; color: #ef4444; }
+.oos-body   { font-size: 0.95rem; line-height: 1.65; color: rgba(241,245,249,0.65); max-width: 320px; }
+.oos-footer { margin-top: 20px; font-size: 0.82rem; color: rgba(241,245,249,0.35); }
+```
+
+#### Step 3 — Add HTML to Customer Panel's index.html (before `</body>`)
+```html
+<div id="orderingOfflineScreen" class="hidden">
+  <div class="oos-icon">🚫</div>
+  <div class="oos-title">Online Ordering Temporarily Unavailable</div>
+  <div class="oos-body">
+    Online ordering is temporarily disabled.<br>
+    Please place your order directly at the counter.
+  </div>
+  <div class="oos-footer">Thank you for your patience.</div>
+</div>
+```
+
+#### Step 4 — Import and initialize in Customer Panel's app.js
+```js
+// Add import at top of app.js
+import { initRestaurantStatus } from "./restaurant-status.js";
+
+// Call early in the startup flow (before or alongside initAuth())
+initRestaurantStatus();
+```
+
+### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/menu-management.js` | Billing Panel | New global toggle state, CSS, listener, render, write functions; updated init/destroy |
+| `index.html` | Billing Panel | Added `#menuMgmtGlobalToggle` div above search bar in Menu tab |
+| `sw.js` | Billing Panel | Bumped cache `pos-static-v27` → `pos-static-v28` |
+| `order-panel-updates/js/restaurant-status.js` | Billing Panel (staged) | **New file** — Customer Panel module for offline screen; copy to Customer Panel repo |
+| `ARCHITECTURE_LOCK.md` | Billing Panel | Added `settings/restaurant_status` document schema; updated sw.js cache version |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+### Cross-Repository Contract Addition
+
+| Contract | Billing Panel file | Customer Panel file |
+|----------|--------------------|---------------------|
+| `settings/restaurant_status.onlineOrderingEnabled` | `js/menu-management.js` | `js/restaurant-status.js` (staged in `order-panel-updates/`) |
+
+### Backward Compatibility
+
+When `settings/restaurant_status` does not exist (all existing deployments before this feature):
+- Billing Panel toggle defaults to ON ✅
+- Customer Panel module defaults to ON ✅
+- No orders are blocked ✅
+- No errors thrown ✅
+
+### Verification Checklist
+
+| Check | Status |
+|-------|--------|
+| Toggle renders at top of Menu tab above search bar | ✅ |
+| Toggle shows 🟢 ON / 🔴 OFF with status text | ✅ |
+| Toggle defaults to ON when document absent | ✅ |
+| Toggle write uses setDoc merge (creates doc on first use) | ✅ |
+| Optimistic UI + rollback on write error | ✅ |
+| Auth guard before write (same pattern as _toggle) | ✅ |
+| Listener error recovery: null + 5 s retry | ✅ |
+| destroyMenuManagement() unsubscribes listener | ✅ |
+| Service worker cache bumped | ✅ |
+| Customer Panel offline screen (requires manual apply) | ⚠️ PENDING — see steps above |
+| ARCHITECTURE_LOCK.md updated | ✅ |
 
 ---
 

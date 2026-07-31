@@ -55,7 +55,9 @@
 //      receipts — emergency notification is now auto-cancelled when operator
 //      clicks "Open in POS" or "Dismiss".
 //   3. _saveActiveReceipts() called after every receipt mutation.
-const CACHE_NAME = 'pos-static-v27';
+// AI UPDATE [2026-07-31]: Bumped pos-static-v27 → pos-static-v28.
+// js/menu-management.js updated with Global Online Ordering Toggle feature.
+const CACHE_NAME = 'pos-static-v28';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
