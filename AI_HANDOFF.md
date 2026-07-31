@@ -1,6 +1,84 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-31 (Bug fix — Acknowledge Order did not stop Pushover emergency notification)
+> Last updated: 2026-07-31 (Feature — Pushover notification ON/OFF toggle in Incoming Orders drawer)
+
+---
+
+## Feature Implemented (2026-07-31 — Notification Toggle)
+
+### Pushover Notification ON/OFF Toggle in Incoming Orders Drawer
+
+#### Why this was added
+
+When the operator is already sitting in front of the Billing Panel with the Incoming Orders drawer open, the Pushover emergency notifications (priority=2, repeating every 30 s) are unnecessary and disruptive. The operator can see new orders on screen. This toggle lets them silence phone notifications while keeping every other part of the Incoming Orders flow intact.
+
+#### Where it lives
+
+The toggle bar is injected inside `#ordersTabContent`, immediately above `#ordersDrawerList`. It is only visible on the Orders tab — it does not appear on the Menu tab, and does not affect any other part of the Billing Panel.
+
+#### Where the preference is stored
+
+`localStorage` key: **`pos_pushover_notifications_enabled`**
+- `'1'` or absent → notifications ON (default)
+- `'0'` → notifications OFF
+
+The value is read at module load time, before any orders arrive.
+
+#### Where `notifyNewOrder()` is conditionally skipped
+
+In `js/incoming-orders.js`, inside the `onSnapshot` callback, immediately after `showToast()` is called. The conditional guard is:
+
+```js
+if (_notificationsEnabled) {
+    notifyNewOrder(docSnap.id, data).then(receipt => { ... });
+} else {
+    console.log(`[incoming-orders] Pushover skipped (notifications OFF) for order ${docSnap.id}`);
+}
+```
+
+The `_notified.add(docSnap.id)` call runs **before** this guard — so any order that arrives while notifications are OFF is permanently recorded in `_notified`. If the operator toggles back ON, those orders will never fire a delayed notification.
+
+#### Behavior
+
+| Scenario | Behavior |
+|---|---|
+| Toggle ON (default) | Every new order triggers Pushover emergency notification — existing behavior unchanged |
+| Toggle OFF | `notifyNewOrder()` is not called; toast still shows; badge still updates; all POS operations continue normally |
+| Toggle ON after being OFF | Only brand-new orders (not yet in `_notified`) trigger notifications — previously skipped orders are silently deduped |
+| Page refresh | `localStorage` value restored; operator preference survives refresh |
+
+#### UI Design
+
+- Small bar between the tab strip and the order list
+- Label: `🔔 Notifications` — `ON` (green) / `OFF` (muted)
+- Custom toggle switch: 44×24 px pill, green when ON, muted gray when OFF, white knob slides on transition
+- Matches the drawer's `#1e1e2e` dark background and existing color language (`#10b981` green)
+- No browser-native checkbox styling
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/incoming-orders.js` | Billing Panel | Added `_NOTIF_LS_KEY` + `_notificationsEnabled` state; toggle CSS in `injectDrawerCSS()`; toggle bar DOM injection in `DOMContentLoaded`; conditional guard around `notifyNewOrder()` |
+| `sw.js` | Billing Panel | Bumped `pos-static-v25` → `pos-static-v26` to bust cached `incoming-orders.js` |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+#### Verification Checklist
+
+| Check | Status |
+|---|---|
+| Toggle ON → new order sends Pushover | ✅ |
+| Toggle OFF → `notifyNewOrder()` not called | ✅ |
+| Incoming Orders update in real time | ✅ unchanged |
+| Badge and counters update | ✅ unchanged |
+| Open in POS works | ✅ unchanged |
+| Save & Exit, Bill & Settle, Cancel Order | ✅ unchanged |
+| Customer Panel synchronization | ✅ unchanged |
+| Toggle state survives page refresh | ✅ localStorage |
+| No delayed notifications when toggled back ON | ✅ deduped by `_notified` Set |
+| No console errors | ✅ |
+
+---
 
 ---
 

@@ -212,6 +212,14 @@ const _notified = new Set();
 const _activeReceipts     = new Map();   // orderId → receipt string
 const _cancellingReceipts = new Set();   // orderId → cancel in progress
 
+// AI UPDATE [2026-07-31] — Notification ON/OFF toggle.
+// Operator preference persisted in localStorage so it survives page refresh.
+// When OFF: notifyNewOrder() is skipped entirely; all other drawer behaviour is unchanged.
+// The order ID is still added to _notified BEFORE this check, so orders received while
+// notifications are OFF are permanently deduped — they will NOT fire when toggled back ON.
+const _NOTIF_LS_KEY = 'pos_pushover_notifications_enabled';
+let _notificationsEnabled = localStorage.getItem(_NOTIF_LS_KEY) !== '0'; // default: ON
+
 // AI UPDATE [2026-07-29] v11: _initialLoadDone is the primary (and only)
 // notification guard.  Starts false on page load.  Set to true after the first
 // snapshot is processed.  NEVER reset to false again — not even on listener
@@ -366,6 +374,70 @@ async function acknowledgeOrder(orderId) {
             margin-top: 8px; letter-spacing: 0.02em;
         }
         .oc-btn-ack:disabled { opacity: 0.55; cursor: not-allowed; }
+
+        /* AI UPDATE [2026-07-31] — Notification toggle styles */
+        #notif-toggle-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 9px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
+            flex-shrink: 0;
+        }
+        .notif-toggle-label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            opacity: 0.85;
+            letter-spacing: 0.01em;
+        }
+        .notif-toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .notif-toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            position: absolute;
+        }
+        .notif-toggle-slider {
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.15);
+            border-radius: 24px;
+            transition: background 0.22s ease;
+        }
+        .notif-toggle-slider::before {
+            content: '';
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            left: 3px;
+            top: 3px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform 0.22s ease;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+        }
+        .notif-toggle-switch input:checked + .notif-toggle-slider {
+            background: #10b981;
+        }
+        .notif-toggle-switch input:checked + .notif-toggle-slider::before {
+            transform: translateX(20px);
+        }
+        .notif-toggle-status {
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            margin-left: 8px;
+            min-width: 26px;
+        }
+        .notif-toggle-status.on  { color: #10b981; }
+        .notif-toggle-status.off { color: rgba(255,255,255,0.35); }
     `;
     document.head.appendChild(s);
 })();
@@ -683,13 +755,21 @@ function startListening() {
                 // AI UPDATE [2026-07-29] session 22: [notify-debug] trace logs removed.
                 // AI UPDATE [2026-07-30]: Capture returned receipt; store in _activeReceipts;
                 //   re-render drawer to show Acknowledge button for this order.
-                notifyNewOrder(docSnap.id, data).then(receipt => {
-                    if (receipt) {
-                        console.log(`[incoming-orders] Receipt stored for order ${docSnap.id}:`, receipt);
-                        _activeReceipts.set(docSnap.id, receipt);
-                        renderDrawer(_pendingOrders);
-                    }
-                });
+                // AI UPDATE [2026-07-31]: Guard with _notificationsEnabled — when the operator
+                //   has toggled notifications OFF, skip the Pushover call entirely.
+                //   The order ID was already added to _notified above, so it will never
+                //   fire a delayed notification if the toggle is switched back ON later.
+                if (_notificationsEnabled) {
+                    notifyNewOrder(docSnap.id, data).then(receipt => {
+                        if (receipt) {
+                            console.log(`[incoming-orders] Receipt stored for order ${docSnap.id}:`, receipt);
+                            _activeReceipts.set(docSnap.id, receipt);
+                            renderDrawer(_pendingOrders);
+                        }
+                    });
+                } else {
+                    console.log(`[incoming-orders] Pushover skipped (notifications OFF) for order ${docSnap.id}`);
+                }
             }
         });
 
@@ -766,6 +846,40 @@ document.addEventListener('DOMContentLoaded', () => {
         btnOrders.addEventListener('click', openDrawer);
     }
     if (overlay) overlay.addEventListener('click', closeDrawer);
+
+    // AI UPDATE [2026-07-31] — Inject notification toggle bar into the orders tab.
+    // Placed above ordersDrawerList, inside ordersTabContent, so it appears only on
+    // the Orders tab and does not affect the Menu tab or any other part of the drawer.
+    const ordersTabContent = document.getElementById('ordersTabContent');
+    const drawerListEl     = document.getElementById('ordersDrawerList');
+    if (ordersTabContent && drawerListEl) {
+        const toggleBar = document.createElement('div');
+        toggleBar.id = 'notif-toggle-bar';
+        toggleBar.innerHTML = `
+            <span class="notif-toggle-label">🔔 Notifications</span>
+            <div style="display:flex; align-items:center; gap:0;">
+                <span class="notif-toggle-status ${_notificationsEnabled ? 'on' : 'off'}" id="notifToggleStatus">
+                    ${_notificationsEnabled ? 'ON' : 'OFF'}
+                </span>
+                <label class="notif-toggle-switch" title="Toggle Pushover phone notifications">
+                    <input type="checkbox" id="notifToggleChk" ${_notificationsEnabled ? 'checked' : ''}>
+                    <span class="notif-toggle-slider"></span>
+                </label>
+            </div>
+        `;
+        ordersTabContent.insertBefore(toggleBar, drawerListEl);
+
+        document.getElementById('notifToggleChk').addEventListener('change', (e) => {
+            _notificationsEnabled = e.target.checked;
+            localStorage.setItem(_NOTIF_LS_KEY, _notificationsEnabled ? '1' : '0');
+            const statusEl = document.getElementById('notifToggleStatus');
+            if (statusEl) {
+                statusEl.textContent  = _notificationsEnabled ? 'ON' : 'OFF';
+                statusEl.className    = `notif-toggle-status ${_notificationsEnabled ? 'on' : 'off'}`;
+            }
+            console.log(`[incoming-orders] Pushover notifications ${_notificationsEnabled ? 'enabled ✓' : 'disabled —'}`);
+        });
+    }
 
     // Re-establish the Firestore network channel whenever the tab comes back
     // into focus (browsers throttle WebSocket connections in background tabs).

@@ -46,7 +46,9 @@
 //   all modified JS/HTML files after replacing all browser-native dialogs.
 // AI UPDATE [2026-07-31]: Bumped v24 → v25 to bust cached js/cart.js and
 //   js/dialog.js after regression fixes (printKOT async + pointer-events fix).
-const CACHE_NAME = 'pos-static-v25';
+// AI UPDATE [2026-07-31]: Bumped v25 → v26 to bust cached js/incoming-orders.js
+//   after adding Pushover notification ON/OFF toggle.
+const CACHE_NAME = 'pos-static-v26';
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [
