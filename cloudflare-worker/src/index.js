@@ -450,7 +450,7 @@ class Firestore {
         structuredQuery: {
           from: [{ collectionId: collection }],
           where,
-          limit: 100,
+          limit: 500,
         },
       }),
     });
@@ -1049,6 +1049,100 @@ async function handleCancelReceipt(data, authCtx) {
   return { ok: true };
 }
 
+// ── expireOrders ──────────────────────────────────────────────────────────────
+// AI UPDATE [2026-08-01] — Auto-Expire Stale Pending Orders
+//
+// Scans pending_table_orders for documents whose status is still 'pending'
+// and whose createdAt timestamp is older than EXPIRE_AFTER_MS (2 hours).
+// Updates each qualifying document to status='expired' and sets expiredAt via
+// server timestamp.
+//
+// Safe statuses that are NEVER expired:
+//   accepted | preparing | kot | completed | billed | dismissed | rejected | cancelled
+//
+// Called by:
+//   1. The Cloudflare cron trigger (every 30 minutes — see scheduled handler).
+//   2. POST /expireOrders — manual backfill / one-shot trigger for testing.
+//
+// Implementation note: We query by status=='pending' and then filter createdAt
+// in JS. This avoids needing a composite Firestore index (status + createdAt).
+// The query limit of 500 is safe for a single-restaurant deployment.
+
+const EXPIRE_AFTER_MS  = 2 * 60 * 60 * 1000;  // 2 hours
+const SAFE_STATUSES    = new Set([
+  'accepted', 'preparing', 'kot', 'completed',
+  'billed', 'dismissed', 'rejected', 'cancelled',
+]);
+
+async function handleExpireOrders(db) {
+  console.log('[expireOrders] Scanning for stale pending orders...');
+
+  // Fetch all documents currently in 'pending' status.
+  // We use a high limit (500) — a restaurant will rarely have that many
+  // simultaneous pending orders; this avoids pagination complexity.
+  const pendingOrders = await db.query('pending_table_orders', [
+    { field: 'status', op: '==', value: 'pending' },
+  ]);
+
+  const cutoff = Date.now() - EXPIRE_AFTER_MS;
+  let expired  = 0;
+  let skipped  = 0;
+
+  for (const order of pendingOrders) {
+    const data   = order.data || {};
+    const status = (data.status || '').toLowerCase();
+
+    // Guard: never expire orders whose status has already moved forward.
+    // (Shouldn't happen given the query filter, but belt-and-suspenders.)
+    if (SAFE_STATUSES.has(status)) {
+      skipped++;
+      continue;
+    }
+
+    // Parse the createdAt field (stored as ISO timestamp string by Firestore).
+    const createdAtRaw = data.createdAt;
+    if (!createdAtRaw) {
+      console.warn(`[expireOrders] Order ${order.id} has no createdAt — skipping.`);
+      skipped++;
+      continue;
+    }
+
+    const createdAtMs = new Date(createdAtRaw).getTime();
+    if (isNaN(createdAtMs)) {
+      console.warn(`[expireOrders] Order ${order.id} has unparseable createdAt "${createdAtRaw}" — skipping.`);
+      skipped++;
+      continue;
+    }
+
+    if (createdAtMs > cutoff) {
+      // Order is recent — not yet expired.
+      skipped++;
+      continue;
+    }
+
+    // This order is stale. Mark it expired.
+    const ageMin = Math.round((Date.now() - createdAtMs) / 60000);
+    console.log(
+      `[expireOrders] Expiring order ${order.id}` +
+      ` (table: ${data.tableId || '?'}, age: ${ageMin} min)`,
+    );
+
+    try {
+      // Update only the status field + add expiredAt server timestamp.
+      await db.update('pending_table_orders', order.id, { status: 'expired' }, ['expiredAt']);
+      expired++;
+    } catch (e) {
+      console.error(`[expireOrders] Failed to expire order ${order.id}:`, e.message);
+      skipped++;
+    }
+  }
+
+  console.log(
+    `[expireOrders] Done — checked: ${pendingOrders.length}, expired: ${expired}, skipped: ${skipped}`,
+  );
+  return { expired, skipped, checked: pendingOrders.length };
+}
+
 // ── pushoverCallback ─────────────────────────────────────────────────────────
 // AI UPDATE [2026-08-01]: Native Pushover acknowledgement sync.
 // Pushover sends a GET request to this endpoint when the operator acknowledges an
@@ -1133,6 +1227,23 @@ export default {
       return handlePushoverCallback(url, _cbDb);
     }
 
+    // AI UPDATE [2026-08-01] — Auto-Expire: manual backfill/trigger endpoint.
+    // GET /expireOrders — run the expiry sweep immediately (no auth required;
+    // only writes status='expired' to orders that are already stale, zero harm
+    // in calling it multiple times).  Used to clear existing ghost orders on
+    // first deploy and for operator-triggered manual sweeps.
+    if (request.method === 'GET' && url.pathname === '/expireOrders') {
+      const _expProjectId = env.FIREBASE_PROJECT_ID || 'billing-system-f8531';
+      const _expDb        = new Firestore(env, _expProjectId);
+      try {
+        const result = await handleExpireOrders(_expDb);
+        return jsonResponse({ ok: true, ...result });
+      } catch (e) {
+        console.error('[expireOrders/GET] Error:', e.message);
+        return errorResponse('internal', e.message || 'expireOrders failed');
+      }
+    }
+
     if (request.method !== 'POST') {
       return errorResponse('unimplemented', 'Only POST is supported.');
     }
@@ -1198,6 +1309,13 @@ export default {
           break;
         }
 
+        // AI UPDATE [2026-08-01] — Auto-Expire: POST callable variant.
+        // Mirrors the GET route above; usable from any HTTP client.
+        // No auth required — see GET /expireOrders comment for rationale.
+        case 'expireOrders':
+          result = await handleExpireOrders(db);
+          break;
+
         default:
           return errorResponse('not-found', `Function "${fnName}" not found.`);
       }
@@ -1211,6 +1329,30 @@ export default {
       }
       console.error(`[${fnName}] Unhandled:`, e.message, e.stack);
       return errorResponse('internal', e.message || 'Internal error');
+    }
+  },
+
+  // ── Scheduled cron handler ─────────────────────────────────────────────────
+  // AI UPDATE [2026-08-01] — Auto-Expire Stale Pending Orders.
+  //
+  // Triggered by the Cloudflare cron schedule defined in wrangler.toml:
+  //   [triggers]
+  //   crons = ["*/30 * * * *"]   ← every 30 minutes
+  //
+  // Runs handleExpireOrders() to mark stale pending orders as 'expired'.
+  // Any order with status='pending' and createdAt older than 2 hours is expired.
+  // Orders already in a terminal/active status are never touched.
+  async scheduled(event, env, ctx) {
+    console.log(`[scheduled] cron fired: ${event.cron} (scheduledTime: ${new Date(event.scheduledTime).toISOString()})`);
+    const projectId = env.FIREBASE_PROJECT_ID || 'billing-system-f8531';
+    const db        = new Firestore(env, projectId);
+    try {
+      const result = await handleExpireOrders(db);
+      console.log(
+        `[scheduled] expireOrders complete — expired: ${result.expired}, skipped: ${result.skipped}, checked: ${result.checked}`,
+      );
+    } catch (e) {
+      console.error('[scheduled] expireOrders failed:', e.message, e.stack);
     }
   },
 };

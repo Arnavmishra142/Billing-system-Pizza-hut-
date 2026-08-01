@@ -7,6 +7,12 @@ account_id = "8a39f7ded493ff634b7d52955e8eed1e"
 [vars]
 FIREBASE_PROJECT_ID = "billing-system-f8531"
 
+# Auto-Expire Stale Pending Orders — cron trigger
+# Fires every 30 minutes. The scheduled() handler calls handleExpireOrders(db)
+# which marks any 'pending' order older than 2 hours as 'expired'.
+[triggers]
+crons = ["*/30 * * * *"]
+
 # Secrets — set these via: wrangler secret put <NAME>
 # (never put secret values in this file)
 #
