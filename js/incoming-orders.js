@@ -250,6 +250,34 @@ const _cancellingReceipts = new Set();  // orderId → cancel in progress
 //   Default: true (ON) until Firestore responds.
 let _notificationsEnabled = true;
 
+// ===== AI UPDATE =====
+// Date: 2026-08-01 — Instant Alarm Stop (Browser Controlled Alarm)
+//
+// Pushover is now used ONLY to wake the tablet. The continuous alarm experience is
+// controlled entirely by the browser via a single shared Audio instance.
+//
+// New flow:
+//   New Firestore order arrives (onSnapshot, genuinely new)
+//   → startAlarm() begins looping sounds/notification.mp3 in the browser
+//   → Operator taps 🔔 Ringing bell button in the Incoming Orders drawer
+//   → stopAlarm() calls audio.pause() + audio.currentTime = 0 → instant stop
+//
+// Bell button ONLY controls browser audio. It does NOT:
+//   • Cancel the Pushover receipt (acknowledgeOrder still does that)
+//   • Write to Firestore
+//   • Change order status
+//   • Affect the Acknowledge Order flow
+//
+// Multiple simultaneous new orders share the single _alarmAudio instance.
+// Only one looping alarm plays at any time (startAlarm is a no-op if already playing).
+// Page refresh resets the alarm state naturally (Audio is re-created).
+// =====================
+
+// ── Browser alarm — single shared Audio instance ───────────────────────────────
+const _alarmAudio  = new Audio('sounds/notification.mp3');
+_alarmAudio.loop   = true;
+let _alarmPlaying  = false;
+
 // AI UPDATE [2026-07-29] v11: _initialLoadDone is the primary (and only)
 // notification guard.  Starts false on page load.  Set to true after the first
 // snapshot is processed.  NEVER reset to false again — not even on listener
@@ -268,6 +296,45 @@ let _initialLoadDone = false;
 //   Billing Panel: onSnapshot detects notifyReceipt → shows Acknowledge button
 //
 // The Billing Panel is now a pure Firestore viewer for notifications.
+
+// ── Browser alarm control functions ───────────────────────────────────────────
+// AI UPDATE [2026-08-01] — Instant Alarm Stop
+// startAlarm() / stopAlarm() ONLY control browser audio.
+// They do NOT cancel Pushover receipts, write to Firestore, or change order status.
+
+function _updateBellBtn() {
+    const btn = document.getElementById('alarm-bell-btn');
+    if (!btn) return;
+    if (_alarmPlaying) {
+        btn.textContent = '🔔 Ringing';
+        btn.className   = 'alarm-bell-btn alarm-btn-ringing';
+    } else {
+        btn.textContent = '🔕 Paused';
+        btn.className   = 'alarm-bell-btn alarm-btn-silent';
+    }
+}
+
+function startAlarm() {
+    if (_alarmPlaying) return;  // already running — one instance only
+    _alarmAudio.currentTime = 0;
+    _alarmAudio.play().catch(err => {
+        // Browsers may block autoplay until first user gesture.
+        // The bell button tap counts as a gesture, so alarm will play on next order
+        // if the page was freshly loaded without any interaction first.
+        console.warn('[incoming-orders] Alarm play blocked (autoplay policy):', err.message);
+    });
+    _alarmPlaying = true;
+    _updateBellBtn();
+    console.log('[incoming-orders] Browser alarm started 🔔');
+}
+
+function stopAlarm() {
+    _alarmAudio.pause();
+    _alarmAudio.currentTime = 0;
+    _alarmPlaying = false;
+    _updateBellBtn();
+    console.log('[incoming-orders] Browser alarm stopped 🔕');
+}
 
 // ── Initialize notification setting from Firestore ────────────────────────────
 // Reads settings/system.notificationEnabled. Called once on DOMContentLoaded.
@@ -452,6 +519,46 @@ async function acknowledgeOrder(orderId) {
         }
         .notif-toggle-status.on  { color: #10b981; }
         .notif-toggle-status.off { color: rgba(255,255,255,0.35); }
+
+        /* AI UPDATE [2026-08-01] — Instant Alarm Stop: bell toggle button */
+        #alarm-bell-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
+            flex-shrink: 0;
+        }
+        .alarm-bar-label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            opacity: 0.85;
+            letter-spacing: 0.01em;
+        }
+        .alarm-bell-btn {
+            border: none;
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: 0.03em;
+            transition: background 0.2s ease, transform 0.1s ease;
+        }
+        .alarm-bell-btn:active { transform: scale(0.95); }
+        .alarm-btn-ringing {
+            background: linear-gradient(135deg, #f59e0b, #fbbf24);
+            color: #1a1a1a;
+            animation: alarmPulse 1s ease-in-out infinite;
+        }
+        .alarm-btn-silent {
+            background: rgba(255,255,255,0.1);
+            color: rgba(255,255,255,0.45);
+        }
+        @keyframes alarmPulse {
+            0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.5); }
+            50%      { box-shadow: 0 0 0 7px rgba(245,158,11,0); }
+        }
     `;
     document.head.appendChild(s);
 })();
@@ -795,6 +902,11 @@ function startListening() {
                 const itemCount = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
                 showToast(data.tableId || 'Unknown Table', itemCount || 1);
 
+                // AI UPDATE [2026-08-01] — Instant Alarm Stop: start the browser alarm.
+                // startAlarm() is a no-op if already ringing (multiple simultaneous orders
+                // share the single _alarmAudio instance — only one loop plays at a time).
+                startAlarm();
+
                 // AI UPDATE [2026-08-01] Architecture migration: Billing Panel no longer
                 // calls notifyOrder. The Customer Panel triggers the Worker immediately after
                 // addDoc succeeds. The Worker writes notifyReceipt to Firestore; the onSnapshot
@@ -897,6 +1009,18 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
         ordersTabContent.insertBefore(toggleBar, drawerListEl);
+
+        // AI UPDATE [2026-08-01] — Instant Alarm Stop: inject alarm bell bar below notification toggle.
+        // The bell button ONLY controls browser audio. It is separate from the Pushover toggle above.
+        // Bell = silence browser alarm.  Acknowledge = cancel Pushover receipt.  Two independent actions.
+        const alarmBar = document.createElement('div');
+        alarmBar.id = 'alarm-bell-bar';
+        alarmBar.innerHTML = `
+            <span class="alarm-bar-label">🔊 Alarm</span>
+            <button id="alarm-bell-btn" class="alarm-bell-btn alarm-btn-silent">🔕 Paused</button>
+        `;
+        ordersTabContent.insertBefore(alarmBar, drawerListEl);
+        document.getElementById('alarm-bell-btn').addEventListener('click', stopAlarm);
 
         // AI UPDATE [2026-08-01]: Initialize toggle state from Firestore global setting.
         // The Customer Panel reads the same setting before deciding to call the Worker.

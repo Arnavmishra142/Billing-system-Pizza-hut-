@@ -1,6 +1,85 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-01 (Item-Level Parcel Toggle — Table Orders only)
+> Last updated: 2026-08-01 (Instant Alarm Stop — Browser Controlled Alarm)
+
+---
+
+## [AI UPDATE 2026-08-01] — Instant Alarm Stop (Browser Controlled Alarm)
+
+### Overview
+
+Added a browser-controlled alarm that starts the moment a new customer order arrives via Firestore, and stops instantly (<1 second) when the operator taps the 🔔 bell button in the Incoming Orders drawer.
+
+**Problem solved:** Emergency Pushover notifications (priority=2) ring until the current retry cycle finishes — even after the operator taps "Acknowledge". There was no way to silence audio immediately from the billing panel.
+
+**New role separation:**
+- **Pushover:** wakes the tablet only. Does not control the continuous alarm experience.
+- **Browser alarm:** controls the actual ringing. Operator silences it instantly via the bell button.
+
+### Flow
+
+```
+Customer places order
+  ↓
+Cloudflare Worker sends Priority-2 Pushover (wakes tablet)
+  ↓
+Billing Panel Firestore onSnapshot detects new order
+  ↓
+startAlarm() → loops sounds/notification.mp3 in browser
+  ↓
+Operator taps 🔔 Ringing button in Incoming Orders
+  ↓
+stopAlarm() → audio.pause() + audio.currentTime = 0
+  ↓
+Browser alarm stops instantly
+  ↓
+Existing Acknowledge / Open in POS flow continues unchanged
+```
+
+### Bell Button UI
+
+A `🔊 Alarm` row is injected below the existing Pushover notifications toggle in the Incoming Orders drawer:
+
+| State | Appearance |
+|-------|-----------|
+| No alarm playing | `🔕 Paused` — grey/dim button |
+| Alarm ringing | `🔔 Ringing` — amber/gold pulsing button |
+
+Tapping the button while ringing → calls `stopAlarm()` → changes to `🔕 Paused`.
+
+### Architecture Notes
+
+- **Single Audio instance:** `_alarmAudio` (module-level `new Audio('sounds/notification.mp3')`, `loop = true`). No duplicate instances; `startAlarm()` is a no-op if already playing.
+- **Bell ONLY controls browser audio.** It does NOT: cancel the Pushover receipt, write to Firestore, change order status, or affect the Acknowledge Order flow.
+- **`startAlarm()`** is called in the `onSnapshot` callback when `_initialLoadDone` is true and order ID is not in `_notified` (same guard used for `showToast` — genuinely new orders only).
+- **`stopAlarm()`** is called from the bell button click handler.
+- **Page refresh:** `_alarmAudio` and `_alarmPlaying` reset naturally. Alarm does not auto-play on reload; it only plays when a new order arrives after the initial snapshot.
+- **Autoplay policy:** Some browsers block audio until first user gesture. `_alarmAudio.play()` errors are caught and logged; once any gesture has happened (e.g., operator opens the drawer), subsequent `play()` calls succeed.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `js/incoming-orders.js` | Added `_alarmAudio`, `_alarmPlaying`, `startAlarm()`, `stopAlarm()`, `_updateBellBtn()`. Added alarm CSS to `injectDrawerCSS`. Injected `#alarm-bell-bar` + `#alarm-bell-btn` in DOMContentLoaded. Called `startAlarm()` after `showToast()` in onSnapshot. |
+| `sw.js` | Bumped cache `pos-static-v31` → `pos-static-v32`. |
+| `index.html` | Bumped `style.css?v=301` → `?v=302`. |
+| `AI_HANDOFF.md` | This update. |
+
+### Customer Panel Changes Required
+
+**None.** This feature is entirely browser-side in the Billing Panel. No Firestore schema changes. No cross-repo changes.
+
+### Verification Checklist
+
+| Check | Expected |
+|-------|---------|
+| New order arrives → browser alarm starts | `startAlarm()` called in onSnapshot after `_initialLoadDone` is true |
+| Existing orders on page load → no alarm | `_notified` guard prevents `startAlarm()` for pre-existing orders |
+| Multiple orders → single alarm loop | `_alarmPlaying` guard in `startAlarm()` — no-op if already ringing |
+| Bell button tap → alarm stops instantly | `stopAlarm()` calls `audio.pause()` + `audio.currentTime = 0` |
+| Bell button does NOT affect Pushover | `stopAlarm()` contains no Pushover/Firestore code |
+| Acknowledge button still works | `acknowledgeOrder()` unchanged |
+| Page refresh resets alarm state | `_alarmAudio` is a new object; `_alarmPlaying = false` on load |
 
 ---
 
