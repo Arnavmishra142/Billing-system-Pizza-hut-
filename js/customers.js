@@ -324,13 +324,29 @@ window._custOpenDetail = async function(phone) {
     const joinedTs = c.createdAt?.toMillis?.() ?? 0;
 
     // Helper that builds the invariant header + stats HTML
+    // Password row — shows stored passwordHash with a show/hide eye toggle.
+    // passwordHash is a SHA-256 hex string (not the raw password).
+    const pwHash = c.passwordHash || '';
+    const passwordRowHtml = pwHash ? `
+<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">
+    <span style="font-size:0.75rem;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;">Password</span>
+    <span id="custPwHidden" style="font-size:0.9rem;color:#6b7280;letter-spacing:3px;flex:1;">••••••••</span>
+    <span id="custPwValue" style="font-size:0.78rem;color:#c9d1d9;font-family:monospace;word-break:break-all;flex:1;display:none;">${_esc(pwHash)}</span>
+    <button type="button" id="custPwToggle" title="Show / hide password"
+        onclick="window._custTogglePassword()"
+        style="background:none;border:1.5px solid #30363d;border-radius:6px;cursor:pointer;color:#6b7280;font-size:0.9rem;padding:3px 8px;line-height:1;flex-shrink:0;transition:color 0.2s,border-color 0.2s;"
+        onmouseover="this.style.color='#f97316';this.style.borderColor='#f97316'"
+        onmouseout="this.style.color='#6b7280';this.style.borderColor='#30363d'">👁</button>
+</div>` : '';
+
     const headerHtml = `
 <!-- Profile header -->
 <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #30363d;">
     <div class="cust-av cust-av-lg">${_avatarLetter(c.name)}</div>
-    <div style="min-width:0;">
+    <div style="min-width:0;flex:1;">
         <div style="font-size:1.15rem;font-weight:800;color:#e6edf3;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_esc(c.name || 'Unknown')}</div>
         <div style="font-size:0.92rem;color:#58a6ff;letter-spacing:0.2px;">${_esc(c.phone || c.id)}</div>
+        ${passwordRowHtml}
     </div>
 </div>
 
@@ -387,6 +403,19 @@ window._custOpenDetail = async function(phone) {
 
 window._custCloseDetail = function() {
     document.getElementById('custDetailOverlay')?.classList.add('hidden');
+};
+
+// Toggle show/hide for the customer's stored passwordHash in the detail overlay.
+// Uses the same show/hide idiom as the login password toggle in customer.html.
+window._custTogglePassword = function() {
+    const valEl    = document.getElementById('custPwValue');
+    const hiddenEl = document.getElementById('custPwHidden');
+    const btnEl    = document.getElementById('custPwToggle');
+    if (!valEl || !hiddenEl) return;
+    const isHidden = valEl.style.display === 'none';
+    valEl.style.display    = isHidden ? '' : 'none';
+    hiddenEl.style.display = isHidden ? 'none' : '';
+    if (btnEl) btnEl.textContent = isHidden ? '🙈' : '👁';
 };
 
 // ── Delete confirmation ───────────────────────────────────────────────────

@@ -320,6 +320,25 @@
         }
         .password-toggle:hover { color: #f97316; }
 
+        /* ── FORGOT PASSWORD LINK ── */
+        .forgot-password-link {
+            display: block;
+            width: 100%;
+            margin-top: 10px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #6b7280;
+            font-size: 0.85rem;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            padding: 6px 0;
+            text-align: center;
+            transition: color 0.2s;
+            font-family: inherit;
+        }
+        .forgot-password-link:hover { color: #f97316; }
+
         /* ── USERNAME FIELD ── */
         .username-row {
             display: flex; align-items: center;
@@ -584,6 +603,21 @@
         </div>
 
         <button class="auth-btn-primary" id="loginBtn">Login →</button>
+        <button type="button" class="forgot-password-link" id="forgotPasswordBtn">Forgot Password?</button>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     FORGOT PASSWORD POPUP
+     ═══════════════════════════════════════════════════════════ -->
+<div class="auth-overlay" id="forgotPasswordOverlay">
+    <div class="auth-sheet" style="text-align:center;">
+        <button class="auth-back-link" id="forgotCloseBtn">✕ Close</button>
+        <div class="auth-logo">🔒</div>
+        <h2>Forgot Password?</h2>
+        <p class="auth-sub" style="color:#c9d1d9;line-height:1.65;font-size:0.95rem;margin-bottom:4px;">
+            Please visit our billing counter. Our staff can verify your account and help you regain access to your account.
+        </p>
     </div>
 </div>
 
@@ -982,6 +1016,14 @@ document.getElementById('loginPasswordInput').addEventListener('keydown', (e) =>
 document.getElementById('loginPasswordToggle').addEventListener('click', () => {
     const inp = document.getElementById('loginPasswordInput');
     inp.type = inp.type === 'password' ? 'text' : 'password';
+});
+
+// Forgot Password popup — open / close
+document.getElementById('forgotPasswordBtn').addEventListener('click', () => {
+    openOverlay('forgotPasswordOverlay');
+});
+document.getElementById('forgotCloseBtn').addEventListener('click', () => {
+    closeOverlay('forgotPasswordOverlay');
 });
 
 document.getElementById('loginBtn').addEventListener('click', async () => {
