@@ -723,6 +723,50 @@ body {
 }
 .cart-item-remove:active { transform: scale(0.85); }
 
+/* ── AI UPDATE [2026-08-01]: Parcel Toggle Button — item-level parcel flag ───
+   Small 📦 button on the left of the item name (Table Orders only).
+   Default (grey outlined) = Dine-In.  Filled green = Parcel.
+   ─────────────────────────────────────────────────────────────────────────── */
+.parcel-toggle-btn {
+    flex-shrink: 0;
+    width: 26px;
+    height: 22px;
+    border-radius: 4px;
+    border: 1.5px solid #4b5563;
+    background: transparent;
+    color: #4b5563;
+    font-size: 0.72rem;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+    vertical-align: middle;
+}
+.parcel-toggle-btn.active {
+    border-color: #10b981;
+    background: #10b981;
+    color: white;
+}
+.parcel-toggle-btn:active { transform: scale(0.82); }
+
+/* ── Parcel Badge — shown inline next to item name when marked Parcel ─────── */
+.parcel-item-badge {
+    display: inline-block;
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.5);
+    font-size: 0.62rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    margin-left: 3px;
+    vertical-align: middle;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
 /* Styled quantity input — hides default browser spinners */
 .qty-input {
     width: 46px;

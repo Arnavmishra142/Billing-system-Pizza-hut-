@@ -462,7 +462,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (existingItem) {
             existingItem.qty += 1;
         } else {
-            currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1, printedQty: 0 });
+            // AI UPDATE [2026-08-01]: Added parcel:false default — item-level parcel toggle (Table Orders only).
+            currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1, printedQty: 0, parcel: false });
         }
         saveLocalCart(currentCart);
         renderCart();
@@ -471,7 +472,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('add-custom-item-to-bill', (e) => {
         const item = e.detail;
         currentCart = getLocalCart();
-        currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1, printedQty: 0 });
+        // AI UPDATE [2026-08-01]: Added parcel:false default — item-level parcel toggle (Table Orders only).
+        currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1, printedQty: 0, parcel: false });
         saveLocalCart(currentCart);
         renderCart();
     });
@@ -489,7 +491,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentCart[existingIndex].printedQty = item.qty;
             }
         } else {
-            currentCart.push({ id: item.id, name: item.name, price: item.price, qty: item.qty, printedQty: 0 });
+            // AI UPDATE [2026-08-01]: Added parcel:false default — item-level parcel toggle (Table Orders only).
+            currentCart.push({ id: item.id, name: item.name, price: item.price, qty: item.qty, printedQty: 0, parcel: false });
         }
 
         saveLocalCart(currentCart);
@@ -521,6 +524,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================================
     // RENDER CART (COMPLETE FUNCTION)
     // =====================================
+    // AI UPDATE [2026-08-01]: Added item-level Parcel Toggle support (Table Orders only).
+    // Each cart item now has a small 📦 toggle button on the left of the item name.
+    // Tapping it instantly marks that item as "Parcel" (green filled) or "Dine-In" (grey).
+    // The parcel state is stored in the cart item (localStorage) as item.parcel: true/false.
+    // Backward compatible — items without the field are treated as parcel: false.
     function renderCart() {
         cartItemsContainer.innerHTML = '';
         let totalAmount = 0;
@@ -572,19 +580,35 @@ document.addEventListener('DOMContentLoaded', () => {
             );
         } catch (_) {}
 
+        // AI UPDATE [2026-08-01]: Determine if this is a Table Order session.
+        // The parcel toggle is only shown for Table Orders ("Table N"), not for
+        // Parcel orders or Direct Entry.  Treat missing item.parcel as false (backward compat).
+        const _isTableOrder = !getCurrentTable().includes('Parcel') && getCurrentTable() !== 'Direct Entry';
+
         currentCart.forEach(item => {
             const itemTotal = item.price * item.qty;
             totalAmount += itemTotal;
 
+            // Backward compat: items saved before this feature have no parcel field → treat as false.
+            const _isParcel = item.parcel === true;
+
             let unprintedQty = item.qty - (item.printedQty || 0);
             let unprintedTag = unprintedQty > 0 ? `<span style="background: #ef4444; color: white; font-size: 0.7rem; padding: 2px 5px; border-radius: 4px; margin-left: 5px;">+${unprintedQty} New</span>` : '';
+
+            // 📦 Parcel badge — shown inline next to item name when marked Parcel
+            const _parcelBadge = _isParcel ? `<span class="parcel-item-badge">📦 Parcel</span>` : '';
+
+            // Parcel toggle button — only rendered in Table Order sessions
+            const _parcelToggle = _isTableOrder
+                ? `<button class="parcel-toggle-btn${_isParcel ? ' active' : ''}" data-id="${item.id}" title="${_isParcel ? 'Marked as Parcel — tap to set Dine-In' : 'Tap to mark as Parcel'}">📦</button>`
+                : '';
 
             const cartItemDiv = document.createElement('div');
             cartItemDiv.className = 'cart-item';
             cartItemDiv.innerHTML = `
                 <button class="cart-item-remove" data-id="${item.id}" title="Remove item">✕</button>
                 <div class="cart-item-header">
-                    <span>${item.name} ${unprintedTag}</span>
+                    <span style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">${_parcelToggle}${item.name} ${unprintedTag}${_parcelBadge}</span>
                     <span class="editable-price" data-id="${item.id}" style="cursor:pointer; color:#10b981; font-weight:bold; border-bottom:1px dashed #10b981;">
                         ₹${itemTotal}
                     </span>
@@ -703,6 +727,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 saveBtn.addEventListener('click', handleSave);
                 cancelBtn.addEventListener('click', handleCancel);
                 inputEl.addEventListener('keydown', handleKey);
+            });
+        });
+
+        // AI UPDATE [2026-08-01]: Parcel Toggle — flip item.parcel on tap (Table Orders only).
+        // Saves immediately to localStorage and re-renders so the badge updates instantly.
+        document.querySelectorAll('.parcel-toggle-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = e.currentTarget.dataset.id;
+                const idx = currentCart.findIndex(i => i.id === id);
+                if (idx === -1) return;
+                currentCart[idx].parcel = !(currentCart[idx].parcel === true);
+                saveLocalCart(currentCart);
+                renderCart();
             });
         });
 
@@ -967,16 +1005,39 @@ document.addEventListener('DOMContentLoaded', () => {
         const now = new Date();
         const timeStr = `${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getFullYear()).slice(-2)} ${now.getHours()%12||12}:${String(now.getMinutes()).padStart(2,'0')} ${now.getHours()>=12?'PM':'AM'}`;
         
+        // AI UPDATE [2026-08-01]: Split itemsToPrint into Dine-In and Parcel groups.
+        // Only Table Orders support item-level parcel flags; Parcel / Direct Entry
+        // sessions never set item.parcel=true, so this is fully backward compatible.
+        const _dineInToPrint  = itemsToPrint.filter(itm => {
+            const ci = currentCart.find(i => i.id === itm.id);
+            return !ci || ci.parcel !== true;
+        });
+        const _parcelToPrint  = itemsToPrint.filter(itm => {
+            const ci = currentCart.find(i => i.id === itm.id);
+            return ci && ci.parcel === true;
+        });
+
         let kotText = BOLD_ON;
         if (isFullKot) kotText += "FULL K.O.T\n";
         kotText += `KOT No: ${Math.floor(Math.random()*900)+100}\n`;
         kotText += `Time: ${timeStr}\n`;
         kotText += `Table: ${getDisplayTitle()}\n\n`;
-        
-        for (const item of itemsToPrint) {
+
+        // Dine-In items (unchanged behaviour)
+        for (const item of _dineInToPrint) {
             kotText += `${item.name} (${item.printQty})\n`;
         }
-        
+
+        // Parcel items — printed under a clear separator so kitchen knows to pack them
+        if (_parcelToPrint.length > 0) {
+            kotText += `\n----------------------\n`;
+            kotText += `[PARCEL]\n`;
+            kotText += `----------------------\n`;
+            for (const item of _parcelToPrint) {
+                kotText += `${item.name} (${item.printQty})\n`;
+            }
+        }
+
         kotText += "\n\n\n" + BOLD_OFF;
 
         triggerRawBTPrint(kotText);

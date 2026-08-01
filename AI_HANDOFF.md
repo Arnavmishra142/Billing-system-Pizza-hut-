@@ -1,6 +1,92 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-01 (Architecture migration — Notification trigger moved to Customer Panel)
+> Last updated: 2026-08-01 (Item-Level Parcel Toggle — Table Orders only)
+
+---
+
+## [AI UPDATE 2026-08-01] — Item-Level Parcel Toggle (Table Orders Only)
+
+### Overview
+
+Added an item-level Parcel toggle to the Table Order cart. The operator can now mark individual items as "Parcel" directly inside a table order, without leaving the POS or creating a separate parcel order.
+
+**Example:** Table 5 has Pizza and Cold Drink. Customer adds "Sandwich — parcel kar dena". Operator taps the 📦 toggle next to Sandwich. It turns green. KOT is printed with Sandwich under a separate `[PARCEL]` section.
+
+### Feature Design
+
+- **Toggle button:** Small 📦 button on the LEFT side of each cart item name (Table Orders only).
+  - Default (grey outlined): Dine-In
+  - Tapped (filled green): Parcel
+  - Tap again: back to grey (Dine-In)
+  - No popup. No confirmation. Instant toggle.
+- **Badge:** When an item is marked Parcel, a small green `📦 Parcel` badge appears inline next to the item name.
+- **Visibility:** Toggle only appears in Table Order sessions (`getCurrentTable()` starts with "Table"). Hidden for Parcel orders and Direct Entry.
+- **Backward compatible:** Items loaded from localStorage without a `parcel` field are treated as `parcel: false`. Old orders continue working normally.
+
+### KOT Print Format
+
+When KOT is printed, items are split into two groups:
+
+```
+Table: Table 5
+
+Pizza (1)
+Cold Drink (1)
+
+----------------------
+[PARCEL]
+----------------------
+Sandwich (1)
+```
+
+- Normal dine-in items print first (unchanged).
+- Parcel items print under the `[PARCEL]` separator.
+- If no items are marked Parcel, KOT format is completely unchanged.
+
+### Save / History
+
+- The `parcel` flag is stored on the cart item in localStorage (`item.parcel: true/false`).
+- When saved to Firestore `sales_history`, the cart item (including `parcel` flag) is stored as-is.
+- `syncCustomerOrderCompletion()` writes to `customer_order_history` — the parcel flag is NOT included in the history record (the customer sees the item normally). This is intentional: the parcel flag is an operator-side packing instruction, not a customer-facing status.
+- No Firestore schema changes. No changes to any shared cross-repo contract.
+
+### Architecture Notes
+
+- **ONLY for Table Orders.** Does NOT modify the Parcel module. Does NOT change existing Parcel workflow.
+- **No changes to Customer Panel.** No cross-repo changes required.
+- **Purely additive.** All existing cart behaviour (add, remove, qty, price edit, KOT, Mark Served, Bill & Settle, Save & Exit, Cancel Order) is unchanged.
+
+### Files Modified
+
+| File | Repo | Change |
+|---|---|---|
+| `js/cart.js` | Billing Panel | Added `parcel:false` to all 3 item-creation paths. Added parcel toggle button + badge in `renderCart()`. Added toggle event listener. Split `itemsToPrint` into dine-in/parcel groups in `printKOT()`. |
+| `css/style.css` | Billing Panel | Added `.parcel-toggle-btn` and `.parcel-item-badge` styles. |
+| `sw.js` | Billing Panel | Bumped cache `pos-static-v30` → `pos-static-v31`. |
+| `index.html` | Billing Panel | Bumped `style.css?v=300` → `?v=301`. |
+| `AI_HANDOFF.md` | Billing Panel | This update. |
+
+### Customer Panel Changes Required
+
+**None.** This feature is entirely operator-side and writes no new Firestore fields to any collection shared with the Customer Panel.
+
+### Verification Checklist
+
+| Check | Status |
+|---|---|
+| Toggle button visible in Table Order cart | ✅ `_isTableOrder` check in `renderCart()` |
+| Toggle NOT visible in Parcel orders | ✅ `getCurrentTable().includes('Parcel')` guard |
+| Toggle NOT visible in Direct Entry | ✅ `getCurrentTable() !== 'Direct Entry'` guard |
+| Toggle state instant, no popup | ✅ direct `item.parcel = !item.parcel`, `saveLocalCart`, `renderCart` |
+| Green filled when active | ✅ `.parcel-toggle-btn.active` CSS class |
+| 📦 Parcel badge appears next to item name | ✅ `parcel-item-badge` span injected in `cart-item-header` |
+| KOT dine-in items print first, unchanged | ✅ `_dineInToPrint` array |
+| KOT parcel items print under `[PARCEL]` separator | ✅ `_parcelToPrint` array with separator |
+| No KOT change when no items are parcel | ✅ separator block only added if `_parcelToPrint.length > 0` |
+| Backward compat: missing `parcel` field = false | ✅ `item.parcel === true` explicit check everywhere |
+| Old orders load correctly | ✅ no field required; default `false` assumed |
+| All existing cart behaviour unchanged | ✅ no modification to qty, price edit, remove, Mark Served, Bill & Settle, Save & Exit, Cancel Order |
+| SW cache bumped | ✅ `pos-static-v31` |
 
 ---
 
