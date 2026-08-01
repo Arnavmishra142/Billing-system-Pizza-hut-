@@ -637,6 +637,11 @@ function renderDrawer(orders) {
             let existing = [];
             try { existing = JSON.parse(localStorage.getItem(cartKey) || '[]'); } catch(_) {}
 
+            // AI UPDATE [2026-08-01]: Build itemMeta (for Firestore initialization) and
+            // cartItemSourceMap entries (for per-item KOT writes) alongside cart merge.
+            const _newItemMeta         = {};   // resolvedId → { kotAt, servedAt, itemStatus }
+            const _newSourceMapEntries = {};   // resolvedId → firestoreOrderDocId
+
             items.forEach(newItem => {
                 const incomingQty = newItem.quantity || 1;
 
@@ -665,13 +670,26 @@ function renderDrawer(orders) {
                         printedQty: 0
                     });
                 }
+
+                // Track for itemMeta initialization and cartItemSourceMap
+                _newItemMeta[resolvedId]         = { kotAt: null, servedAt: null, itemStatus: 'pending' };
+                _newSourceMapEntries[resolvedId] = id;  // resolvedId → Firestore doc ID
             });
             localStorage.setItem(cartKey, JSON.stringify(existing));
+
+            // Persist cartItemSourceMap_<tableName> — maps resolvedId → Firestore doc ID
+            // so printKOT can write per-item kotAt to the correct document.
+            // Merged (not replaced) so multiple "Open in POS" presses accumulate correctly.
+            let _prevSourceMap = {};
+            try { _prevSourceMap = JSON.parse(localStorage.getItem(`cartItemSourceMap_${tableName}`) || '{}'); } catch (_) {}
+            Object.assign(_prevSourceMap, _newSourceMapEntries);
+            localStorage.setItem(`cartItemSourceMap_${tableName}`, JSON.stringify(_prevSourceMap));
+
             window.dispatchEvent(new Event('cart-updated'));
 
             // 2. Mark order as accepted in Firestore
             try {
-                await updateDoc(doc(db, 'pending_table_orders', id), { status: 'accepted' });
+                await updateDoc(doc(db, 'pending_table_orders', id), { status: 'accepted', itemMeta: _newItemMeta });
 
                 // UI convenience cache — NOT the source of truth for settlement.
                 // cart.js reads customer_table_sessions from Firestore for lock release.

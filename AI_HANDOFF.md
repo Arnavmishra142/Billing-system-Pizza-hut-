@@ -1,6 +1,75 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-07-31 (Feature — Global Online Ordering Toggle)
+> Last updated: 2026-08-01 (Bug Fix — Per-item KOT timer + Mark as Served)
+
+---
+
+## [AI UPDATE 2026-08-01] — Per-Item KOT Timer Fix + "Mark as Served"
+
+### Files Modified
+- `js/incoming-orders.js`
+- `js/cart.js`
+- `firestore.rules`
+
+### Root Cause of the Timer Reset Bug
+`printKOT()` in `js/cart.js` ran a `getDocs(query(..., where('tableId', '==', currentTable)))` and called `updateDoc(ref, { status: 'kot', kotAt: serverTimestamp() })` on **every** active order for that table — including orders already in `'kot'` status. When a second KOT was pressed for a new order, every prior order's `kotAt` was overwritten with a fresh `serverTimestamp()`, resetting their kitchen timers to zero.
+
+### New Firestore Field: `itemMeta`
+Added a new top-level map field `itemMeta` to `pending_table_orders` documents (additive — existing `items` array and all other fields untouched):
+```
+itemMeta: {
+  "<resolvedId>": {
+    kotAt:      Timestamp | null,
+    servedAt:   Timestamp | null,
+    itemStatus: "pending" | "preparing" | "served"
+  }
+}
+```
+`resolvedId` is the same ID used in the `items[]` array and is resolved as:
+`posItem?.id || newItem.itemId || newItem.id || \`inc_${newItem.name}\``
+
+### New localStorage Key: `cartItemSourceMap_<tableName>`
+Written by the "Open in POS" handler in `incoming-orders.js`. Maps `resolvedId → firestoreOrderDocId` so `printKOT` in `cart.js` can write to the correct document's `itemMeta` during KOT. Merged on multiple "Open in POS" presses. Cleared alongside `acceptedOrderIds` in all three cleanup paths.
+
+### Changes to `js/incoming-orders.js`
+- "Open in POS" handler now builds `_newItemMeta` and `_newSourceMapEntries` during the items merge loop.
+- `updateDoc(..., { status: 'accepted' })` now also includes `itemMeta: _newItemMeta` to initialize the field on the document.
+- `cartItemSourceMap_<tableName>` is persisted to localStorage (merged, not replaced).
+
+### Changes to `js/cart.js`
+- **`printKOT` KOT sync block fully replaced** with per-item logic:
+  - Reads `cartItemSourceMap_<table>`; groups `itemsToPrint` by source orderId.
+  - For each source order: fetches doc, writes `itemMeta.<key>.kotAt = serverTimestamp()` only if `kotAt` is currently null (new items); skips already-preparing items to preserve their timers.
+  - Order-level `status` and `kotAt` written only on first KOT (when `status !== 'kot'`).
+  - Fallback (no sourceMap): original table-wide query but guards against resetting `kotAt` on already-`'kot'` docs.
+- **"Mark as Served" button** added to each cart item row for items with a `cartItemSourceMap` entry. Clicking it writes `itemMeta.<key>.servedAt = serverTimestamp()` and `itemMeta.<key>.itemStatus = 'served'` to Firestore, then re-renders the row in a muted "served" state. Items without a source mapping (manual POS items) show no button.
+- `_servedItems` (in-memory `Set`) tracks served items for the current table session; cleared when a new table is loaded via `load-table-cart`.
+- `cartItemSourceMap` added to the cleanup key list in all three paths: `syncCustomerOrderCompletion`, `cancelImportedOrdersOnEmptyCart`, `cancelOrderInPOS`.
+
+### Changes to `firestore.rules`
+- New helper `isAllowedItemMetaUpdate()`: allows operator writes that touch `itemMeta` without a `status` field (covers the "Mark as Served" write which has no status change).
+- `pending_table_orders` update rule changed to: `isAllowedStatusUpdate() || isAllowedItemMetaUpdate()`.
+- **Deploy required:** `firebase deploy --only firestore:rules`
+
+### What Was NOT Changed
+- `syncCustomerOrderCompletion` logic (order-level completion, history write)
+- `cancelImportedOrdersOnEmptyCart` and `cancelOrderInPOS` functions (logic unchanged; only the cleanup key list is extended)
+- Bill & Settle, Save & Exit, Cancel Order handlers
+- KOT Bluetooth text printing (`triggerRawBTPrint` / `triggerESCPOSPrint`)
+- `printedQty` tracking per item (still drives the "new items only" KOT filter)
+- `acceptedOrderIds`, `activeCustomerUid` localStorage keys
+- Existing `items[]` array and all order-level fields on `pending_table_orders`
+- Customer Panel's `onSnapshot` filters (no Customer Panel changes in this session)
+
+### Customer Panel Changes Required (Separate Prompt)
+The Customer Panel should be updated to read per-item `kotAt` from `itemMeta` for independent per-item timers, with a fallback to the order-level `kotAt` for documents without `itemMeta` (backward compatibility for orders in flight at deploy time).
+
+### Backward Compatibility
+- `itemMeta` is additive. Old documents without it will have `itemMeta` as `undefined`. All code reading `itemMeta` null-guards with `doc.itemMeta?.[key]`.
+- Order-level `status` and `kotAt` fields remain. The Customer Panel still filters on `status`.
+- Orders in flight at deploy time have no `itemMeta` and behave with the old single-timer logic until they complete.
+
+---
 
 ---
 

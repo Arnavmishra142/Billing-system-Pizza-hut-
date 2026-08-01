@@ -207,7 +207,7 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
 
         // ── Step 3: Clear localStorage convenience cache for this table ────────
         // acceptedOrderIds added to the clear list (v2 / Issue 2 fix).
-        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
+        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds', 'cartItemSourceMap']
             .forEach(key => localStorage.removeItem(`${key}_${tableName}`));
 
         console.log(`[OrderSync] Order completion synced for table "${tableName}" (${completionReason})`);
@@ -292,7 +292,7 @@ async function cancelImportedOrdersOnEmptyCart(tableName) {
 
         // Clear the same localStorage convenience-cache keys that
         // syncCustomerOrderCompletion clears on normal completion.
-        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
+        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds', 'cartItemSourceMap']
             .forEach(key => localStorage.removeItem(`${key}_${tableName}`));
 
         console.log(`[OrderCancel] Auto-cancelled empty imported order(s) for table "${tableName}"`);
@@ -354,7 +354,7 @@ async function cancelOrderInPOS(tableName) {
 
         // Clear all localStorage convenience-cache keys — same set as
         // syncCustomerOrderCompletion and cancelImportedOrdersOnEmptyCart.
-        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
+        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds', 'cartItemSourceMap']
             .forEach(key => localStorage.removeItem(`${key}_${tableName}`));
 
         console.log(`[CancelOrder] Order explicitly cancelled for table "${tableName}".`);
@@ -406,6 +406,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const activeTableNameEl = document.getElementById('activeTableName');
 
     let currentCart = [];
+
+    // AI UPDATE [2026-08-01]: Tracks which cart items have been marked served in
+    // this session (keyed by item.id). Cleared when a new table is loaded via
+    // load-table-cart so served state from a previous table does not leak across.
+    const _servedItems = new Set();
 
     const getCurrentTable = () => activeTableNameEl.innerText;
     const getCurrentCustomer = () => activeTableNameEl.dataset.customer || 'C1';
@@ -509,6 +514,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.addEventListener('load-table-cart', () => {
         currentCart = getLocalCart();
+        _servedItems.clear(); // clear served state when switching to a different table
         renderCart();
     });
 
@@ -556,6 +562,16 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // AI UPDATE [2026-08-01]: Read cartItemSourceMap once per render pass so each
+        // item row knows whether it came from a Customer Panel order (and should show
+        // the "Mark as Served" button).
+        let _renderSourceMap = {};
+        try {
+            _renderSourceMap = JSON.parse(
+                localStorage.getItem(`cartItemSourceMap_${getCurrentTable()}`) || '{}'
+            );
+        } catch (_) {}
+
         currentCart.forEach(item => {
             const itemTotal = item.price * item.qty;
             totalAmount += itemTotal;
@@ -581,6 +597,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button class="qty-btn qty-plus" data-id="${item.id}">+</button>
                     </div>
                 </div>
+                ${_renderSourceMap.hasOwnProperty(item.id) ? `
+                <div style="margin-top:6px;">
+                    <button class="mark-served-btn${_servedItems.has(item.id) ? ' served' : ''}"
+                        data-id="${item.id}"
+                        ${_servedItems.has(item.id) ? 'disabled' : ''}
+                        style="width:100%;padding:5px 10px;border:none;border-radius:6px;font-size:0.78rem;font-weight:600;cursor:${_servedItems.has(item.id) ? 'default' : 'pointer'};background:${_servedItems.has(item.id) ? 'rgba(16,185,129,0.12)' : 'rgba(16,185,129,0.22)'};color:${_servedItems.has(item.id) ? '#6ee7b7' : '#10b981'};opacity:${_servedItems.has(item.id) ? '0.6' : '1'};">
+                        ${_servedItems.has(item.id) ? '✅ Served' : '✓ Mark Served'}
+                    </button>
+                </div>` : ''}
             `;
 
             cartItemsContainer.appendChild(cartItemDiv);
@@ -678,6 +703,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 saveBtn.addEventListener('click', handleSave);
                 cancelBtn.addEventListener('click', handleCancel);
                 inputEl.addEventListener('keydown', handleKey);
+            });
+        });
+
+        // AI UPDATE [2026-08-01]: "Mark as Served" — per-item served status for items
+        // that originated from a Customer Panel order (have a cartItemSourceMap entry).
+        // Writes itemMeta.<key>.servedAt + itemStatus:'served' to Firestore without
+        // touching the order-level status field (covered by isAllowedItemMetaUpdate()
+        // in firestore.rules).  Row is re-rendered in a muted "Served" visual state.
+        document.querySelectorAll('.mark-served-btn:not([disabled])').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                const itemId = e.currentTarget.dataset.id;
+                let _sm = {};
+                try { _sm = JSON.parse(localStorage.getItem(`cartItemSourceMap_${getCurrentTable()}`) || '{}'); } catch (_) {}
+                const orderId = _sm[itemId];
+                if (!orderId) return;
+
+                try {
+                    await updateDoc(doc(db, 'pending_table_orders', orderId), {
+                        [`itemMeta.${itemId}.servedAt`]:   serverTimestamp(),
+                        [`itemMeta.${itemId}.itemStatus`]: 'served',
+                    });
+                    console.log(`[Served] Marked item ${itemId} as served on order ${orderId}`);
+                } catch (_e) {
+                    console.warn('[Served] updateDoc failed (non-fatal):', _e.message);
+                }
+                _servedItems.add(itemId);
+                renderCart();
             });
         });
     } // renderCart() END
@@ -797,10 +849,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!currentCart || currentCart.length === 0) return;
         
         const itemsToPrint = isFullKot 
-            ? currentCart.map(item => ({name: item.name, printQty: item.qty}))
+            ? currentCart.map(item => ({id: item.id, name: item.name, printQty: item.qty}))
             : currentCart
                 .filter(item => item.qty > (item.printedQty || 0))
-                .map(item => ({name: item.name, printQty: item.qty - (item.printedQty || 0)}));
+                .map(item => ({id: item.id, name: item.name, printQty: item.qty - (item.printedQty || 0)}));
 
         if (itemsToPrint.length === 0) {
             // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
@@ -818,20 +870,96 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // ── Sync KOT status to customer panel in real-time ─────────────────────
+        // AI UPDATE [2026-08-01]: Replaced the original block that overwrote kotAt on
+        // EVERY active order for the table (including already-preparing items), which
+        // reset their kitchen timers to zero on every subsequent KOT press.
+        //
+        // New per-item logic:
+        //   1. Read cartItemSourceMap_<table> (resolvedId → firestoreOrderDocId).
+        //   2. Group itemsToPrint by source orderId; items with no mapping (manual
+        //      POS items) are skipped — they have no pending_table_orders document.
+        //   3. For each source order: fetch the doc, then build a selective payload:
+        //        - itemMeta.<key>.kotAt set ONLY if currently null (new item).
+        //        - Existing kotAt values are NEVER overwritten (timer preserved).
+        //        - Order-level status + kotAt written only on first KOT (not 'kot' yet).
+        //   Fallback: if cartItemSourceMap is empty/missing (manual session or legacy),
+        //   fall back to the original table-wide query but guard against resetting
+        //   kotAt on already-'kot' docs.
         (async () => {
             try {
-                const _snap = await getDocs(query(
-                    collection(db, 'pending_table_orders'),
-                    where('tableId', '==', getCurrentTable())
-                ));
-                _snap.docs.forEach(_d => {
-                    const _st = (_d.data().status || 'pending').toLowerCase();
-                    if (['pending', 'accepted', 'kot'].includes(_st)) {
-                        updateDoc(_d.ref, { status: 'kot', kotAt: serverTimestamp() })
-                            .catch(e => console.warn('[KOT] sync failed:', e));
+                const _currentTable = getCurrentTable();
+                let _sourceMap = {};
+                try {
+                    _sourceMap = JSON.parse(
+                        localStorage.getItem(`cartItemSourceMap_${_currentTable}`) || '{}'
+                    );
+                } catch (_) {}
+
+                if (Object.keys(_sourceMap).length > 0) {
+                    // ── Per-item path: group itemsToPrint by source orderId ──────────
+                    const _orderItems = new Map(); // orderId → Set<itemKey>
+                    for (const itm of itemsToPrint) {
+                        const orderId = _sourceMap[itm.id];
+                        if (!orderId) continue; // manual POS item — no Firestore doc
+                        if (!_orderItems.has(orderId)) _orderItems.set(orderId, new Set());
+                        _orderItems.get(orderId).add(itm.id);
                     }
-                });
-            } catch(e) { console.warn('[KOT] query failed:', e); }
+
+                    for (const [orderId, itemKeys] of _orderItems) {
+                        try {
+                            const _docRef  = doc(db, 'pending_table_orders', orderId);
+                            const _docSnap = await getDoc(_docRef);
+                            if (!_docSnap.exists()) continue;
+
+                            const _data         = _docSnap.data();
+                            const _docStatus    = (_data.status || 'pending').toLowerCase();
+                            const _existingMeta = _data.itemMeta || {};
+                            const _payload      = {};
+
+                            // Per-item kotAt: stamp only items not yet KOT'd
+                            for (const itemKey of itemKeys) {
+                                const _meta = _existingMeta[itemKey];
+                                if (!_meta || !_meta.kotAt) {
+                                    // First KOT for this item — stamp it
+                                    _payload[`itemMeta.${itemKey}.kotAt`]      = serverTimestamp();
+                                    _payload[`itemMeta.${itemKey}.itemStatus`] = 'preparing';
+                                }
+                                // kotAt already exists → DO NOT overwrite; timer is preserved
+                            }
+
+                            // Order-level status + kotAt: only on first KOT for this order
+                            if (_docStatus !== 'kot') {
+                                _payload.status = 'kot';
+                                _payload.kotAt  = serverTimestamp();  // written once only
+                            }
+
+                            if (Object.keys(_payload).length > 0) {
+                                await updateDoc(_docRef, _payload);
+                                console.log(`[KOT] Updated order ${orderId}:`, Object.keys(_payload));
+                            }
+                        } catch (_e) {
+                            console.warn('[KOT] per-item sync failed for order', orderId, _e);
+                        }
+                    }
+                } else {
+                    // ── Fallback: no cartItemSourceMap (manual / legacy session) ─────
+                    // Guard: never reset kotAt on already-'kot' documents.
+                    const _snap = await getDocs(query(
+                        collection(db, 'pending_table_orders'),
+                        where('tableId', '==', _currentTable)
+                    ));
+                    _snap.docs.forEach(_d => {
+                        const _st = (_d.data().status || 'pending').toLowerCase();
+                        if (['pending', 'accepted', 'kot'].includes(_st)) {
+                            const _upd = _st === 'kot'
+                                ? { status: 'kot' }                            // already KOT'd — no kotAt reset
+                                : { status: 'kot', kotAt: serverTimestamp() }; // first KOT — stamp it
+                            updateDoc(_d.ref, _upd)
+                                .catch(e => console.warn('[KOT] fallback sync failed:', e));
+                        }
+                    });
+                }
+            } catch(e) { console.warn('[KOT] sync failed:', e); }
         })();
 
         const BOLD_ON = '\x1B\x45\x01';

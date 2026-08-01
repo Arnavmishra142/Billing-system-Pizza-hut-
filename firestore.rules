@@ -51,6 +51,17 @@ service cloud.firestore {
           && allowed.hasAny([request.resource.data.status]);
     }
 
+    // AI UPDATE [2026-08-01]: Allow operator writes that only touch itemMeta
+    // (per-item kotAt, servedAt, itemStatus) without also providing a status field.
+    // The "Mark as Served" write in js/cart.js updates itemMeta.<key>.servedAt and
+    // itemMeta.<key>.itemStatus but does NOT change the order-level status field,
+    // so it does not satisfy isAllowedStatusUpdate() and would be denied without
+    // this separate rule.
+    function isAllowedItemMetaUpdate() {
+      return request.resource.data.keys().hasAny(['itemMeta'])
+          && !request.resource.data.keys().hasAny(['status']);
+    }
+
     // ── pending_table_orders ──────────────────────────────────────────────────
     // Reads:    owning customer OR any operator
     // Creates:  BRIDGE — any authenticated user may create an order.
@@ -65,7 +76,8 @@ service cloud.firestore {
       allow read:   if isOrderOwner() || isOperator();
       // BRIDGE: direct browser write — remove when createCustomerOrder CF is live
       allow create: if request.auth != null;
-      allow update: if isOperator() && isAllowedStatusUpdate();
+      allow update: if isOperator()
+          && (isAllowedStatusUpdate() || isAllowedItemMetaUpdate());
     }
 
     // ── customer_table_sessions ───────────────────────────────────────────────
