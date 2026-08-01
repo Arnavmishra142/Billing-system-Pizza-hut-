@@ -1,6 +1,122 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-01 (Pure Pushover Emergency architecture)
+> Last updated: 2026-08-01 (Auto-Expire Stale Pending Orders)
+
+---
+
+## [AI UPDATE 2026-08-01] — Auto-Expire Stale Pending Orders
+
+### What Was Built
+
+A scheduled Cloudflare Worker cron job that automatically marks stale `pending` orders as `expired`. Any `pending_table_orders` document whose `status` is still `"pending"` and whose `createdAt` timestamp is older than **2 hours** is updated to `status: "expired"` with an `expiredAt` server timestamp.
+
+This cleans up "ghost orders" — orders placed by customers who closed their browser or abandoned the session before the operator could act on them.
+
+### Status Values That Are NEVER Expired
+
+```
+accepted | preparing | kot | completed | billed | dismissed | rejected | cancelled
+```
+
+Only untouched `pending` orders are eligible. The check is belt-and-suspenders: both the Firestore query (status == 'pending') and a JS guard inside the loop prevent touching any other status.
+
+### Architecture
+
+```
+Cloudflare Cron (*/30 * * * *)
+  ↓
+scheduled() handler in cloudflare-worker/src/index.js
+  ↓
+handleExpireOrders(db)
+  ↓
+db.query('pending_table_orders', [{ field:'status', op:'==', value:'pending' }])
+  ↓
+Filter in JS: createdAt older than EXPIRE_AFTER_MS (2 hours = 7_200_000 ms)
+  ↓
+db.update(orderId, { status: 'expired' }, ['expiredAt'])  ← server timestamp
+```
+
+**Why filter in JS rather than Firestore query?**  
+Querying `status == 'pending' AND createdAt < X` is a composite inequality query requiring a Firestore composite index. Filtering the `createdAt` cutoff in JavaScript (after fetching by status) avoids that index requirement entirely. Safe for a single-restaurant deployment (well under 500 pending orders at any time).
+
+### New Constant: `EXPIRE_AFTER_MS`
+
+```js
+const EXPIRE_AFTER_MS = 2 * 60 * 60 * 1000;  // 2 hours
+```
+
+Located at the top of the `handleExpireOrders` block in `cloudflare-worker/src/index.js`. Change this value to adjust the expiry window.
+
+### Routes Added
+
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| `GET` | `/expireOrders` | None | Manual backfill / one-shot trigger — safe to call any number of times |
+| `POST` | `/expireOrders` (switch case) | None | Same sweep, callable as a POST body `{ "data": {} }` |
+
+No auth required — the endpoint only writes `status: 'expired'` to already-stale orders; calling it repeatedly is idempotent and harmless.
+
+### Cron Schedule
+
+```toml
+# cloudflare-worker/wrangler.toml
+[triggers]
+crons = ["*/30 * * * *"]   # every 30 minutes
+```
+
+The `scheduled(event, env, ctx)` handler in the export default calls `handleExpireOrders(db)` and logs the result.
+
+### Worker Deployment
+
+- **Worker URL:** `https://pizza-billing-functions.mishrarnav142.workers.dev`
+- **Version deployed:** `8c2709b7-d180-454b-bf1f-4e3d0497fc97`
+- **Cron active:** `*/30 * * * *` — confirmed in `wrangler deploy` output
+- **Secrets set:** `FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`, `ADMIN_PIN`
+
+### Backfill
+
+Run once after deploy to clear existing ghost orders immediately:
+```
+GET https://pizza-billing-functions.mishrarnav142.workers.dev/expireOrders
+```
+Returns: `{ ok: true, expired: N, skipped: M, checked: P }`
+
+### New Firestore Field: `expiredAt` on `pending_table_orders`
+
+| Field | Type | Set by |
+|-------|------|--------|
+| `expiredAt` | Firestore Timestamp (server) | Worker cron / manual trigger |
+
+Added alongside `status: 'expired'`. The Customer Panel already hides orders whose status is `"expired"` (completed as part of the prerequisite work noted in the task spec). The Billing Panel's `incoming-orders.js` only displays `pending` orders, so expired orders disappear automatically from both UIs via the existing `onSnapshot` filters.
+
+### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `cloudflare-worker/src/index.js` | Billing Panel | Added `EXPIRE_AFTER_MS`, `SAFE_STATUSES`, `handleExpireOrders(db)` function; `GET /expireOrders` route; `POST expireOrders` switch case; `scheduled()` cron handler in export default; raised Firestore query limit 100→500 |
+| `cloudflare-worker/wrangler.toml` | Billing Panel | Added `[triggers] crons = ["*/30 * * * *"]` |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+### What Was NOT Changed
+
+- `js/incoming-orders.js` — no changes needed; it already only shows `pending` orders
+- Customer Panel — no changes needed; it already hides `expired` status orders
+- Firestore rules — `status: 'expired'` is a valid status transition (same field as all other status updates; existing `isAllowedStatusUpdate()` rule covers it — Worker uses Admin SDK access, bypassing rules entirely)
+- Billing Panel UI — no changes
+
+### Verification Checklist
+
+| Check | Status |
+|-------|--------|
+| Worker deployed with cron `*/30 * * * *` | ✅ |
+| `handleExpireOrders` only touches `pending` status | ✅ |
+| `accepted`, `kot`, `preparing`, `completed`, `billed`, `dismissed`, `rejected`, `cancelled` never expired | ✅ |
+| `expiredAt` server timestamp written alongside `status: 'expired'` | ✅ |
+| GET `/expireOrders` manual backfill endpoint registered | ✅ |
+| Firebase secrets set in Worker (`FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL`, `ADMIN_PIN`) | ✅ |
+| Backfill run to clear existing ghost orders | ⚠️ Firestore returned 429 (daily read quota exhausted on Spark plan). Ghost orders will expire automatically on the next cron run (within 30 min). Re-run: `GET https://pizza-billing-functions.mishrarnav142.workers.dev/expireOrders` |
+| Customer Panel hides `expired` orders | ✅ (pre-existing) |
+| Billing Panel hides `expired` orders (not `pending`) | ✅ (pre-existing) |
 
 ---
 
