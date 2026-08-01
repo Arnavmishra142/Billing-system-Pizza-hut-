@@ -1,6 +1,109 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-01 (Silent Wake + Local Alarm architecture)
+> Last updated: 2026-08-01 (Pure Pushover Emergency architecture)
+
+---
+
+## [AI UPDATE 2026-08-01] — Pure Pushover Emergency Architecture
+
+### Problem Solved
+
+The previous "Silent Wake + Local Alarm" architecture (priority 1 + browser audio) created duplicate
+sounds when the tablet received the Pushover notification *and* the browser looped `sounds/notification.mp3`.
+Additionally, the browser alarm required an autoplay-unlock overlay on every fresh page load, and the
+alarm could not be reliably stopped by the operator on a tablet that had auto-locked.
+
+The user explicitly requested a return to **Pure Emergency Pushover**: Pushover is the ONLY sound source.
+The browser plays NO audio whatsoever.
+
+### New Architecture (Final)
+
+```
+Customer places order
+  ↓
+Customer Panel calls Worker → notifyOrder
+  ↓
+Worker sends Priority 2 Emergency Pushover
+  priority=2, retry=30, expire=3600
+  → Tablet rings using Pushover's own alarm sound
+  → Repeats every 30 s until cancelled or 3600 s expires
+  ↓
+Worker writes receipt_id to pending_table_orders/{orderId}.notifyReceipt
+  ↓
+Billing Panel: Firestore onSnapshot sees notifyReceipt
+  → Acknowledge button appears on the order card
+  ↓
+Operator taps "Acknowledge Order" button
+  ↓
+Billing Panel calls Worker cancelReceipt with receipt_id
+  ↓
+Worker calls Pushover receipts/{receipt}/cancel.json
+  ↓
+Current Pushover sound finishes naturally
+NO future repeats occur
+```
+
+**Role separation (final):**
+| System | Responsibility |
+|--------|---------------|
+| Pushover (priority 2, emergency) | ALL audible alerting — rings tablet, repeats every 30 s |
+| Browser | ZERO audio — only Firestore listener + UI display |
+| Acknowledge button | Cancels Pushover receipt → stops future repeats |
+| Bell button | **Removed** — no longer needed |
+| Autoplay unlock overlay | **Removed** — no longer needed |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `cloudflare-worker/src/index.js` | `handleNotifyOrder`: priority 1→2, removed sound:'none', added retry:30, expire:3600, re-added callback URL, always writes notifyReceipt to Firestore, added Firestore write success log |
+| `js/incoming-orders.js` | Removed: `_alarmAudio`, `_alarmPlaying`, `startAlarm()`, `stopAlarm()`, `_updateBellBtn()`, `_initAudioUnlockOverlay()`, `#alarm-bell-bar` DOM injection, all alarm CSS, autoplay unlock overlay. Updated `acknowledgeOrder()` to remove `stopAlarm()` call. |
+| `sw.js` | Bumped cache `pos-static-v33` → `pos-static-v34` |
+| `index.html` | Bumped `style.css?v=303` → `?v=304` |
+| `AI_HANDOFF.md` | This update |
+
+### Worker Deployment Required
+
+⚠️ **The Cloudflare Worker must be redeployed** for the priority-2 change to take effect.
+
+The Cloudflare API token stored in the Replit environment does not have deploy permissions.
+To deploy manually:
+
+```bash
+cd cloudflare-worker
+npx wrangler deploy
+```
+
+Or log in first if needed:
+```bash
+npx wrangler login
+cd cloudflare-worker
+npx wrangler deploy
+```
+
+Until the Worker is redeployed, Pushover will still send priority-1 (silent) notifications.
+The Billing Panel changes (browser alarm removal) are already live.
+
+### handleCancelReceipt — No Change Required
+
+`handleCancelReceipt` already correctly:
+- Accepts `{ receipt }` from the Billing Panel
+- Calls `https://api.pushover.net/1/receipts/{receipt}/cancel.json` with form-encoded token
+- Returns `{ ok: true }` on success
+- Logs: receipt received, cancel request sent, Pushover response
+
+### Verification Checklist
+
+| Check | Expected |
+|-------|---------|
+| New order → Pushover rings tablet | Worker sends priority 2; tablet alarm sounds |
+| Pushover repeats every 30 s | Confirmed by priority=2, retry=30 |
+| receipt_id written to Firestore | `notifyReceipt` field on `pending_table_orders` doc |
+| Billing Panel shows Acknowledge button | `_activeReceipts` populated from `data.notifyReceipt` in onSnapshot |
+| Acknowledge pressed → receipt cancelled | `acknowledgeOrder()` → `cancelReceipt` Worker function |
+| No future Pushover repeats after cancel | Pushover cancel API stops the receipt loop |
+| Browser plays NO audio | All `Audio`, `startAlarm`, `stopAlarm`, alarm CSS removed |
+| No autoplay overlay on page load | `_initAudioUnlockOverlay` removed |
 
 ---
 

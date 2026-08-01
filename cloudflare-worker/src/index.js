@@ -923,13 +923,12 @@ async function handleReleaseTableLock(data, authCtx, db, fbAuth, env) {
 // AI UPDATE [2026-07-30]: Sends a Pushover notification for a new customer order.
 // AI UPDATE [2026-08-01] Architecture migration: handleNotifyOrder now accepts `db`
 // so it can write notifyReceipt back to the Firestore order document after Pushover
-// delivery. The Billing Panel reads notifyReceipt from Firestore (instead of
-// localStorage) to know whether to show the Acknowledge button.
-// AI UPDATE [2026-08-01] Silent Wake architecture: switched from Priority 2 (emergency,
-// audible loop) to Priority 1 (high priority, silent). The Pushover notification is now
-// ONLY responsible for waking the tablet / bypassing Do Not Disturb. All audible
-// alerting is handled by the Billing Panel browser alarm (sounds/notification.mp3).
-// Priority 1 does not return a receipt and does not repeat — no cancel flow needed.
+// delivery. The Billing Panel reads notifyReceipt from Firestore to know whether to
+// show the Acknowledge button and to pass the receipt_id when cancelling.
+// AI UPDATE [2026-08-01] Pure Emergency architecture: Priority 2 (emergency) is the
+// ONLY sound source. The browser plays NO audio. Pushover rings the tablet via its
+// own alarm sound and repeats every retry seconds until cancelled or expire elapses.
+// The Billing Panel Acknowledge button cancels the receipt so future repeats stop.
 async function handleNotifyOrder(data, authCtx, baseUrl, db) {
   if (!authCtx?.uid) throw new FnError('unauthenticated', 'Caller must be authenticated.');
 
@@ -961,22 +960,26 @@ async function handleNotifyOrder(data, authCtx, baseUrl, db) {
 
   const message = lines.join('\n');
 
-  // AI UPDATE [2026-08-01] Silent Wake: Priority 1 (high priority) wakes the tablet and
-  // bypasses Do Not Disturb without triggering an audible alarm loop on the phone.
-  // sound:'none' silences the Pushover notification entirely — the Billing Panel browser
-  // alarm (sounds/notification.mp3) is the sole audible alert for the operator.
-  // Priority 1 does NOT return a receipt and does NOT repeat, so retry/expire are removed.
-  // The callback URL is kept for forward compatibility but will not be called by Pushover
-  // since priority 1 has no acknowledgement loop.
-  console.log(`[notifyOrder] Sending silent-wake Pushover (priority 1) for order ${orderId} (${tableId})`);
+  // Pure Emergency architecture: Priority 2 rings the tablet with Pushover's own
+  // alarm sound and repeats every 30 s until the receipt is cancelled or expire
+  // (3600 s) elapses.  The Billing Panel browser plays NO audio — Pushover is the
+  // sole sound source.  The callback URL allows the Pushover app's own Acknowledge
+  // button to write acknowledgedAt to Firestore.
+  const callbackUrl = orderId
+    ? `${baseUrl}/pushoverCallback?orderId=${encodeURIComponent(orderId)}`
+    : undefined;
+
+  console.log(`[notifyOrder] Sending Priority 2 Emergency Pushover for order ${orderId} (${tableId})`);
 
   const _pushoverPayload = {
     token:    PUSHOVER_TOKEN,
     user:     PUSHOVER_USER,
     title,
     message,
-    sound:    'none',
-    priority: 1,
+    priority: 2,
+    retry:    30,
+    expire:   3600,
+    ...(callbackUrl ? { callback: callbackUrl } : {}),
   };
 
   const res = await fetch('https://api.pushover.net/1/messages.json', {
@@ -993,11 +996,13 @@ async function handleNotifyOrder(data, authCtx, baseUrl, db) {
       `Pushover delivery failed: ${(result.errors || ['unknown error']).join(', ')}`);
   }
 
-  // Priority 1 does not return a receipt — only priority 2 (emergency) does.
-  // Only write notifyReceipt to Firestore if a receipt is present (future-proof).
-  console.log(`[notifyOrder] Silent-wake delivered ✓`);
+  // Priority 2 always returns a receipt string — write it to Firestore so the
+  // Billing Panel can show the Acknowledge button and pass it to the cancel endpoint.
+  console.log(`[notifyOrder] Emergency notification delivered ✓ receipt: ${result.receipt}`);
   if (orderId && db && result.receipt) {
+    console.log(`[notifyOrder] Writing notifyReceipt to Firestore for order ${orderId}`);
     db.update('pending_table_orders', orderId, { notifyReceipt: result.receipt })
+      .then(() => console.log(`[notifyOrder] Firestore notifyReceipt written ✓`))
       .catch(e => console.warn('[notifyOrder] Could not store notifyReceipt in Firestore:', e.message));
   }
 
