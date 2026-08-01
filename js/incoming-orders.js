@@ -177,8 +177,10 @@ import {
     orderBy,
     where,
     getDocs,
+    getDoc,
     doc,
     updateDoc,
+    setDoc,
     enableNetwork
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
@@ -233,38 +235,20 @@ const _notified = new Set();
 //   Prevents duplicate POST /api/cancel-receipt calls if the operator clicks the
 //   Acknowledge button more than once before the first request resolves.
 
-// AI UPDATE [2026-07-31]: Persist active receipts to localStorage so they survive
-//   page reloads. If the operator reloads the page while an emergency notification
-//   is active, the receipt is restored and the Acknowledge button reappears.
-const _RECEIPTS_LS_KEY = 'pos_active_receipts';
+// AI UPDATE [2026-08-01] Architecture migration: receipt source of truth is now the
+//   Firestore field `notifyReceipt` on each `pending_table_orders` document (written by
+//   the Worker after Pushover delivery). _activeReceipts is an in-memory cache populated
+//   from Firestore on every snapshot. No localStorage persistence needed — Firestore
+//   delivers the receipt again on every reconnect or page reload.
+const _activeReceipts     = new Map();  // orderId → receipt string (synced from Firestore)
+const _cancellingReceipts = new Set();  // orderId → cancel in progress
 
-function _loadActiveReceipts() {
-    try {
-        const saved = localStorage.getItem(_RECEIPTS_LS_KEY);
-        if (saved) return new Map(Object.entries(JSON.parse(saved)));
-    } catch (_) {}
-    return new Map();
-}
-
-function _saveActiveReceipts() {
-    try {
-        localStorage.setItem(
-            _RECEIPTS_LS_KEY,
-            JSON.stringify(Object.fromEntries(_activeReceipts))
-        );
-    } catch (_) {}
-}
-
-const _activeReceipts     = _loadActiveReceipts();  // orderId → receipt string (persisted)
-const _cancellingReceipts = new Set();               // orderId → cancel in progress
-
-// AI UPDATE [2026-07-31] — Notification ON/OFF toggle.
-// Operator preference persisted in localStorage so it survives page refresh.
-// When OFF: notifyNewOrder() is skipped entirely; all other drawer behaviour is unchanged.
-// The order ID is still added to _notified BEFORE this check, so orders received while
-// notifications are OFF are permanently deduped — they will NOT fire when toggled back ON.
-const _NOTIF_LS_KEY = 'pos_pushover_notifications_enabled';
-let _notificationsEnabled = localStorage.getItem(_NOTIF_LS_KEY) !== '0'; // default: ON
+// AI UPDATE [2026-08-01] Architecture migration: notification ON/OFF setting is now stored
+//   in Firestore `settings/system { notificationEnabled: boolean }` so Customer Panel reads
+//   the same value before calling the Worker. _notificationsEnabled is a local mirror of
+//   that Firestore value, initialized from Firestore by _initNotifSetting() on load.
+//   Default: true (ON) until Firestore responds.
+let _notificationsEnabled = true;
 
 // AI UPDATE [2026-07-29] v11: _initialLoadDone is the primary (and only)
 // notification guard.  Starts false on page load.  Set to true after the first
@@ -272,47 +256,30 @@ let _notificationsEnabled = localStorage.getItem(_NOTIF_LS_KEY) !== '0'; // defa
 // restarts.  See v11 AI UPDATE at the top of this file for the full explanation.
 let _initialLoadDone = false;
 
-// ── Pushover notification via backend ─────────────────────────────────────────
-// AI UPDATE [2026-07-28] v6: Replaced browser audio/notification with Pushover.
-// AI UPDATE [2026-07-29] v10: Rich payload — pass orderId, customerPhone, and
-//   items array so server.js can build a fully-formatted Pushover notification
-//   (Customer Name, Phone, Table, Order #, itemised list).  Priority bumped to
-//   emergency (2) in server.js.
-// AI UPDATE [2026-07-29] session 22: Removed temporary [notify-debug] trace logs.
-//   Notification chain confirmed working end-to-end in session 14. Only failure
-//   paths are logged (non-OK response, fetch error).
-// AI UPDATE [2026-07-30]: Returns the Pushover receipt string (or null on failure)
-//   so the caller can store it for later acknowledgement via cancelReceipt.
-// AI UPDATE [2026-07-30]: Switched from fetch('/api/notify-order') to
-//   httpsCallable(functions, 'notifyOrder') so the call routes through the
-//   Cloudflare Worker (functions.customDomain) and works on GitHub Pages (static
-//   host) as well as Replit Preview.  The Express /api/notify-order route in
-//   server.js is preserved but no longer called by this module.
-async function notifyNewOrder(orderId, data) {
-    const tableId       = data.tableId           || 'Unknown Table';
-    const customerName  = data.customer?.name    || '';
-    const customerPhone = data.customer?.phone   || '';
-    const items         = data.items             || [];
-    const itemCount     = items.reduce((s, i) => s + (i.quantity || 1), 0);
+// AI UPDATE [2026-08-01] Architecture migration: notifyNewOrder() REMOVED.
+// Pushover notifications are now triggered by the Customer Panel (order-panel-updates/js/order.js)
+// immediately after the Firestore write succeeds — never by the Billing Panel.
+// This eliminates the single point of failure where notifications were silently
+// lost when the Billing Panel tab was closed, sleeping, or disconnected.
+//
+// New flow:
+//   Customer Panel: addDoc → success → httpsCallable('notifyOrder') → Worker
+//   Worker: Pushover → writes notifyReceipt to pending_table_orders/{orderId}
+//   Billing Panel: onSnapshot detects notifyReceipt → shows Acknowledge button
+//
+// The Billing Panel is now a pure Firestore viewer for notifications.
 
-    console.log(`[incoming-orders] Sending emergency Pushover notification for order ${orderId} (${tableId})`);
-
+// ── Initialize notification setting from Firestore ────────────────────────────
+// Reads settings/system.notificationEnabled. Called once on DOMContentLoaded.
+// Default: true (ON) if the document does not yet exist.
+async function _initNotifSetting() {
     try {
-        const fn     = httpsCallable(functions, 'notifyOrder');
-        const result = await fn({ orderId, tableId, customerName, customerPhone, items, itemCount });
-
-        console.log('[incoming-orders] Pushover response received:', result.data);
-
-        const receipt = result.data?.receipt;
-        if (receipt) {
-            console.log(`[incoming-orders] Receipt extracted for order ${orderId}:`, receipt);
-            return receipt;
-        }
-
-        return null;
+        const snap    = await getDoc(doc(db, 'settings', 'system'));
+        const enabled = snap.exists() ? snap.data().notificationEnabled !== false : true;
+        return enabled;
     } catch (err) {
-        console.error('[incoming-orders] Pushover callable failed:', err.code, err.message);
-        return null;
+        console.warn('[incoming-orders] Could not read notification setting from Firestore:', err.message);
+        return true; // safe default
     }
 }
 
@@ -344,7 +311,7 @@ async function acknowledgeOrder(orderId) {
 
         if (result.data?.ok) {
             _activeReceipts.delete(orderId);
-            _saveActiveReceipts();
+            // AI UPDATE [2026-08-01]: No localStorage save — Firestore is source of truth.
             console.log(`[incoming-orders] Receipt cleared — emergency notification cancelled for order ${orderId}`);
         } else {
             console.warn(`[incoming-orders] Cancel returned unexpected response for order ${orderId}:`, result.data);
@@ -793,16 +760,18 @@ function startListening() {
             const order = { id: docSnap.id, ...data };
             pending.push(order);
 
-            // AI UPDATE [2026-08-01]: Native Pushover acknowledgement sync.
-            // When the operator acknowledges the emergency notification from the Pushover
-            // phone app, the Worker writes acknowledgedAt to this Firestore document.
-            // The existing onSnapshot fires immediately; we clear the receipt here so the
-            // next renderDrawer() call removes the "Acknowledge Order" button automatically
-            // — no page refresh or manual Billing Panel interaction required.
-            if (data.acknowledgedAt && _activeReceipts.has(docSnap.id)) {
+            // AI UPDATE [2026-08-01] Architecture migration: sync _activeReceipts from Firestore.
+            // notifyReceipt is written by the Worker after Pushover delivery (new field).
+            // acknowledgedAt is written by the Worker /pushoverCallback (existing field).
+            // _activeReceipts is an in-memory cache populated here so acknowledgeOrder()
+            // has the receipt string without any localStorage dependency.
+            if (data.notifyReceipt && !data.acknowledgedAt) {
+                if (!_activeReceipts.has(docSnap.id)) {
+                    _activeReceipts.set(docSnap.id, data.notifyReceipt);
+                }
+            } else if (data.acknowledgedAt && _activeReceipts.has(docSnap.id)) {
                 console.log(`[incoming-orders] Order ${docSnap.id} acknowledged natively via Pushover app — clearing receipt`);
                 _activeReceipts.delete(docSnap.id);
-                _saveActiveReceipts();
             }
 
             if (!_notified.has(docSnap.id)) {
@@ -826,43 +795,10 @@ function startListening() {
                 const itemCount = (data.items || []).reduce((s, i) => s + (i.quantity || 1), 0);
                 showToast(data.tableId || 'Unknown Table', itemCount || 1);
 
-                // AI UPDATE [2026-07-28] v6: Pushover push notification via backend.
-                // AI UPDATE [2026-07-29] v10: Pass docSnap.id as orderId for rich notification.
-                // AI UPDATE [2026-07-29] v11: Timestamp guard removed; _initialLoadDone guard restored.
-                // AI UPDATE [2026-07-29] session 22: [notify-debug] trace logs removed.
-                // AI UPDATE [2026-07-30]: Capture returned receipt; store in _activeReceipts;
-                //   re-render drawer to show Acknowledge button for this order.
-                // AI UPDATE [2026-07-31]: Guard with _notificationsEnabled — when the operator
-                //   has toggled notifications OFF, skip the Pushover call entirely.
-                //   The order ID was already added to _notified above, so it will never
-                //   fire a delayed notification if the toggle is switched back ON later.
-                if (_notificationsEnabled) {
-                    notifyNewOrder(docSnap.id, data).then(receipt => {
-                        if (receipt) {
-                            // AI UPDATE [2026-07-31]: Race guard — store the receipt first,
-                            // then check whether the order is still in the pending list.
-                            // If notifyNewOrder() resolved AFTER the order was accepted or
-                            // dismissed (the operator acted while the Worker call was in-flight),
-                            // the orphan cleanup has already run and will not run again for this
-                            // orderId.  Without this guard the receipt would be stored in
-                            // _activeReceipts permanently with no future cleanup, and the
-                            // emergency notification would run to its full expire=3600s window.
-                            // Fix: store the receipt, then immediately cancel if no longer pending.
-                            _activeReceipts.set(docSnap.id, receipt);
-                            const stillPending = _pendingOrders.some(o => o.id === docSnap.id);
-                            if (stillPending) {
-                                console.log(`[incoming-orders] Receipt stored for order ${docSnap.id}:`, receipt);
-                                _saveActiveReceipts();
-                                renderDrawer(_pendingOrders);
-                            } else {
-                                console.log(`[incoming-orders] Order ${docSnap.id} already left pending while notify was in-flight — auto-cancelling`);
-                                acknowledgeOrder(docSnap.id);  // clears receipt, saves, no re-render needed
-                            }
-                        }
-                    });
-                } else {
-                    console.log(`[incoming-orders] Pushover skipped (notifications OFF) for order ${docSnap.id}`);
-                }
+                // AI UPDATE [2026-08-01] Architecture migration: Billing Panel no longer
+                // calls notifyOrder. The Customer Panel triggers the Worker immediately after
+                // addDoc succeeds. The Worker writes notifyReceipt to Firestore; the onSnapshot
+                // above populates _activeReceipts from that field. Nothing to do here.
             }
         });
 
@@ -871,21 +807,15 @@ function startListening() {
         // the first snapshot are processed with _initialLoadDone = false (silenced).
         _initialLoadDone = true;
 
-        // AI UPDATE [2026-07-30] — Orphan cleanup: if an order was accepted or
-        // dismissed before the operator acknowledged its emergency notification,
-        // cancel the Pushover notification automatically so the phone stops ringing.
-        // AI UPDATE [2026-07-31]: Changed from silent _activeReceipts.delete() to
-        //   calling acknowledgeOrder(). Previously the receipt was removed from the
-        //   Map without ever hitting the Pushover cancel API, so the emergency
-        //   notification kept repeating for the full expire=3600s window even after
-        //   the operator accepted the order ("Open in POS") or dismissed it.
-        //   acknowledgeOrder() is fire-and-forget here (not awaited); it guards
-        //   internally against duplicate calls via _cancellingReceipts.
+        // Orphan cleanup: if an order was accepted/dismissed before the operator
+        // acknowledged its notification, cancel the Pushover receipt automatically.
+        // _activeReceipts is now populated from Firestore notifyReceipt field, so
+        // this still works correctly — receipt is available whenever the field is set.
         const pendingIds = new Set(pending.map(o => o.id));
         for (const orderId of _activeReceipts.keys()) {
             if (!pendingIds.has(orderId)) {
                 console.log(`[incoming-orders] Order ${orderId} left pending — auto-cancelling emergency notification`);
-                acknowledgeOrder(orderId);  // fire-and-forget; clears receipt + saves on success
+                acknowledgeOrder(orderId);  // fire-and-forget; guards against duplicate calls
             }
         }
 
@@ -968,9 +898,24 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         ordersTabContent.insertBefore(toggleBar, drawerListEl);
 
+        // AI UPDATE [2026-08-01]: Initialize toggle state from Firestore global setting.
+        // The Customer Panel reads the same setting before deciding to call the Worker.
+        _initNotifSetting().then(enabled => {
+            _notificationsEnabled = enabled;
+            const chk      = document.getElementById('notifToggleChk');
+            const statusEl = document.getElementById('notifToggleStatus');
+            if (chk) chk.checked = enabled;
+            if (statusEl) {
+                statusEl.textContent = enabled ? 'ON' : 'OFF';
+                statusEl.className   = `notif-toggle-status ${enabled ? 'on' : 'off'}`;
+            }
+        });
+
         document.getElementById('notifToggleChk').addEventListener('change', (e) => {
             _notificationsEnabled = e.target.checked;
-            localStorage.setItem(_NOTIF_LS_KEY, _notificationsEnabled ? '1' : '0');
+            // AI UPDATE [2026-08-01]: Write to Firestore so Customer Panel reads the same value.
+            setDoc(doc(db, 'settings', 'system'), { notificationEnabled: _notificationsEnabled }, { merge: true })
+                .catch(err => console.warn('[incoming-orders] Could not save notification setting:', err.message));
             const statusEl = document.getElementById('notifToggleStatus');
             if (statusEl) {
                 statusEl.textContent  = _notificationsEnabled ? 'ON' : 'OFF';

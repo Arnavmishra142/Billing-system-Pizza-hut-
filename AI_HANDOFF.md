@@ -1,6 +1,127 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-01 (Feature — Native Pushover Acknowledgement Sync)
+> Last updated: 2026-08-01 (Architecture migration — Notification trigger moved to Customer Panel)
+
+---
+
+## [AI UPDATE 2026-08-01] — Notification Architecture Migration
+
+### Overview
+
+**Architecture change:** The Pushover notification trigger has been moved from the Billing Panel to the Customer Panel. The Billing Panel is now a pure Firestore viewer — it no longer calls `notifyOrder`. This eliminates the single point of failure where notifications were silently dropped whenever the Billing Panel tab was closed, asleep, or disconnected.
+
+### Old Architecture (removed)
+
+```
+Billing Panel (onSnapshot detects new order)
+    ↓
+httpsCallable('notifyOrder') → Worker → Pushover
+```
+**Problem:** If Billing Panel tab is closed → no notification, ever.
+
+### New Architecture
+
+```
+Customer Panel: placeOrder() → addDoc() succeeds
+    ↓ (fire-and-forget, never blocks success UI)
+Check settings/system.notificationEnabled (getDoc, one-time)
+    ↓ if enabled (default ON)
+httpsCallable('notifyOrder') → Worker
+    ↓
+Worker sends Pushover (priority=2, emergency)
+    ↓
+Worker writes notifyReceipt to pending_table_orders/{orderId}
+    ↓
+Billing Panel onSnapshot fires → detects notifyReceipt field
+    ↓
+_activeReceipts populated from Firestore (no longer from localStorage)
+    ↓
+renderDrawer() shows "Acknowledge Order" button
+    ↓
+Operator acknowledges (button or native Pushover phone ack)
+    ↓
+Worker cancels receipt / writes acknowledgedAt (unchanged)
+    ↓
+Billing Panel onSnapshot → button disappears
+```
+
+### Global Notification ON/OFF Switch
+
+The Billing Panel's notification toggle now writes to Firestore `settings/system.notificationEnabled` instead of `localStorage`. The Customer Panel reads this value (one-time `getDoc`) before deciding whether to call the Worker. This makes the toggle truly global — a single operator toggle affects all devices and the Customer Panel simultaneously.
+
+| Toggle state | What happens |
+|---|---|
+| ON (default) | Customer Panel calls Worker after every successful order write |
+| OFF | Customer Panel skips Worker call entirely; order creation, KOT, history all continue normally |
+
+### New Firestore Field: `notifyReceipt` on `pending_table_orders`
+
+| Field | Type | Written by | Read by |
+|---|---|---|---|
+| `notifyReceipt` | string | Worker `notifyOrder` after Pushover delivery | Billing Panel `onSnapshot` → `_activeReceipts` cache |
+
+Additive, optional field. Worker uses `db.update()` (field-mask) so no other order data is touched. Non-fatal if the write fails (notification was already delivered; button simply won't appear in Billing Panel for that order).
+
+### New Firestore Document: `settings/system`
+
+```
+settings/system { notificationEnabled: boolean }
+```
+Written by: Billing Panel toggle (`js/incoming-orders.js` → `setDoc(..., { merge: true })`).  
+Read by: Customer Panel (`js/order.js` → one-time `getDoc` before calling Worker).  
+Rules: `read: if true`, `write: if isOperator()` (covered by existing `settings/{docId}` rule).
+
+### Files Modified
+
+| File | Repo | Change |
+|---|---|---|
+| `cloudflare-worker/src/index.js` | Billing Panel | `handleNotifyOrder`: added `db` param; writes `notifyReceipt` to Firestore after Pushover success. Switch case passes `db`. |
+| `js/incoming-orders.js` | Billing Panel | Removed `notifyNewOrder()`. Removed localStorage receipt persistence. `_activeReceipts` populated from Firestore `notifyReceipt` field in `onSnapshot`. Notification toggle writes to `settings/system.notificationEnabled` (Firestore) instead of `localStorage`. Added `getDoc`/`setDoc` imports. Added `_initNotifSetting()`. |
+| `order-panel-updates/js/order.js` | Customer Panel bridge | Added `_triggerOrderNotification()`. Called fire-and-forget after `addDoc` succeeds. Imports `functions` and `httpsCallable`. |
+| `order-panel-updates/js/firebase-config.js` | Customer Panel bridge | **NEW FILE** — Customer Panel firebase-config with `functions.customDomain` set to Worker URL. Replaces `js/firebase-config.js` in `teamdovolve-hue/Order-`. |
+| `ARCHITECTURE_LOCK.md` | Billing Panel | Added `notifyReceipt` field to `pending_table_orders` schema. Added `settings/system` collection doc. |
+| `sw.js` | Billing Panel | Bumped `pos-static-v29` → `pos-static-v30`. |
+| `AI_HANDOFF.md` | Billing Panel | This update. |
+
+### Worker Deployment
+
+Worker redeployed as part of this migration:
+- Version ID: `ae4052a0-f582-4faf-ac13-bc5cf2b65a9a`
+- URL: `https://pizza-billing-functions.mishrarnav142.workers.dev`
+
+### Customer Panel Deployment Required
+
+**Two files must be deployed to `teamdovolve-hue/Order-`:**
+
+1. `order-panel-updates/js/order.js` → replace `js/order.js`
+2. `order-panel-updates/js/firebase-config.js` → replace `js/firebase-config.js`
+
+Without the Customer Panel deploy, notifications continue to work through the old Billing Panel path (still present in `onSnapshot` as a no-op — the trigger code is removed, but the button display logic now reads `notifyReceipt` from Firestore, which will be absent since the Worker won't be called).
+
+### Backward Compatibility
+
+- `_activeReceipts` still drives the Acknowledge button display — same UX, different data source (Firestore instead of localStorage).
+- Orphan cleanup (auto-cancel on accept/dismiss) still works — `_activeReceipts` is still populated at that point.
+- Manual Acknowledge button still works as a fallback.
+- Orders without `notifyReceipt` (pre-deploy, or notification-off orders) silently show no Acknowledge button — correct behaviour.
+- `acknowledgedAt` callback path (Pushover native ack) unchanged.
+
+### Verification Checklist
+
+| Check | Status |
+|---|---|
+| Worker writes `notifyReceipt` to Firestore order doc | ✅ `db.update(...)` in `handleNotifyOrder` |
+| Customer Panel reads `settings/system.notificationEnabled` | ✅ `_triggerOrderNotification()` |
+| Customer Panel skips Worker if setting is OFF | ✅ early return in `_triggerOrderNotification()` |
+| Billing Panel no longer calls `notifyOrder` | ✅ `notifyNewOrder()` removed |
+| `_activeReceipts` populated from Firestore | ✅ in `onSnapshot` forEach |
+| localStorage receipt persistence removed | ✅ `_loadActiveReceipts` / `_saveActiveReceipts` removed |
+| Billing Panel toggle writes to Firestore | ✅ `setDoc(settings/system, ...)` |
+| Billing Panel toggle reads initial value from Firestore | ✅ `_initNotifSetting()` on load |
+| Acknowledge button still appears correctly | ✅ `_activeReceipts.has(id)` (populated from Firestore) |
+| Orphan cleanup still works | ✅ `_activeReceipts` still populated before cleanup runs |
+| Worker deployed | ✅ version `ae4052a0` |
+| **Customer Panel deploy required** | ⚠️ deploy `order-panel-updates/js/order.js` + `firebase-config.js` to Netlify |
 
 ---
 

@@ -1,6 +1,6 @@
 // ============================================================
 //  POS Service Worker — Cache-first for static assets
-//  Version: 13 (bump this number whenever you deploy changes)
+//  Version: 14 (bump this number whenever you deploy changes)
 // ============================================================
 //
 // AI UPDATE [2026-07-29] session 13: Bumped v11 → v12.
@@ -57,7 +57,7 @@
 //   3. _saveActiveReceipts() called after every receipt mutation.
 // AI UPDATE [2026-07-31]: Bumped pos-static-v27 → pos-static-v28.
 // js/menu-management.js updated with Global Online Ordering Toggle feature.
-const CACHE_NAME = 'pos-static-v29'; // AI UPDATE [2026-08-01]: bumped for incoming-orders.js native Pushover ack sync
+const CACHE_NAME = 'pos-static-v30'; // AI UPDATE [2026-08-01]: bumped for notification architecture migration (trigger moved to Customer Panel)
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

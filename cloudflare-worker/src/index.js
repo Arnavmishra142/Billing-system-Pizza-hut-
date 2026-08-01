@@ -925,7 +925,12 @@ async function handleReleaseTableLock(data, authCtx, db, fbAuth, env) {
 // cancel the alert via cancelReceipt.
 // Requires any authenticated Firebase user (anonymous session is fine).
 // No Firestore access needed — pure Pushover API call.
-async function handleNotifyOrder(data, authCtx, baseUrl) {
+// AI UPDATE [2026-08-01] Architecture migration: handleNotifyOrder now accepts `db`
+// so it can write notifyReceipt back to the Firestore order document after Pushover
+// delivery. The Billing Panel reads notifyReceipt from Firestore (instead of
+// localStorage) to know whether to show the Acknowledge button. This decouples the
+// Billing Panel from the notification path — it becomes a pure Firestore viewer.
+async function handleNotifyOrder(data, authCtx, baseUrl, db) {
   if (!authCtx?.uid) throw new FnError('unauthenticated', 'Caller must be authenticated.');
 
   const {
@@ -995,6 +1000,17 @@ async function handleNotifyOrder(data, authCtx, baseUrl) {
   }
 
   console.log(`[notifyOrder] Delivered ✓ receipt: ${result.receipt}`);
+
+  // AI UPDATE [2026-08-01] Architecture migration: write notifyReceipt back to the
+  // Firestore order document so the Billing Panel reads it from Firestore rather than
+  // storing it in localStorage. This makes the Billing Panel a pure Firestore viewer —
+  // it shows the Acknowledge button whenever notifyReceipt is present and acknowledgedAt
+  // is absent. Non-fatal: a failure here does not block the notification itself.
+  if (orderId && db) {
+    db.update('pending_table_orders', orderId, { notifyReceipt: result.receipt })
+      .catch(e => console.warn('[notifyOrder] Could not store notifyReceipt in Firestore:', e.message));
+  }
+
   return { receipt: result.receipt };
 }
 
@@ -1175,9 +1191,8 @@ export default {
         case 'notifyOrder': {
           if (!rawToken) throw new FnError('unauthenticated', 'Caller must be authenticated.');
           const authCtx = await verifyIdToken(rawToken, projectId);
-          // AI UPDATE [2026-08-01]: Pass url.origin so handleNotifyOrder can build
-          // the Pushover callback URL pointing back to this Worker.
-          result = await handleNotifyOrder(data, authCtx, url.origin);
+          // AI UPDATE [2026-08-01]: Pass url.origin (callback URL) and db (write notifyReceipt).
+          result = await handleNotifyOrder(data, authCtx, url.origin, db);
           break;
         }
 

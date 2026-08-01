@@ -14,11 +14,16 @@
  *   3. No data-structure changes needed
  */
 
-import { db, auth }                      from "./firebase-config.js";
+// AI UPDATE [2026-08-01] Architecture migration: notification trigger moved here.
+// Billing Panel is now a pure Firestore viewer — it no longer calls notifyOrder.
+// Customer Panel triggers the Worker immediately after addDoc succeeds, ensuring
+// notifications fire even when the Billing Panel is closed or disconnected.
+import { db, auth, functions }            from "./firebase-config.js";
 import {
   collection, addDoc, getDoc, doc,
   serverTimestamp,
 }                                         from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { httpsCallable }                  from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
 import { cart, clearCart }                from "./cart.js";
 import { getCustomer }                    from "./customer.js";
 import { waitForAuthReady, getLoginInfo } from "./auth.js";
@@ -152,7 +157,7 @@ export async function placeOrder() {
     // where all previous orders live.
     const _loginInfo = getLoginInfo();
     const _stableUid = _loginInfo?.uid || auth.currentUser?.uid || "";
-    await addDoc(collection(db, "pending_table_orders"), {
+    const _docRef = await addDoc(collection(db, "pending_table_orders"), {
       tableId,
       customer: {
         uid:   _stableUid,
@@ -164,6 +169,11 @@ export async function placeOrder() {
       totalPrice: +totalPrice.toFixed(2),
       createdAt:  serverTimestamp(),
     });
+
+    // AI UPDATE [2026-08-01] Architecture migration: trigger notification from Customer Panel.
+    // Fire-and-forget — never blocks or delays the success UI. All errors are caught internally.
+    // Only fires after Firestore write confirms success (docRef received = write accepted).
+    _triggerOrderNotification(_docRef.id, tableId, customer, items, totalItems).catch(() => {});
 
     setActiveTableId(tableId);
     clearCart();
@@ -225,4 +235,47 @@ function _showError(detail = "") {
 
 function _esc(s = "") {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ── Notification trigger ──────────────────────────────────────────────────────
+// AI UPDATE [2026-08-01] Architecture migration.
+//
+// Called fire-and-forget immediately after addDoc succeeds. Never throws — all
+// errors are caught so a notification failure can never break the order flow.
+//
+// Flow:
+//   1. Read settings/system.notificationEnabled from Firestore (one-time getDoc).
+//      Default: ON if the document is absent (backward compatible).
+//   2. If OFF: log and return — order creation, history, KOT all continue normally.
+//   3. If ON: call Worker httpsCallable('notifyOrder') with full order payload.
+//      Worker: sends Pushover (priority=2, emergency) + writes notifyReceipt to
+//              the order document so Billing Panel shows the Acknowledge button.
+//
+// Requires functions.customDomain = Worker URL in firebase-config.js (already set).
+async function _triggerOrderNotification(orderId, tableId, customer, items, itemCount) {
+  try {
+    // Check global notification setting — one-time read (not a listener)
+    const snap    = await getDoc(doc(db, 'settings', 'system'));
+    const enabled = snap.exists() ? snap.data().notificationEnabled !== false : true;
+
+    if (!enabled) {
+      console.log('[order] Pushover notification skipped — globally disabled via Billing Panel toggle');
+      return;
+    }
+
+    const fn = httpsCallable(functions, 'notifyOrder');
+    await fn({
+      orderId,
+      tableId,
+      customerName:  customer?.name  || '',
+      customerPhone: customer?.phone || '',
+      items,
+      itemCount,
+    });
+
+    console.log('[order] Pushover notification sent ✓ for order', orderId);
+  } catch (err) {
+    // Non-fatal: notification failure must never affect order placement
+    console.warn('[order] Pushover notification failed (non-fatal):', err.code || err.message);
+  }
 }

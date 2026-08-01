@@ -215,6 +215,7 @@ Schema changes require **explicit user approval**. Never rename collections, ren
   totalPrice: number
   createdAt:  Timestamp      // ServerTimestamp
   kotAt:          Timestamp  // ServerTimestamp — set when KOT printed (optional until KOT)
+  notifyReceipt:  string     // Pushover receipt string — written by Worker/notifyOrder after delivery (optional; used by Billing Panel to show Acknowledge button)
   acknowledgedAt: Timestamp  // ServerTimestamp — set when operator acknowledges via Pushover app (optional; written by Worker /pushoverCallback endpoint only)
   completedAt:    Timestamp  // ServerTimestamp — set on Bill & Settle / Save & Exit
 }
@@ -282,6 +283,17 @@ Written by the Billing Panel (`js/menu-management.js` toggle).
 Read by the Customer Panel (`js/restaurant-status.js` via `onSnapshot`).
 When this document does not yet exist, the default is **ON** (backward compatible).
 **Do NOT store menu-item availability in this document.** This is global restaurant status only.
+
+#### `settings/system` — Global notification setting (added 2026-08-01)
+```
+{
+  notificationEnabled: boolean  // true = send Pushover notifications; false = skip. Default ON if absent.
+}
+```
+Written by: Billing Panel (`js/incoming-orders.js` notification toggle — operator action).
+Read by: Customer Panel (`js/order.js` via one-time `getDoc` before calling Worker).
+Firestore rules: `read: if true` (customers can read), `write: if isOperator()` (already covers `settings/{docId}`).
+When this document does not exist, Customer Panel defaults to **ON** (backward compatible).
 
 #### `sales_history/{docId}` — Completed/billed orders
 ```
