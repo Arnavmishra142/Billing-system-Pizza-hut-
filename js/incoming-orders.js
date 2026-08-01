@@ -540,6 +540,63 @@ function closeDrawer() {
     overlay && overlay.classList.remove('open');
 }
 
+// ── Customer-slot assignment ──────────────────────────────────────────────────
+// AI UPDATE [2026-08-01]: Multiple-customers-same-table support.
+//
+// Problem: Two different customers at the same table would both merge into C1
+// because the cart key was hardcoded as `cart_${tableName}_C1`.
+//
+// Solution: maintain a per-table identity→slot mapping in localStorage.
+//   Key: `customerSlotMap_${tableName}`
+//   Value: { C1: { phone, uid }, C2: { phone, uid }, … }
+//
+// Logic:
+//   - Search existing slots for a matching phone OR uid → reuse that slot.
+//   - If no match → allocate the next available C-number (max of slotMap keys
+//     and live cart_${tableName}_C* keys, +1).
+//   - Persist the updated map back to localStorage.
+//
+// This function is pure localStorage I/O — no Firestore writes, no network.
+function _findOrAllocateCustomerSlot(tableName, phone, uid) {
+    // Load existing slot map for this table
+    let slotMap = {};
+    try {
+        slotMap = JSON.parse(localStorage.getItem(`customerSlotMap_${tableName}`) || '{}');
+    } catch (_) { slotMap = {}; }
+
+    // Step 1: search for an existing slot that matches this customer identity
+    for (const [slot, identity] of Object.entries(slotMap)) {
+        const phoneMatch = phone && identity.phone && identity.phone === phone;
+        const uidMatch   = uid   && identity.uid   && identity.uid   === uid;
+        if (phoneMatch || uidMatch) {
+            console.log(`[incoming-orders] Customer ${phone || uid} matched existing slot ${slot} on ${tableName}`);
+            return slot;
+        }
+    }
+
+    // Step 2: no existing slot — find the next available C-number
+    let maxC = 0;
+    for (const slot of Object.keys(slotMap)) {
+        const n = parseInt(slot.replace('C', ''), 10);
+        if (!isNaN(n) && n > maxC) maxC = n;
+    }
+    // Also check live cart keys in case slotMap was cleared but carts still exist
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key.startsWith(`cart_${tableName}_C`)) {
+            const suffix = key.slice(`cart_${tableName}_C`.length);
+            const n = parseInt(suffix, 10);
+            if (!isNaN(n) && n > maxC) maxC = n;
+        }
+    }
+
+    const newSlot = `C${maxC + 1}`;
+    slotMap[newSlot] = { phone: phone || '', uid: uid || '' };
+    localStorage.setItem(`customerSlotMap_${tableName}`, JSON.stringify(slotMap));
+    console.log(`[incoming-orders] Customer ${phone || uid} allocated new slot ${newSlot} on ${tableName}`);
+    return newSlot;
+}
+
 // ── Render orders inside the drawer ──────────────────────────────────────────
 let _pendingOrders = [];
 
@@ -606,8 +663,15 @@ function renderDrawer(orders) {
             const customerSessionId = order.customerSessionId      || '';
             const tableLockId      = order.tableLockId             || '';
 
+            // AI UPDATE [2026-08-01]: Multi-customer same-table support.
+            // Determine which customer tab (C1/C2/C3…) this order belongs to.
+            // Same phone/UID → reuses existing slot. New identity → next slot.
+            const _orderPhone    = order.customer?.phone || '';
+            const customerSlot   = _findOrAllocateCustomerSlot(tableName, _orderPhone, customerUid);
+            console.log(`[incoming-orders] Order ${id} (${_orderPhone || customerUid}) → slot ${customerSlot} on ${tableName}`);
+
             // 1. Merge customer items into localStorage cart for this table
-            const cartKey = `cart_${tableName}_C1`;
+            const cartKey = `cart_${tableName}_${customerSlot}`;
             let existing = [];
             try { existing = JSON.parse(localStorage.getItem(cartKey) || '[]'); } catch(_) {}
 
@@ -689,9 +753,11 @@ function renderDrawer(orders) {
 
             closeDrawer();
 
-            // 3. Open POS directly to that table (cart already loaded)
+            // 3. Open POS directly to that table, on the correct customer tab
+            // AI UPDATE [2026-08-01]: Pass customerSlot so the operator lands on
+            // the right Customer tab (C1/C2/C3…), not always C1.
             if (typeof window._posOpenTable === 'function') {
-                window._posOpenTable(tableName);
+                window._posOpenTable(tableName, customerSlot);
             }
         });
 

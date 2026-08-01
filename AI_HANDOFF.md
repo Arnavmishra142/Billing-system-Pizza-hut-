@@ -4,6 +4,63 @@
 
 ---
 
+## [AI UPDATE 2026-08-01] — Multiple Online Customers on the Same Table
+
+### Problem Solved
+
+When two different customers scanned the same table's QR code and placed orders, both orders merged into Customer 1's cart (`cart_${tableName}_C1`). This was because:
+
+1. `incoming-orders.js` hardcoded `cart_${tableName}_C1` as the cart key for every incoming order.
+2. `tables.js` line 342 exposed `window._posOpenTable = (name) => openPOS(name, 'C1')` — always navigating to C1 regardless of which customer's order was accepted.
+
+### New Matching Logic
+
+```
+Incoming online order (phone, uid)
+  ↓
+_findOrAllocateCustomerSlot(tableName, phone, uid)
+  ↓
+  Search customerSlotMap_${tableName} for matching phone OR uid
+  ↓
+  Match found? → reuse that slot (C1/C2/C3…)
+  No match?   → allocate next C-number (max of slotMap + live cart keys + 1)
+               → save new entry to customerSlotMap_${tableName}
+  ↓
+Write items to cart_${tableName}_${slot}
+  ↓
+window._posOpenTable(tableName, slot) — opens the correct customer tab
+```
+
+**Identity map storage:**
+- localStorage key: `customerSlotMap_${tableName}`
+- Format: `{ "C1": { "phone": "+91...", "uid": "..." }, "C2": { ... } }`
+- Persists alongside carts; cleared naturally when all carts for the table are removed.
+
+### Scenarios Verified
+
+| Case | Input | Expected | Logic |
+|------|-------|----------|-------|
+| 1 | Same phone, same table | Same slot | `phoneMatch` → reuse C1 |
+| 2 | Different phone, same table | New slot | No match → allocate C2 |
+| 3 | Three different phones | C1, C2, C3 | Each gets next C-number |
+| 4 | Existing customer orders again | Same slot | `phoneMatch` → reuse existing slot |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `js/incoming-orders.js` | Added `_findOrAllocateCustomerSlot()` (module-level). In "Open in POS" handler: detect slot, use `cart_${tableName}_${customerSlot}`, call `_posOpenTable(tableName, customerSlot)` |
+| `js/tables.js` | Fixed `window._posOpenTable = (name, targetTab = 'C1') => openPOS(name, targetTab)` — was ignoring targetTab; now passes it through |
+| `sw.js` | Bumped cache `pos-static-v34` → `pos-static-v35` |
+| `index.html` | Bumped `style.css?v=304` → `?v=305` |
+| `AI_HANDOFF.md` | This update |
+
+### Known Limitation (pre-existing, not changed)
+
+`activeCustomerUid_${tableName}` and `acceptedOrderIds_${tableName}` are per-table keys written by the "Open in POS" handler. When multiple customers exist on a table, the last accepted order's UID/doc IDs overwrite earlier ones. This affects `syncCustomerOrderCompletion` (billing history sync) but is a pre-existing limitation — the user explicitly stated billing/history logic must not be changed. Future work: make these keys per-slot (`activeCustomerUid_${tableName}_${slot}`), which would require updating `cart.js` and `syncCustomerOrderCompletion`.
+
+---
+
 ## [AI UPDATE 2026-08-01] — Pure Pushover Emergency Architecture
 
 ### Problem Solved

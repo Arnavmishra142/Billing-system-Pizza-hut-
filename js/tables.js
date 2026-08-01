@@ -339,7 +339,9 @@ document.addEventListener('DOMContentLoaded', () => {
     renderRunningOrders();
 
     // Expose POS navigation for incoming-orders.js
-    window._posOpenTable = (name) => openPOS(name, 'C1');
+    // AI UPDATE [2026-08-01]: Pass targetTab through so incoming orders open on the
+    // correct customer tab (C1/C2/C3…) instead of always defaulting to C1.
+    window._posOpenTable = (name, targetTab = 'C1') => openPOS(name, targetTab);
     window._posLoadGrid  = (type) => loadGrid(type);
 
     // Running Orders sirf tab rebuild karo jab home screen actually dikh raha ho.
