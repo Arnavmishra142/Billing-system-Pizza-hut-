@@ -1,6 +1,118 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-01 (Bug Fix — Per-item KOT timer + Mark as Served)
+> Last updated: 2026-08-01 (Feature — Native Pushover Acknowledgement Sync)
+
+---
+
+## [AI UPDATE 2026-08-01] — Native Pushover Acknowledgement Sync
+
+### Overview
+
+When the operator receives an emergency Pushover notification for a new order and acknowledges it directly from the Pushover mobile app, the Billing Panel now automatically removes the "Acknowledge Order" button and updates the UI in real time — no page refresh, no manual interaction in the Billing Panel required.
+
+### Why Native Acknowledgement Was Adopted
+
+Previously, the emergency notification (priority=2, repeating every 30 s) could only be stopped by:
+1. Tapping "Acknowledge Order" inside the Billing Panel web UI, OR
+2. Clicking "Open in POS" or "Dismiss" (which triggered automatic cancellation)
+
+The Pushover mobile app already provides a native "Acknowledge" button on the notification. But the original `notifyOrder` call included no `callback` URL, so Pushover had no way to inform the system when the operator acknowledged from the phone. The Billing Panel button persisted indefinitely. This change makes the phone's native button the primary acknowledgement path.
+
+### Complete Flow
+
+```
+1. New customer order arrives
+       ↓
+2. Billing Panel calls Worker: notifyOrder (with orderId)
+       ↓
+3. Worker sends Pushover priority=2 notification
+   Includes: callback = https://pizza-billing-functions.mishrarnav142.workers.dev/pushoverCallback?orderId=<orderId>
+       ↓
+4. Operator taps "Acknowledge" on Pushover phone notification
+       ↓
+5. Pushover sends: GET /pushoverCallback?orderId=<id>&acknowledged=1&receipt=<receipt>&...
+       ↓
+6. Worker handlePushoverCallback():
+   - Validates orderId present and acknowledged=1
+   - Writes { acknowledgedAt: serverTimestamp() } to pending_table_orders/<orderId>
+     (only this field — all other order data untouched)
+   - Returns HTTP 200 (prevents Pushover from retrying)
+       ↓
+7. Billing Panel onSnapshot fires (existing listener — no change to query or subscription)
+       ↓
+8. snapshot.forEach detects: data.acknowledgedAt set AND orderId in _activeReceipts
+   → _activeReceipts.delete(orderId)  → _saveActiveReceipts()
+       ↓
+9. renderDrawer(_pendingOrders) re-renders → "Acknowledge Order" button gone ✓
+```
+
+### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `cloudflare-worker/src/index.js` | Billing Panel | `handleNotifyOrder`: added `baseUrl` param + `callback` URL in Pushover payload; new `handlePushoverCallback` function; `GET /pushoverCallback` routing; pass `url.origin` to `handleNotifyOrder` in switch |
+| `js/incoming-orders.js` | Billing Panel | In `onSnapshot` forEach: detect `acknowledgedAt` → clear receipt from `_activeReceipts` → `_saveActiveReceipts()` |
+| `sw.js` | Billing Panel | Bumped `pos-static-v28` → `pos-static-v29` |
+| `ARCHITECTURE_LOCK.md` | Billing Panel | Added `acknowledgedAt` to `pending_table_orders` schema; updated sw.js cache version |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+### New Worker Endpoint: `GET /pushoverCallback`
+
+- URL: `https://pizza-billing-functions.mishrarnav142.workers.dev/pushoverCallback`
+- Method: GET (Pushover uses GET for all callbacks)
+- Our query param: `orderId` (set in the callback URL when notification is sent)
+- Pushover query params: `acknowledged` (1), `receipt`, `acknowledged_at`, `acknowledged_by`, `device`
+- Auth: none (Pushover does not authenticate callbacks; orderId provides implicit scoping)
+- Always returns `200 OK` to prevent Pushover retries
+
+### New Firestore Field: `acknowledgedAt` on `pending_table_orders`
+
+Additive, optional field. Never written by the Billing Panel. Never read by the Customer Panel.
+
+| Field | Type | Written by | Read by |
+|-------|------|-----------|---------|
+| `acknowledgedAt` | Timestamp (serverTimestamp) | Worker `/pushoverCallback` only | Billing Panel `onSnapshot` |
+
+No Firestore rules change required — the Worker uses the service account (Admin SDK), which bypasses security rules entirely.
+
+### Backward Compatibility
+
+- Manual "Acknowledge Order" button in the Billing Panel still works as fallback.
+- Orders without `acknowledgedAt` (pre-deploy, or if callback fails) show the button normally.
+- The `acknowledgedAt` check is null-guarded: `if (data.acknowledgedAt && ...)`.
+- If the Firestore write fails in the callback, the Worker still returns 200 (Pushover doesn't retry). Manual acknowledgement remains available.
+- The callback URL is only added when `baseUrl && orderId` are both truthy — graceful degradation if either is absent.
+
+### Deployment Required
+
+**The Cloudflare Worker must be redeployed for this to take effect:**
+```bash
+cd cloudflare-worker
+wrangler deploy
+```
+
+Without deployment, `notifyOrder` continues to work as before (no callback URL = no native ack sync). All other Billing Panel behaviour is unchanged.
+
+### Verification Checklist
+
+| Check | Status |
+|-------|--------|
+| Worker sends `callback` URL in Pushover payload | ✅ code (requires Worker deploy) |
+| Callback URL contains orderId | ✅ |
+| Worker routes `GET /pushoverCallback` before POST-only guard | ✅ |
+| Callback validates `acknowledged=1` before writing | ✅ |
+| Callback writes only `acknowledgedAt` (no other fields touched) | ✅ `db.update({}, ['acknowledgedAt'])` |
+| Firestore write uses service account (no rules change needed) | ✅ existing architecture |
+| Billing Panel `onSnapshot` detects `acknowledgedAt` | ✅ |
+| Receipt cleared without calling Pushover cancel API again | ✅ (already acked natively) |
+| "Acknowledge Order" button disappears automatically | ✅ `renderDrawer` re-renders |
+| Manual Acknowledge button still works as fallback | ✅ unchanged |
+| Backward compat: orders without `acknowledgedAt` unaffected | ✅ null-guarded |
+| Worker returns 200 even on Firestore failure (no retries) | ✅ |
+| Service worker cache bumped | ✅ `v29` |
+| **Worker deploy required** | ⚠️ run `cd cloudflare-worker && wrangler deploy` |
+
+---
 
 ---
 

@@ -793,6 +793,18 @@ function startListening() {
             const order = { id: docSnap.id, ...data };
             pending.push(order);
 
+            // AI UPDATE [2026-08-01]: Native Pushover acknowledgement sync.
+            // When the operator acknowledges the emergency notification from the Pushover
+            // phone app, the Worker writes acknowledgedAt to this Firestore document.
+            // The existing onSnapshot fires immediately; we clear the receipt here so the
+            // next renderDrawer() call removes the "Acknowledge Order" button automatically
+            // — no page refresh or manual Billing Panel interaction required.
+            if (data.acknowledgedAt && _activeReceipts.has(docSnap.id)) {
+                console.log(`[incoming-orders] Order ${docSnap.id} acknowledged natively via Pushover app — clearing receipt`);
+                _activeReceipts.delete(docSnap.id);
+                _saveActiveReceipts();
+            }
+
             if (!_notified.has(docSnap.id)) {
                 // Add to dedup set BEFORE the guard check so that if this order
                 // is silenced (pre-existing on page load), it is still recorded

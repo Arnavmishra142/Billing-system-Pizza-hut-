@@ -57,7 +57,7 @@
 //   3. _saveActiveReceipts() called after every receipt mutation.
 // AI UPDATE [2026-07-31]: Bumped pos-static-v27 → pos-static-v28.
 // js/menu-management.js updated with Global Online Ordering Toggle feature.
-const CACHE_NAME = 'pos-static-v28';
+const CACHE_NAME = 'pos-static-v29'; // AI UPDATE [2026-08-01]: bumped for incoming-orders.js native Pushover ack sync
 
 // All static files that make the app shell work offline
 const STATIC_ASSETS = [

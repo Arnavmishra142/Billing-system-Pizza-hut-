@@ -214,8 +214,9 @@ Schema changes require **explicit user approval**. Never rename collections, ren
   }]
   totalPrice: number
   createdAt:  Timestamp      // ServerTimestamp
-  kotAt:      Timestamp      // ServerTimestamp — set when KOT printed (optional until KOT)
-  completedAt:Timestamp      // ServerTimestamp — set on Bill & Settle / Save & Exit
+  kotAt:          Timestamp  // ServerTimestamp — set when KOT printed (optional until KOT)
+  acknowledgedAt: Timestamp  // ServerTimestamp — set when operator acknowledges via Pushover app (optional; written by Worker /pushoverCallback endpoint only)
+  completedAt:    Timestamp  // ServerTimestamp — set on Bill & Settle / Save & Exit
 }
 ```
 
@@ -381,7 +382,7 @@ export function stopOrderStatus()   // Called by Customer Panel app.js on logout
 
 ### `sw.js` — Service Worker
 ```
-Current cache version: v28
+Current cache version: v29
 // If JS files are updated, bump the cache version string.
 // Failure to do so causes the browser to serve stale cached JS.
 // See memory: sw-stale-cache.md

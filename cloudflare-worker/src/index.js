@@ -925,7 +925,7 @@ async function handleReleaseTableLock(data, authCtx, db, fbAuth, env) {
 // cancel the alert via cancelReceipt.
 // Requires any authenticated Firebase user (anonymous session is fine).
 // No Firestore access needed — pure Pushover API call.
-async function handleNotifyOrder(data, authCtx) {
+async function handleNotifyOrder(data, authCtx, baseUrl) {
   if (!authCtx?.uid) throw new FnError('unauthenticated', 'Caller must be authenticated.');
 
   const {
@@ -958,19 +958,32 @@ async function handleNotifyOrder(data, authCtx) {
 
   console.log(`[notifyOrder] Sending emergency Pushover for order ${orderId} (${tableId})`);
 
+  // AI UPDATE [2026-08-01]: Include Pushover callback URL so the phone's native
+  // "Acknowledge" button syncs back to Firestore via the Worker callback endpoint.
+  // When acknowledged from the phone, Pushover GETs:
+  //   <baseUrl>/pushoverCallback?orderId=<orderId>&acknowledged=1&receipt=<receipt>&...
+  // The Worker then writes acknowledgedAt to the Firestore document, and the
+  // Billing Panel's existing onSnapshot removes the button automatically.
+  const _callbackUrl = (baseUrl && orderId)
+    ? `${baseUrl}/pushoverCallback?orderId=${encodeURIComponent(orderId)}`
+    : undefined;
+
+  const _pushoverPayload = {
+    token:    PUSHOVER_TOKEN,
+    user:     PUSHOVER_USER,
+    title,
+    message,
+    sound:    'notification',
+    priority: 2,
+    retry:    30,
+    expire:   3600,
+  };
+  if (_callbackUrl) _pushoverPayload.callback = _callbackUrl;
+
   const res = await fetch('https://api.pushover.net/1/messages.json', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      token:    PUSHOVER_TOKEN,
-      user:     PUSHOVER_USER,
-      title,
-      message,
-      sound:    'notification',
-      priority: 2,
-      retry:    30,
-      expire:   3600,
-    }),
+    body:    JSON.stringify(_pushoverPayload),
   });
 
   const result = await res.json();
@@ -1025,6 +1038,64 @@ async function handleCancelReceipt(data, authCtx) {
   return { ok: true };
 }
 
+// ── pushoverCallback ─────────────────────────────────────────────────────────
+// AI UPDATE [2026-08-01]: Native Pushover acknowledgement sync.
+// Pushover sends a GET request to this endpoint when the operator acknowledges an
+// emergency notification from the Pushover mobile app.
+//
+// Query params we embed in the callback URL:
+//   orderId — the Firestore pending_table_orders document ID
+// Query params Pushover appends:
+//   acknowledged (1), receipt, acknowledged_at, acknowledged_by, device
+//
+// On receipt:
+//   1. Validates orderId is present and acknowledged=1.
+//   2. Writes { acknowledgedAt: serverTimestamp() } to pending_table_orders/<orderId>
+//      using the Admin SDK service account — bypasses Firestore security rules.
+//      db.update with empty jsObj + serverTsFields=['acknowledgedAt'] touches only
+//      the acknowledgedAt field via a Firestore updateTransform; all other order data
+//      is unchanged.
+//   3. Always returns HTTP 200 so Pushover does not retry the callback.
+//
+// The Billing Panel's existing onSnapshot fires automatically on the Firestore write
+// and removes the "Acknowledge Order" button in real time — no page refresh needed.
+async function handlePushoverCallback(url, db) {
+  const orderId      = url.searchParams.get('orderId')      || '';
+  const acknowledged = url.searchParams.get('acknowledged') || '';
+  const receipt      = url.searchParams.get('receipt')      || '';
+
+  console.log(
+    `[pushoverCallback] orderId=${orderId} acknowledged=${acknowledged}` +
+    ` receipt=${receipt ? receipt.slice(0, 8) + '…' : '(none)'}`
+  );
+
+  if (!orderId) {
+    console.warn('[pushoverCallback] Missing orderId — returning 200 without action');
+    return new Response('ok', { status: 200 });
+  }
+
+  if (acknowledged !== '1') {
+    // Pushover may call the URL for other reasons (e.g. receipt expired).
+    // Only act on explicit user acknowledgements (acknowledged=1).
+    console.log(`[pushoverCallback] Non-acknowledgement callback (acknowledged=${acknowledged}) — ignoring`);
+    return new Response('ok', { status: 200 });
+  }
+
+  try {
+    // db.update with empty jsObj + serverTsFields writes ONLY acknowledgedAt via a
+    // Firestore updateTransform — no regular fields are overwritten.
+    await db.update('pending_table_orders', orderId, {}, ['acknowledgedAt']);
+    console.log(`[pushoverCallback] Wrote acknowledgedAt to order ${orderId} ✓`);
+  } catch (e) {
+    // Non-fatal: log and return 200 to prevent Pushover retries.
+    // Manual acknowledgement via the Billing Panel remains available as fallback.
+    console.error(`[pushoverCallback] Firestore update failed for order ${orderId}:`, e.message);
+  }
+
+  // Always 200 — Pushover retries on any non-2xx response.
+  return new Response('ok', { status: 200 });
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -1039,6 +1110,16 @@ export default {
       return new Response(JSON.stringify({ ok: true, service: 'pizza-billing-functions' }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders() },
       });
+    }
+
+    // AI UPDATE [2026-08-01]: Native Pushover acknowledgement callback.
+    // Pushover sends GET /pushoverCallback when the operator acknowledges the
+    // emergency notification from the phone app. Must be routed before the
+    // POST-only guard below because Pushover always uses GET for callbacks.
+    if (request.method === 'GET' && url.pathname === '/pushoverCallback') {
+      const _cbProjectId = env.FIREBASE_PROJECT_ID || 'billing-system-f8531';
+      const _cbDb        = new Firestore(env, _cbProjectId);
+      return handlePushoverCallback(url, _cbDb);
     }
 
     if (request.method !== 'POST') {
@@ -1094,7 +1175,9 @@ export default {
         case 'notifyOrder': {
           if (!rawToken) throw new FnError('unauthenticated', 'Caller must be authenticated.');
           const authCtx = await verifyIdToken(rawToken, projectId);
-          result = await handleNotifyOrder(data, authCtx);
+          // AI UPDATE [2026-08-01]: Pass url.origin so handleNotifyOrder can build
+          // the Pushover callback URL pointing back to this Worker.
+          result = await handleNotifyOrder(data, authCtx, url.origin);
           break;
         }
 
