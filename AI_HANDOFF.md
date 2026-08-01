@@ -1,6 +1,112 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-01 (Instant Alarm Stop — Browser Controlled Alarm)
+> Last updated: 2026-08-01 (Silent Wake + Local Alarm architecture)
+
+---
+
+## [AI UPDATE 2026-08-01] — Silent Wake + Local Alarm Architecture
+
+### Problem Solved
+
+After the previous "Instant Alarm Stop" session, **both** alarms were playing simultaneously:
+- Pushover emergency notification (priority 2) → audible loop on the phone/tablet
+- Browser alarm (`sounds/notification.mp3`) → looping in the Billing Panel
+
+This created duplicate sounds and a poor operator experience.
+
+### New Architecture
+
+```
+Customer places order
+  ↓
+Customer Panel calls Worker → notifyOrder
+  ↓
+Worker sends Priority-1 Pushover with sound:'none'
+  → Tablet wakes / bypasses Do Not Disturb
+  → No audible alarm from Pushover
+  ↓
+Billing Panel Firestore onSnapshot detects new order
+  ↓
+startAlarm() → loops sounds/notification.mp3 in browser
+  ↓
+Operator taps 🔔 Ringing (bell button) OR Acknowledge Order
+  ↓
+stopAlarm() → audio.pause() + audio.currentTime = 0 → instant stop
+  ↓
+No duplicate sounds. No waiting for Pushover cycle.
+```
+
+**Role separation (final):**
+| System | Responsibility |
+|--------|---------------|
+| Pushover (priority 1, sound:none) | Wake the tablet / bypass Do Not Disturb only |
+| Browser alarm (sounds/notification.mp3) | All audible alerting — operator controls it |
+| Bell button (🔔/🔕) | Silence browser alarm instantly |
+| Acknowledge button | Cancel Pushover receipt (no-op with priority 1; kept for backward compat) |
+
+### Changes Made
+
+#### 1. Cloudflare Worker — `handleNotifyOrder` (cloudflare-worker/src/index.js)
+
+| Field | Before | After |
+|-------|--------|-------|
+| `priority` | `2` (emergency, audible loop) | `1` (high priority, silent wake) |
+| `sound` | `'notification'` | `'none'` |
+| `retry` | `30` | **removed** (only required for priority 2) |
+| `expire` | `3600` | **removed** (only required for priority 2) |
+| `callback` | present | **removed** (priority 1 has no ack loop) |
+| Receipt write to Firestore | always | only if `result.receipt` exists (priority 1 returns none) |
+
+**Worker must be redeployed:** `cd cloudflare-worker && wrangler deploy`
+
+#### 2. Billing Panel — `acknowledgeOrder()` (js/incoming-orders.js)
+
+`stopAlarm()` is now called **immediately** at the start of `acknowledgeOrder()`, before any async receipt cancellation. Both the bell button and the Acknowledge button now stop the browser alarm instantly.
+
+With priority-1 Pushover, `_activeReceipts` will be empty (no receipt returned) — `acknowledgeOrder()` gracefully handles this: stops the alarm and re-renders, without attempting a Pushover cancel call.
+
+#### 3. Billing Panel — Autoplay Unlock Overlay (js/incoming-orders.js)
+
+New `_initAudioUnlockOverlay()` function shows a full-screen overlay on first load:
+
+- **Shown when:** `localStorage.getItem('pos_audio_unlocked')` is falsy
+- **Dismissed by:** operator tap → `_alarmAudio.play().then(pause)` → sets `pos_audio_unlocked` flag
+- **Never shown again** unless localStorage is cleared
+- This pre-authorizes the Audio context so the alarm reliably fires when the first new order arrives — even before any other interaction on the page
+
+### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `cloudflare-worker/src/index.js` | Billing Panel | `handleNotifyOrder`: priority 2→1, sound:'none', removed retry/expire/callback, guarded receipt write |
+| `js/incoming-orders.js` | Billing Panel | `acknowledgeOrder`: added `stopAlarm()` at entry point. Added `_initAudioUnlockOverlay()` and called it in DOMContentLoaded. |
+| `sw.js` | Billing Panel | Bumped cache `pos-static-v32` → `pos-static-v33` |
+| `index.html` | Billing Panel | Bumped `style.css?v=302` → `?v=303` |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+### Worker Deployment Required
+
+The Cloudflare Worker change is code-only in this session. The live Worker at `https://pizza-billing-functions.mishrarnav142.workers.dev` still sends priority-2 emergency notifications until redeployed.
+
+**To deploy:** `cd cloudflare-worker && wrangler deploy`
+
+Until redeployed, both alarms continue to play (same as before). After deploy, only the browser alarm plays.
+
+### Customer Panel Changes Required
+
+**None.** No Firestore schema changes. No cross-repo changes.
+
+### Verification Checklist
+
+| Check | Expected |
+|-------|---------|
+| Pushover notification arrives silently | `sound:'none'`, `priority:1` — wakes device, no audible ring |
+| New order arrives → browser alarm starts | `startAlarm()` in onSnapshot |
+| Bell button tap → alarm stops instantly | `stopAlarm()` in bell click handler |
+| Acknowledge tap → alarm stops instantly | `stopAlarm()` called first in `acknowledgeOrder()` |
+| No duplicate alarms | Pushover silent; only browser plays |
+| First page load → unlock overlay | `_initAudioUnlockOverlay()` when `pos_audio_unlocked` absent |
+| Subsequent loads → no overlay | `pos_audio_unlocked` flag present in localStorage |
 
 ---
 

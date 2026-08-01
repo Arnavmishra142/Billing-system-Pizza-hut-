@@ -356,9 +356,16 @@ async function _initNotifSetting() {
 //   Pushover token stays server-side and the call works on GitHub Pages.
 //   _cancellingReceipts guards against duplicate in-flight cancel requests.
 async function acknowledgeOrder(orderId) {
+    // AI UPDATE [2026-08-01] Silent Wake architecture: stop the browser alarm immediately
+    // when operator hits Acknowledge — no waiting for Pushover. This is instant (<1s).
+    stopAlarm();
+
     const receipt = _activeReceipts.get(orderId);
     if (!receipt) {
-        console.warn('[incoming-orders] acknowledgeOrder — no receipt found for order', orderId);
+        // With priority-1 Pushover, no receipt is issued — this is the normal path.
+        // Browser alarm is already stopped above. Nothing more to do.
+        console.log('[incoming-orders] acknowledgeOrder — no receipt (priority-1 delivery); browser alarm stopped');
+        renderDrawer(_pendingOrders);
         return;
     }
     if (_cancellingReceipts.has(orderId)) {
@@ -367,7 +374,7 @@ async function acknowledgeOrder(orderId) {
     }
 
     _cancellingReceipts.add(orderId);
-    console.log(`[incoming-orders] Acknowledge clicked — cancelling emergency receipt for order ${orderId} → receipt: ${receipt}`);
+    console.log(`[incoming-orders] Acknowledge clicked — cancelling Pushover receipt for order ${orderId} → receipt: ${receipt}`);
 
     try {
         const fn     = httpsCallable(functions, 'cancelReceipt');
@@ -979,8 +986,84 @@ if (!auth.currentUser) {
     );
 }
 
+// ── Autoplay unlock overlay ───────────────────────────────────────────────────
+// AI UPDATE [2026-08-01] Silent Wake architecture: Browsers block audio.play() until
+// a user gesture has occurred on the page. Without this overlay, the very first new
+// order after a fresh page load would call _alarmAudio.play() and get silently blocked
+// by the autoplay policy — the alarm would never sound.
+//
+// Solution: show a full-screen tap-to-initialize overlay on first load. The tap counts
+// as a user gesture. We play then immediately pause _alarmAudio so the browser grants
+// the audio permission. On all subsequent loads (flag present in localStorage), skip
+// the overlay — the browser already trusts the page.
+//
+// Flag key: 'pos_audio_unlocked' in localStorage (cleared only on storage reset).
+function _initAudioUnlockOverlay() {
+    if (localStorage.getItem('pos_audio_unlocked')) return;  // already initialized
+
+    const ov = document.createElement('div');
+    ov.id = 'audio-unlock-overlay';
+    ov.innerHTML = `
+        <div id="audio-unlock-card">
+            <div style="font-size:2.8rem;margin-bottom:16px;">🔔</div>
+            <div style="font-size:1.2rem;font-weight:700;margin-bottom:10px;letter-spacing:0.02em;">Enable Alarm Sound</div>
+            <div style="font-size:0.88rem;opacity:0.75;margin-bottom:28px;line-height:1.6;">
+                Tap to allow the billing panel<br>to play the order alarm.
+            </div>
+            <button id="audio-unlock-btn">Tap to Initialize POS</button>
+        </div>
+    `;
+
+    const style = document.createElement('style');
+    style.id = 'audio-unlock-style';
+    style.textContent = `
+        #audio-unlock-overlay {
+            position: fixed; inset: 0; z-index: 99999;
+            background: rgba(10,10,20,0.96);
+            display: flex; align-items: center; justify-content: center;
+            font-family: inherit;
+        }
+        #audio-unlock-card {
+            background: #1e1e2e; border-radius: 20px;
+            padding: 40px 36px; text-align: center;
+            color: #fff; max-width: 320px; width: 90%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+        }
+        #audio-unlock-btn {
+            background: linear-gradient(135deg, #f59e0b, #fbbf24);
+            color: #1a1a1a; border: none; border-radius: 14px;
+            padding: 14px 32px; font-size: 1rem; font-weight: 700;
+            cursor: pointer; letter-spacing: 0.03em;
+            box-shadow: 0 4px 18px rgba(245,158,11,0.45);
+        }
+        #audio-unlock-btn:active { transform: scale(0.96); }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(ov);
+
+    document.getElementById('audio-unlock-btn').addEventListener('click', () => {
+        // Play then immediately pause — this is the user-gesture that unlocks autoplay.
+        _alarmAudio.play()
+            .then(() => {
+                _alarmAudio.pause();
+                _alarmAudio.currentTime = 0;
+                console.log('[incoming-orders] Audio unlocked ✓');
+            })
+            .catch(err => {
+                console.warn('[incoming-orders] Audio unlock failed (will retry on next gesture):', err.message);
+            })
+            .finally(() => {
+                localStorage.setItem('pos_audio_unlocked', '1');
+                ov.remove();
+                document.getElementById('audio-unlock-style')?.remove();
+            });
+    });
+}
+
 // ── Wire up button & overlay ──────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+    _initAudioUnlockOverlay();  // AI UPDATE [2026-08-01]: show on first load, skip thereafter
+
     if (btnOrders) {
         // Make btn position:relative so the badge positions correctly
         btnOrders.style.position = 'relative';
