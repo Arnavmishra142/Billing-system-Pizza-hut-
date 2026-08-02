@@ -3758,3 +3758,55 @@ The Firestore rules are unchanged. This fix only adds Storage rules.
 
 The Customer Panel reads `imageUrl` from Firestore documents, not directly from Storage.
 Image upload is a Billing Panel–only operation. No cross-repo changes needed.
+
+---
+
+## Session 2026-08-02 — Cloudinary Image Storage Migration
+
+### Feature: Switched menu image storage from Firebase Storage to Cloudinary
+
+#### What Changed
+
+Menu item images are now uploaded to Cloudinary instead of Firebase Storage.
+Firestore continues to store only the `imageUrl` string — the value now points to
+a Cloudinary `secure_url` instead of a Firebase Storage download URL. No Firestore
+schema changes. The Customer Panel is unaffected (it reads `imageUrl` from Firestore,
+not from any storage SDK directly).
+
+#### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `server.js` | Billing Panel | Added `CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET` env var config; added `POST /api/upload-menu-image` and `POST /api/delete-menu-image` endpoints using the `cloudinary` and `multer` npm packages |
+| `js/cloudinary-upload.js` | Billing Panel | **NEW** — reusable client-side service: `uploadMenuImage()`, `deleteMenuImage()`, `extractCloudinaryPublicId()`. No credentials — calls the server proxy only. |
+| `js/admin.js` | Billing Panel | Replaced Firebase Storage upload/delete block with calls to `cloudinary-upload.js`. Added `_currentPublicId` state variable. Removed `_storageRefFromUrl()`. Kept `_toWebP()` for client-side payload reduction. |
+| `sw.js` | Billing Panel | Bumped cache v39 → v40 to bust cached `js/admin.js` |
+| `ARCHITECTURE_LOCK.md` | Billing Panel | Updated Shared Backend Services table, Frozen Systems table, and `menu_items.imageUrl` description |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+#### Architecture Decision
+
+- **Credentials never reach the browser.** `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` live in Replit Secrets and are only read by `server.js`.
+- **Two server-side proxy endpoints** handle all Cloudinary API calls:
+  - `POST /api/upload-menu-image` — receives multipart file, streams buffer to Cloudinary, returns `{ url, publicId }`. Optionally deletes the old image (`oldPublicId` body field).
+  - `POST /api/delete-menu-image` — receives `{ publicId }`, calls `cloudinary.uploader.destroy()`.
+- **`_toWebP()` kept client-side** to reduce upload payload size. Cloudinary additionally applies `quality: auto` and `fetch_format: auto` server-side for CDN delivery.
+- **Old Firebase Storage images** (items uploaded before this migration) continue to display correctly via the existing `imageUrl || image` fallback in `js/admin.js` and `js/firebase-config.js`. Their images remain in Firebase Storage and are not deleted. New uploads go to Cloudinary.
+- **Replacing an existing Cloudinary image** — on upload, `oldPublicId` is passed to the server so it deletes the previous image as part of the same call (improvement over the Firebase Storage behavior which only cleaned up within-session uploads).
+
+#### Credentials Required
+
+Three Replit Secrets must be set before menu image uploads work:
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
+
+The server warns at startup if any are missing.
+
+#### No Customer Panel Changes Required
+
+The Customer Panel reads `imageUrl` from Firestore documents. The storage provider is transparent to it.
+
+#### No Firestore Schema Changes
+
+`imageUrl` field semantics are unchanged (a string HTTPS URL). Only the origin of the URL changes from Firebase Storage to Cloudinary.

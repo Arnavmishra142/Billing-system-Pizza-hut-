@@ -33,9 +33,11 @@
 
 'use strict';
 
-const express = require('express');
-const path    = require('path');
-const fs      = require('fs');
+const express   = require('express');
+const path      = require('path');
+const fs        = require('fs');
+const multer    = require('multer');
+const { v2: cloudinary } = require('cloudinary');
 
 const app  = express();
 const PORT = process.env.PORT || 5000;
@@ -54,13 +56,120 @@ if (!groqKey) {
     console.log(`[server] Wrote groq-key.generated.js (${groqKey.length} char key)`);
 }
 
-// ── 2. Pushover credentials ───────────────────────────────────────────────────
+// ── 2. Cloudinary configuration ───────────────────────────────────────────────
+// AI UPDATE [2026-08-02]: Cloudinary replaces Firebase Storage for menu images.
+// All three credentials come from environment variables only — never hardcoded.
+// The browser never sees these values; uploads/deletes go through the two API
+// endpoints below (/api/upload-menu-image, /api/delete-menu-image).
+const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || '';
+const CLOUDINARY_API_KEY    = process.env.CLOUDINARY_API_KEY    || '';
+const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || '';
+
+cloudinary.config({
+    cloud_name: CLOUDINARY_CLOUD_NAME,
+    api_key:    CLOUDINARY_API_KEY,
+    api_secret: CLOUDINARY_API_SECRET,
+    secure:     true,
+});
+
+if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) {
+    console.warn('⚠️  Cloudinary credentials not set — menu image uploads will fail until ' +
+        'CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET are configured.');
+} else {
+    console.log(`[server] Cloudinary configured (cloud: ${CLOUDINARY_CLOUD_NAME})`);
+}
+
+// multer: in-memory storage — file buffer is piped to Cloudinary, no temp files written
+const _upload = multer({
+    storage:    multer.memoryStorage(),
+    limits:     { fileSize: 10 * 1024 * 1024 }, // 10 MB hard cap
+    fileFilter: (_req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) cb(null, true);
+        else cb(new Error('Only image files are accepted'));
+    },
+});
+
+// ── 3. Pushover credentials ───────────────────────────────────────────────────
 const PUSHOVER_TOKEN = 'a8dwxwd298zj8uu5fotos3h8rhsu2c';
 const PUSHOVER_USER  = 'u8cgozgvay9w3gmwp34p1od9ytir89';
 const PUSHOVER_URL   = 'https://api.pushover.net/1/messages.json';
 
 // ── Middleware ─────────────────────────────────────────────────────────────────
 app.use(express.json());
+
+// ── POST /api/upload-menu-image ───────────────────────────────────────────────
+// AI UPDATE [2026-08-02]: Server-side Cloudinary upload proxy.
+// Receives a multipart image from the browser, uploads to Cloudinary, returns:
+//   { ok: true, url: <secure_url>, publicId: <public_id> }
+// Optional body field `oldPublicId`: if present, the server deletes the old
+// Cloudinary image (best-effort, fire-and-forget) as part of this call.
+// Cloudinary credentials stay server-side — the browser only calls this endpoint.
+app.post('/api/upload-menu-image', _upload.single('image'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ ok: false, error: 'No image file provided' });
+    }
+    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) {
+        return res.status(503).json({ ok: false, error: 'Cloudinary credentials are not configured on this server' });
+    }
+
+    try {
+        // Stream the buffer directly to Cloudinary (no temp file)
+        const result = await new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+                {
+                    folder:       'menu-images', // organises all menu images in one folder
+                    quality:      'auto',         // intelligent quality reduction
+                    fetch_format: 'auto',         // serve WebP/AVIF to supporting browsers
+                },
+                (error, result) => {
+                    if (error) reject(error);
+                    else       resolve(result);
+                }
+            );
+            stream.end(req.file.buffer);
+        });
+
+        console.log(`[cloudinary] Uploaded: ${result.public_id} (${result.bytes} bytes)`);
+
+        // Best-effort delete old image — fire-and-forget, non-blocking
+        const oldPublicId = (req.body && req.body.oldPublicId || '').trim();
+        if (oldPublicId) {
+            cloudinary.uploader.destroy(oldPublicId)
+                .then(() => console.log(`[cloudinary] Deleted old image: ${oldPublicId}`))
+                .catch(err => console.warn(`[cloudinary] delete old image failed (non-fatal): ${err.message}`));
+        }
+
+        res.json({ ok: true, url: result.secure_url, publicId: result.public_id });
+    } catch (err) {
+        console.error('[cloudinary] upload failed:', err.message);
+        res.status(500).json({ ok: false, error: err.message || 'Upload to Cloudinary failed' });
+    }
+});
+
+// ── POST /api/delete-menu-image ───────────────────────────────────────────────
+// AI UPDATE [2026-08-02]: Server-side Cloudinary delete proxy.
+// Body: { publicId: string }
+// Returns: { ok: true }
+// Used by admin.js when the operator removes an image or replaces it with another.
+// Credentials stay server-side.
+app.post('/api/delete-menu-image', async (req, res) => {
+    const { publicId } = req.body || {};
+    if (!publicId || typeof publicId !== 'string') {
+        return res.status(400).json({ ok: false, error: 'publicId (string) is required' });
+    }
+    if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET) {
+        return res.status(503).json({ ok: false, error: 'Cloudinary credentials are not configured on this server' });
+    }
+
+    try {
+        await cloudinary.uploader.destroy(publicId);
+        console.log(`[cloudinary] Deleted: ${publicId}`);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[cloudinary] delete failed:', err.message);
+        res.status(500).json({ ok: false, error: err.message || 'Delete from Cloudinary failed' });
+    }
+});
 
 // ── POST /api/notify-order ────────────────────────────────────────────────────
 // Called by js/incoming-orders.js whenever a genuinely new customer order arrives.

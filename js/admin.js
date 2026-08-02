@@ -2,15 +2,19 @@
 // Added Customers tab support to switchTab(). Imports initCustomerManagement
 // and refreshCustomerManagement from js/customers.js.
 // AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert()/confirm().
-import { db, storage, auth, functions } from './firebase-config.js';
+import { db, auth, functions } from './firebase-config.js';
 import { initCustomerManagement, refreshCustomerManagement } from './customers.js';
 import { showAlert, showConfirm } from './dialog.js';
+// AI UPDATE [2026-08-02]: Switched menu image storage from Firebase Storage to Cloudinary.
+// Credentials are server-side only; this module calls the Express proxy endpoints.
+import { uploadMenuImage, deleteMenuImage, extractCloudinaryPublicId } from './cloudinary-upload.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
     getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot,
     serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-import { ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
+// AI UPDATE [2026-08-02]: Firebase Storage imports removed — image uploads now go
+// through Cloudinary via the server-side proxy (js/cloudinary-upload.js).
 import { onAuthStateChanged, signInAnonymously, signOut }
     from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
@@ -379,7 +383,10 @@ const imgRemoveBtn       = document.getElementById('imgRemoveBtn');
 // _uploadedThisSession tracks a URL uploaded in the current modal session so it
 // can be cleaned up from Storage if the user removes it before saving.
 let _currentImageUrl     = null;
-let _uploadedThisSession = null;
+// AI UPDATE [2026-08-02]: Cloudinary public_id of the current image (for delete).
+// null when no image or when the URL is a legacy Firebase Storage URL.
+let _currentPublicId     = null;
+let _uploadedThisSession = null; // publicId of image uploaded this modal session (for cleanup)
 let _uploadInProgress    = false;
 let currentEditId        = null;
 let allMenuItems         = [];
@@ -504,6 +511,7 @@ document.getElementById('itemCategoryInput').addEventListener('change', (e) => {
 document.getElementById('addNewItemBtn').addEventListener('click', () => {
     currentEditId            = null;
     _currentImageUrl         = null;
+    _currentPublicId         = null;
     _uploadedThisSession     = null;
     _uploadInProgress        = false;
     document.getElementById('modalTitle').textContent     = 'Add New Item';
@@ -528,6 +536,7 @@ window.editMenuItem = function(id) {
     if (!item) return;
     currentEditId            = id;
     _currentImageUrl         = item.imageUrl || item.image || null; // backward-compat: old field was `image`
+    _currentPublicId         = extractCloudinaryPublicId(_currentImageUrl); // null for legacy Firebase Storage URLs
     _uploadedThisSession     = null;
     _uploadInProgress        = false;
     document.getElementById('modalTitle').textContent     = 'Edit Item';
@@ -577,15 +586,17 @@ itemModal.addEventListener('click', (e) => { if (e.target === itemModal) closeMo
 imgUploadBtn.addEventListener('click', () => { if (!_uploadInProgress) itemImageInput.click(); });
 imagePreview.addEventListener('click', () => { if (!_uploadInProgress) itemImageInput.click(); });
 
-// Remove button — clears the image URL and best-effort deletes a session-uploaded image
+// Remove button — clears the image URL and best-effort deletes a session-uploaded image.
+// AI UPDATE [2026-08-02]: deleteObject (Firebase Storage) replaced with deleteMenuImage
+// (Cloudinary server-side proxy). _uploadedThisSession now stores a publicId, not a URL.
 imgRemoveBtn.addEventListener('click', () => {
     if (_uploadInProgress) return;
     if (_uploadedThisSession) {
-        const r = _storageRefFromUrl(_uploadedThisSession);
-        if (r) deleteObject(r).catch(() => {});
+        deleteMenuImage(_uploadedThisSession); // fire-and-forget, non-fatal
         _uploadedThisSession = null;
     }
     _currentImageUrl               = null;
+    _currentPublicId               = null;
     imagePreview.style.backgroundImage = '';
     imagePreviewText.style.display     = 'flex';
     imgRemoveBtn.classList.add('hidden');
@@ -593,7 +604,10 @@ imgRemoveBtn.addEventListener('click', () => {
     itemImageInput.value               = '';
 });
 
-// File selected → immediately upload to Firebase Storage (eager)
+// File selected → immediately upload to Cloudinary via server proxy (eager).
+// AI UPDATE [2026-08-02]: Switched from Firebase Storage to Cloudinary.
+// Credentials are kept server-side; the browser only calls /api/upload-menu-image.
+// The 30-second timeout is enforced inside uploadMenuImage() via AbortController.
 itemImageInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     itemImageInput.value = ''; // reset so the same file can be re-selected later
@@ -610,56 +624,24 @@ itemImageInput.addEventListener('change', async (e) => {
         imagePreviewText.style.display     = 'none';
         if (imageUploadSpinner) imageUploadSpinner.classList.remove('hidden');
 
-        // Convert to WebP for optimised storage (falls back to original on any failure)
+        // Convert to WebP client-side to reduce upload payload size.
+        // Cloudinary also applies auto quality and format optimization server-side.
         const blob = await _toWebP(file);
-        const ext  = blob.type === 'image/webp' ? 'webp' : (file.name.split('.').pop() || 'jpg');
-        const path = `menu-images/${Date.now()}.${ext}`;
-        const imgRef = ref(storage, path);
 
-        // AI UPDATE [2026-08-02]: Wrap uploadBytes + getDownloadURL in a hard 30-second
-        // timeout via Promise.race.
-        //
-        // Root causes fixed here:
-        //   1. Firebase Storage had no rules deployed (storage.rules added alongside this
-        //      fix). Default rules are "deny all" — every upload was rejected with HTTP 403.
-        //   2. The Firebase Storage SDK has no per-request HTTP timeout. Its retry window
-        //      (maxUploadRetryTime = 600,000 ms = 10 min) means a retryable failure (5xx,
-        //      408, 429) causes silent retries for up to 10 minutes — the spinner appears
-        //      permanently stuck from the user's perspective because the await never settles
-        //      within any reasonable time.
-        //   3. getDownloadURL has the same problem (maxOperationRetryTime = 120,000 ms =
-        //      2 min).
-        //
-        // Promise.race ensures the upload chain surfaces a failure within 30 seconds
-        // regardless of what the Firebase SDK is doing internally. The underlying SDK
-        // request continues in the background but its result is discarded.
-        const newUrl = await Promise.race([
-            uploadBytes(imgRef, blob, { contentType: blob.type })
-                .then(() => getDownloadURL(imgRef)),
-            new Promise((_, reject) =>
-                setTimeout(
-                    () => reject(new Error(
-                        'Upload timed out after 30 s. ' +
-                        'Check internet connection and Firebase Storage rules, then try again.'
-                    )),
-                    30_000
-                )
-            )
-        ]);
+        // Pass the old publicId so the server deletes it as part of this upload:
+        //   - _uploadedThisSession: a previous upload within the same modal session
+        //   - _currentPublicId:     the original item image (null for legacy Firebase URLs)
+        const oldToDelete = _uploadedThisSession || _currentPublicId || null;
+        const result = await uploadMenuImage(blob, oldToDelete);
 
-        // Best-effort delete the image that was uploaded earlier this session (if any)
-        if (_uploadedThisSession) {
-            const old = _storageRefFromUrl(_uploadedThisSession);
-            if (old) deleteObject(old).catch(() => {});
-        }
-
-        _uploadedThisSession               = newUrl;
-        _currentImageUrl                   = newUrl;
-        imagePreview.style.backgroundImage = `url(${newUrl})`;
+        _uploadedThisSession               = result.publicId;
+        _currentPublicId                   = result.publicId;
+        _currentImageUrl                   = result.url;
+        imagePreview.style.backgroundImage = `url(${result.url})`;
         imagePreviewText.style.display     = 'none';
         imgRemoveBtn.classList.remove('hidden');
         imgUploadBtn.textContent           = '🔄 Replace Image';
-        console.log('[menu-img] Uploaded:', path);
+        console.log('[menu-img] Uploaded to Cloudinary:', result.publicId);
     } catch (err) {
         console.error('[menu-img] Upload failed:', err);
         // Restore whatever was showing before the upload attempt
@@ -717,16 +699,8 @@ function _toWebP(file) {
     });
 }
 
-// Parse a Firebase Storage HTTPS download URL → a Storage ref for deleteObject.
-// Firebase Storage download URLs encode the path as /v0/b/{bucket}/o/{encoded-path}.
-function _storageRefFromUrl(url) {
-    if (!url) return null;
-    try {
-        const m = new URL(url).pathname.match(/\/v0\/b\/[^/]+\/o\/(.+)$/);
-        if (m) return ref(storage, decodeURIComponent(m[1]));
-    } catch (_) {}
-    return null;
-}
+// AI UPDATE [2026-08-02]: _storageRefFromUrl removed — Firebase Storage is no longer
+// used for menu images. Cloudinary public_id extraction is in js/cloudinary-upload.js.
 
 // Non-blocking toast for image-related errors (non-modal so it doesn't interrupt flow)
 function _imgToast(msg) {

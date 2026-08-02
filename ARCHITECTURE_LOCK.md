@@ -68,7 +68,8 @@ Both panels share the **same Firebase project**, the same Firestore database, an
 |---------|-------|
 | **Firebase Auth** | `signInAnonymously()` — both panels use anonymous auth |
 | **Firestore** | All data: orders, menu, customers, history, tables, expenses |
-| **Firebase Storage** | Menu item images (uploaded via `upload-menu.html`) |
+| **Firebase Storage** | No longer used for menu images (migrated to Cloudinary 2026-08-02). `export const storage` kept in `firebase-config.js` for backward compatibility. |
+| **Cloudinary** | Menu item images only. Uploads/deletes go through server-side Express proxy (`/api/upload-menu-image`, `/api/delete-menu-image`). Credentials: `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` — Replit Secrets, never in client code. |
 | **Groq API** | AI Manager chat (`admin/chat.ai.html`) — key injected at build time |
 
 All Cloud Functions are **bypassed** (Spark plan, no billing). Direct Firestore reads/writes are used everywhere.
@@ -86,6 +87,7 @@ The following systems are **production-stable**. Future AI agents **MUST NOT** m
 | **Incoming Orders** | `js/incoming-orders.js` | 🔒 FROZEN |
 | **Menu Management** | `js/menu-management.js`, `admin/index.html` | 🔒 FROZEN |
 | **Menu Availability** | `inStock` field on `menu_items` documents | 🔒 FROZEN |
+| **Menu Image Upload** | `js/admin.js` → `js/cloudinary-upload.js` → `server.js /api/upload-menu-image` → Cloudinary | 🔒 FROZEN |
 | **KOT Workflow** | `js/cart.js` `printKOT()` | 🔒 FROZEN |
 | **Save & Exit** | `js/cart.js` | 🔒 FROZEN |
 | **Bill & Settle** | `js/cart.js` | 🔒 FROZEN |
@@ -261,7 +263,7 @@ Written once at account creation; username changes are a future feature.
   inStock:      boolean         // true or absent = available; false = out of stock
   active:       boolean         // true or absent = visible in Customer Panel; false = soft-hidden (added 2026-08-02)
   description:  string          // optional human-readable description (added 2026-08-02; '' if not set)
-  imageUrl:     string          // Firebase Storage HTTPS URL, folder: menu-images/ (added 2026-08-02)
+  imageUrl:     string          // Cloudinary secure_url (as of 2026-08-02; previously Firebase Storage). Firestore stores only the URL — storage provider is transparent to readers.
   image:        string          // DEPRECATED — old field name for imageUrl; read as imageUrl || image; never written
   displayOrder: number          // sort hint for Customer Panel; 0 = no preference (added 2026-08-02)
   variants: [{                  // dynamic size/portion variants — Customer Panel picks one (added 2026-08-02)

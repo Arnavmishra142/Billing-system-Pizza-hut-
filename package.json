@@ -11,7 +11,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "express": "^5.2.1"
+    "cloudinary": "^2.10.0",
+    "express": "^5.2.1",
+    "multer": "^2.2.0"
   },
   "devDependencies": {
     "firebase": "^12.16.0",

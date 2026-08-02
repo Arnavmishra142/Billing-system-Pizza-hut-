@@ -60,7 +60,8 @@
 // All static files that make the app shell work offline
 // AI UPDATE [2026-08-02]: v38→v39 — bust cached js/admin.js after image upload
 // timeout fix (Promise.race + 30 s hard limit on uploadBytes + getDownloadURL).
-const CACHE_NAME = 'pos-static-v39'; const STATIC_ASSETS = [
+// AI UPDATE [2026-08-02]: Bumped v39 → v40 — js/admin.js and js/cloudinary-upload.js changed.
+const CACHE_NAME = 'pos-static-v40'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
