@@ -120,6 +120,76 @@ Added alongside `status: 'expired'`. The Customer Panel already hides orders who
 
 ---
 
+## [AI UPDATE 2026-08-02] — Pushover Sound Fix
+
+### Root Cause
+
+The Pushover "Notification" sound was NOT playing on Android. Instead, Android played a one-time default system "ting". Two compounding bugs were found and fixed:
+
+**Bug 1 — `sound` parameter completely absent from the Worker (active code path)**
+
+`handleNotifyOrder` in `cloudflare-worker/src/index.js` sent no `sound` field at all:
+```js
+// BEFORE (broken)
+const _pushoverPayload = {
+  token, user, title, message,
+  priority: 2, retry: 30, expire: 3600,
+  ...callback,
+};
+```
+Without `sound`, Pushover falls back to the Android notification channel's default → "ting".
+
+For **Priority 2 (emergency)** specifically, the missing `sound` also breaks the looping alarm behaviour: with a valid `sound`, Pushover's Android app loops the sound every `retry` seconds (30 s) until the operator acknowledges. Without it, only a single short "ting" fires.
+
+**Bug 2 — Wrong-case sound identifier in `server.js` (inactive backup path)**
+
+`server.js` sent `sound: 'notification'` (lowercase `n`). The actual identifier is `'Notification'` (capital `N`), verified against the live Pushover API:
+
+```
+GET https://api.pushover.net/1/sounds.json?token=...
+→ { "Notification": "Order's notification", "pushover": "Pushover (default)", ... }
+```
+
+`'notification'` (lowercase) is not in the sounds list → Pushover ignores it → device default → "ting".
+
+### Fix Applied
+
+**`cloudflare-worker/src/index.js`** — added `sound: 'Notification'` to `_pushoverPayload`:
+```js
+const _pushoverPayload = {
+  token, user, title, message,
+  sound:    'Notification',   // capital N — "Order's notification" per /1/sounds.json
+  priority: 2,
+  retry:    30,
+  expire:   3600,
+  ...callback,
+};
+```
+
+**`server.js`** — corrected `sound: 'notification'` → `sound: 'Notification'` (capital N).
+
+### Worker Deployment Status
+
+⚠️ The Worker code fix is committed. Deployment requires `CLOUDFLARE_API_TOKEN` with Workers Edit permissions — added to Replit secrets in this session. Deploy with:
+```
+cd cloudflare-worker && npx wrangler deploy
+```
+Until deployed, the live Worker still sends no `sound` parameter.
+
+### Why Priority 2 + Missing `sound` = Silent alarm
+
+| Scenario | What Android hears |
+|----------|-------------------|
+| Priority 2, no `sound` | One-time "ting" (Android channel default), no loop |
+| Priority 2, `sound: 'notification'` (invalid) | Same — Pushover ignores invalid identifiers |
+| Priority 2, `sound: 'Notification'` (correct) | Custom "Order's notification" sound, loops every 30 s until acknowledged |
+
+### Verification
+
+The `sound` parameter is the ONLY change. No other fields (priority, retry, expire, callback, receipt write, acknowledge/cancel flow) were touched.
+
+---
+
 ## [AI UPDATE 2026-08-01] — Online Customer Name Badge in POS Cart
 
 ### What Was Built
