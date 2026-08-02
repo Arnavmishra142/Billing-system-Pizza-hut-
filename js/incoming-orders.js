@@ -552,9 +552,22 @@ function closeDrawer() {
 //
 // Logic:
 //   - Search existing slots for a matching phone OR uid → reuse that slot.
-//   - If no match → allocate the next available C-number (max of slotMap keys
-//     and live cart_${tableName}_C* keys, +1).
+//   - If no match → allocate the LOWEST available C-number (not max+1).
 //   - Persist the updated map back to localStorage.
+//
+// AI UPDATE [2026-08-02]: Fixed customer number inflation bug.
+//   Root cause: slotMap entries were never removed after a customer was billed
+//   and their cart was cleared.  On each new allocation the old code used
+//   max(existing slots)+1, so numbers kept climbing (C3, C4 … C7 …) even
+//   though the table was empty.
+//
+//   Fix — two changes:
+//   1. Step 0 (new): prune slotMap entries whose cart key no longer exists.
+//      A missing cart key means the customer has been billed/settled and their
+//      slot is free.  Pruning before any match/allocate keeps the map accurate.
+//   2. Step 2 (changed): find the LOWEST integer ≥ 1 not occupied by either
+//      the (now-pruned) slotMap or a live cart key.  This ensures C2 is reused
+//      after C2 is billed, rather than incrementing to C3, C4, …
 //
 // This function is pure localStorage I/O — no Firestore writes, no network.
 function _findOrAllocateCustomerSlot(tableName, phone, uid) {
@@ -563,6 +576,22 @@ function _findOrAllocateCustomerSlot(tableName, phone, uid) {
     try {
         slotMap = JSON.parse(localStorage.getItem(`customerSlotMap_${tableName}`) || '{}');
     } catch (_) { slotMap = {}; }
+
+    // Step 0: prune stale entries — remove any slot whose cart no longer exists.
+    // When a customer is billed/settled, cart.js removes the cart_<table>_<slot>
+    // key.  Without this cleanup, old entries accumulate and the max+1 approach
+    // below would keep incrementing the customer number forever.
+    let pruned = false;
+    for (const slot of Object.keys(slotMap)) {
+        if (!localStorage.getItem(`cart_${tableName}_${slot}`)) {
+            delete slotMap[slot];
+            pruned = true;
+        }
+    }
+    if (pruned) {
+        localStorage.setItem(`customerSlotMap_${tableName}`, JSON.stringify(slotMap));
+        console.log(`[incoming-orders] Pruned stale slot entries for ${tableName}; remaining:`, Object.keys(slotMap));
+    }
 
     // Step 1: search for an existing slot that matches this customer identity
     for (const [slot, identity] of Object.entries(slotMap)) {
@@ -574,23 +603,16 @@ function _findOrAllocateCustomerSlot(tableName, phone, uid) {
         }
     }
 
-    // Step 2: no existing slot — find the next available C-number
-    let maxC = 0;
-    for (const slot of Object.keys(slotMap)) {
-        const n = parseInt(slot.replace('C', ''), 10);
-        if (!isNaN(n) && n > maxC) maxC = n;
-    }
-    // Also check live cart keys in case slotMap was cleared but carts still exist
-    for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key.startsWith(`cart_${tableName}_C`)) {
-            const suffix = key.slice(`cart_${tableName}_C`.length);
-            const n = parseInt(suffix, 10);
-            if (!isNaN(n) && n > maxC) maxC = n;
-        }
+    // Step 2: no existing slot — find the LOWEST available C-number.
+    // Iterate from C1 upward; stop at the first number not present in the
+    // (pruned) slotMap AND with no live cart key.  This reuses freed numbers
+    // (e.g. C2 after C2 is billed) instead of always incrementing to a new max.
+    let n = 1;
+    while (slotMap[`C${n}`] || localStorage.getItem(`cart_${tableName}_C${n}`)) {
+        n++;
     }
 
-    const newSlot = `C${maxC + 1}`;
+    const newSlot = `C${n}`;
     slotMap[newSlot] = { phone: phone || '', uid: uid || '' };
     localStorage.setItem(`customerSlotMap_${tableName}`, JSON.stringify(slotMap));
     console.log(`[incoming-orders] Customer ${phone || uid} allocated new slot ${newSlot} on ${tableName}`);
