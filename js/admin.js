@@ -602,12 +602,14 @@ itemImageInput.addEventListener('change', async (e) => {
     _uploadInProgress = true;
     document.getElementById('saveItemBtn').disabled = true;
     imgUploadBtn.disabled                           = true;
-    imgRemoveBtn.classList.add('hidden');
-    imagePreview.style.backgroundImage              = '';
-    imagePreviewText.style.display                  = 'none';
-    imageUploadSpinner.classList.remove('hidden');
 
     try {
+        // Show spinner — inside try so any null-ref TypeError is caught, not silently swallowed
+        imgRemoveBtn.classList.add('hidden');
+        imagePreview.style.backgroundImage = '';
+        imagePreviewText.style.display     = 'none';
+        if (imageUploadSpinner) imageUploadSpinner.classList.remove('hidden');
+
         // Convert to WebP for optimised storage (falls back to original on any failure)
         const blob = await _toWebP(file);
         const ext  = blob.type === 'image/webp' ? 'webp' : (file.name.split('.').pop() || 'jpg');
@@ -650,21 +652,39 @@ itemImageInput.addEventListener('change', async (e) => {
 });
 
 // Convert any image file to a WebP Blob using the Canvas API.
-// Falls back to the original File if conversion fails or is unsupported.
+// Falls back to the original File on any error or if conversion takes > 10 s.
 function _toWebP(file) {
     return new Promise((resolve) => {
-        const img = new Image();
-        const url = URL.createObjectURL(file);
-        img.onload = () => {
-            URL.revokeObjectURL(url);
-            const canvas = document.createElement('canvas');
-            canvas.width  = img.naturalWidth;
-            canvas.height = img.naturalHeight;
-            canvas.getContext('2d').drawImage(img, 0, 0);
-            canvas.toBlob((blob) => resolve(blob || file), 'image/webp', 0.85);
-        };
-        img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
-        img.src = url;
+        // Safety timeout: if the canvas never calls back, fall back to original
+        const timer = setTimeout(() => {
+            console.warn('[menu-img] _toWebP timed out — using original file');
+            resolve(file);
+        }, 10000);
+
+        const cleanup = (result) => { clearTimeout(timer); resolve(result); };
+
+        try {
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            img.onload = () => {
+                URL.revokeObjectURL(url);
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width  = img.naturalWidth  || 1;
+                    canvas.height = img.naturalHeight || 1;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) { cleanup(file); return; }
+                    ctx.drawImage(img, 0, 0);
+                    canvas.toBlob(
+                        (blob) => cleanup(blob && blob.size > 0 ? blob : file),
+                        'image/webp',
+                        0.85
+                    );
+                } catch (_) { cleanup(file); }
+            };
+            img.onerror = () => { URL.revokeObjectURL(url); cleanup(file); };
+            img.src = url;
+        } catch (_) { cleanup(file); }
     });
 }
 
