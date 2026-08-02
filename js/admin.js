@@ -393,6 +393,23 @@ let allMenuItems         = [];
 
 let _menuUnsub = null;
 
+// ── Auth wait helper ──────────────────────────────────────────────────────────
+// Wait up to timeoutMs for auth.currentUser to become non-null.
+// signInAnonymously() is called fire-and-forget at login/session-restore; there
+// is a brief window where auth.currentUser may still be null.  All Firestore
+// writes (updateDoc, addDoc, deleteDoc) require isOperator() which checks
+// request.auth != null — so we must wait for auth before writing.
+// Mirrors the identical helper in menu-management.js (same root-cause fix).
+function _waitForAuth(timeoutMs = 5000) {
+    if (auth.currentUser) return Promise.resolve(auth.currentUser);
+    return new Promise(resolve => {
+        const unsub = onAuthStateChanged(auth, (user) => {
+            if (user) { unsub(); resolve(user); }
+        });
+        setTimeout(() => { unsub(); resolve(null); }, timeoutMs);
+    });
+}
+
 window.loadMenuData = function() {
     const grid = document.getElementById('menuCardGrid');
 
@@ -476,9 +493,17 @@ function renderMenuCards() {
 }
 
 window.toggleStock = async function(id, status) {
+    // Auth guard: same rule as saveItemBtn — isOperator() requires request.auth != null.
+    if (!auth.currentUser) {
+        const user = await _waitForAuth(5000);
+        if (!user) { await showAlert('Sign-in failed. Please reload.', 'error', 'Auth Error'); return; }
+    }
     try { await updateDoc(doc(db, "menu_items", id), { inStock: status }); }
     // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
-    catch(e) { await showAlert("Stock update failed!", 'error', 'Update Failed'); }
+    catch(e) {
+        console.error('[toggleStock] Firestore write failed:', e.code, e.message);
+        await showAlert("Stock update failed!", 'error', 'Update Failed');
+    }
 };
 
 window.deleteMenuItem = async function(id) {
@@ -486,10 +511,20 @@ window.deleteMenuItem = async function(id) {
     if (!await showConfirm("This menu item will be permanently removed from the database.", {
         title: 'Delete item permanently?', confirmText: 'Delete', type: 'error'
     })) return;
-    await deleteDoc(doc(db, "menu_items", id));
-    // The live onSnapshot listener fires automatically after the delete —
-    // no need to call loadMenuData() here; doing so would unnecessarily
-    // tear down the listener and recreate it.
+    // Auth guard: isOperator() requires request.auth != null.
+    if (!auth.currentUser) {
+        const user = await _waitForAuth(5000);
+        if (!user) { await showAlert('Sign-in failed. Please reload.', 'error', 'Auth Error'); return; }
+    }
+    try {
+        await deleteDoc(doc(db, "menu_items", id));
+        // The live onSnapshot listener fires automatically after the delete —
+        // no need to call loadMenuData() here; doing so would unnecessarily
+        // tear down the listener and recreate it.
+    } catch (e) {
+        console.error('[deleteMenuItem] Firestore delete failed:', e.code, e.message);
+        await showAlert('Delete failed! Check internet.', 'error', 'Delete Failed');
+    }
 };
 
 function populateCategoryDropdown(selectedCat = null) {
@@ -723,6 +758,14 @@ function _imgToast(msg) {
 // Edits update only the mutable presentation fields; variants/extraOptions/active/
 // displayOrder/createdAt are intentionally NOT overwritten so future UI that manages
 // those fields won't have its data stomped by the basic edit form.
+//
+// AI UPDATE [2026-08-02] (bug fix): Added _waitForAuth() guard before the Firestore
+// write. signInAnonymously() is called fire-and-forget at login — auth.currentUser
+// can still be null when the handler fires, causing isOperator() → false →
+// permission-denied, which was swallowed as the misleading "Save failed! Check
+// internet." message. Root cause is the same class of bug fixed in
+// menu-management.js on 2026-07-28. Also improved error logging to distinguish
+// permission-denied from real network failures.
 document.getElementById('saveItemBtn').addEventListener('click', async () => {
     const btn         = document.getElementById('saveItemBtn');
     const name        = document.getElementById('itemNameInput').value.trim();
@@ -740,6 +783,21 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
         if (!category) { await showAlert("Enter category name!", 'warning', 'Missing Field'); return; }
     }
     if (!name || !price) { await showAlert("Name and Price are required!", 'warning', 'Missing Fields'); return; }
+
+    // Auth guard: Firestore rule requires isOperator() → request.auth != null.
+    // signInAnonymously() is fire-and-forget at login; wait up to 5 s for it to
+    // resolve before attempting the write.
+    if (!auth.currentUser) {
+        const user = await _waitForAuth(5000);
+        if (!user) {
+            await showAlert(
+                'Could not sign in. Please reload the page and try again.',
+                'error',
+                'Auth Error'
+            );
+            return;
+        }
+    }
 
     btn.textContent = 'Saving… ⏳';
     btn.disabled    = true;
@@ -778,9 +836,17 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
         // no need to call loadMenuData() here; doing so would tear down the
         // listener and recreate it unnecessarily.
     } catch (e) {
-        console.error(e);
-        // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
-        await showAlert('Save failed! Check internet.', 'error', 'Save Failed');
+        // Log the real error code so it is visible in the browser console
+        console.error('[saveItemBtn] Firestore write failed:', e.code, e.message, e);
+        const isPermErr = (e.code === 'permission-denied') ||
+                          (e.message || '').toLowerCase().includes('permission');
+        await showAlert(
+            isPermErr
+                ? 'Permission denied. Please reload and log in again.'
+                : 'Save failed! Check internet.',
+            'error',
+            'Save Failed'
+        );
     } finally {
         btn.textContent = currentEditId ? 'Update Item' : 'Save Item';
         btn.disabled    = false;

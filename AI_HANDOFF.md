@@ -3861,3 +3861,109 @@ git add js/cloudinary-upload.js js/cloudinary-public.js sw.js
 git commit -m "fix: switch to Cloudinary unsigned upload (works on GitHub Pages)"
 git push
 ```
+
+---
+
+## Session 2026-08-02 — Bug Fix: "Update Item" Save Failure (Firestore permission-denied)
+
+### Problem
+
+Pressing **"Update Item"** in the Edit Item dialog always showed **"Save Failed! Check Internet."**  
+The internet connection was not the cause. The Cloudinary image upload completed successfully
+and the image was visible in the dialog. The failure occurred only when `updateDoc()` was called
+to persist the changes to Firestore.
+
+### Root Cause
+
+**Missing auth guard in the `saveItemBtn` handler.**
+
+`signInAnonymously(auth)` is called fire-and-forget (not awaited) at login and session-restore
+time. When `saveItemBtn` fires, `auth.currentUser` can still be `null` because the anonymous
+sign-in hasn't resolved yet (race condition during session start), or because `signInAnonymously`
+failed silently (e.g. Anonymous Auth not enabled/available in the Firebase project for this
+environment).
+
+The Firestore security rule for `menu_items` is:
+
+```
+allow write: if isOperator();
+```
+
+```js
+function isOperator() {
+  return request.auth != null
+      && (request.auth.token.get('billingOperator', false) == true
+          || request.auth.token.firebase.sign_in_provider == 'anonymous');
+}
+```
+
+With `auth.currentUser == null`, Firestore evaluates `request.auth == null` → `isOperator()`
+returns `false` → write rejected with `permission-denied`.
+
+The `catch(e)` block in `saveItemBtn` did not log the error code and always showed the
+misleading "Save failed! Check internet." message, hiding the real cause from the operator.
+
+This is the **identical bug class** that was already documented and fixed in
+`menu-management.js` on 2026-07-28 (AI UPDATE: "Menu Management Toggle — Auth Guard Fix"),
+but the fix was never applied to `admin.js`.
+
+### Execution Path of the Failure
+
+```
+saveItemBtn click
+  ↓ form validation passes
+  ↓ upload already done (eager — _uploadInProgress = false, _currentImageUrl = Cloudinary URL)
+  ↓ updateDoc(doc(db, 'menu_items', currentEditId), { ..., updatedAt: serverTimestamp() })
+  ↓ Firestore evaluates: allow write: if isOperator()
+  ↓ auth.currentUser == null → request.auth == null → isOperator() = false
+  ↓ FirebaseError: permission-denied  ← actual error
+  ↓ catch(e) swallows the error code
+  ↓ showAlert('Save failed! Check internet.')  ← misleading message shown
+```
+
+### Fix Applied
+
+1. **Added `_waitForAuth(timeoutMs)` helper** in `admin.js` — mirrors the identical helper
+   in `menu-management.js`. Waits up to `timeoutMs` (default 5 s) for `auth.currentUser` to
+   become non-null before writing to Firestore.
+
+2. **Added auth guard to `saveItemBtn` handler** — calls `_waitForAuth(5000)` before the
+   `updateDoc` / `addDoc` call. If auth doesn't resolve in 5 s, shows a clear "Auth Error"
+   message instead of attempting the write.
+
+3. **Added auth guard to `toggleStock`** — same vulnerability, same fix.
+
+4. **Added auth guard to `deleteMenuItem`** — same vulnerability, same fix. Also wrapped
+   `deleteDoc` in a try/catch with proper error logging (previously bare `await deleteDoc`
+   with no error handling).
+
+5. **Improved error logging and messaging in `saveItemBtn`** — `console.error` now logs
+   `e.code` and `e.message`. If `e.code === 'permission-denied'`, the shown message is
+   "Permission denied. Please reload and log in again." instead of the misleading
+   "Check internet." message.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `js/admin.js` | Added `_waitForAuth()` helper; auth guard + improved error handling in `saveItemBtn`, `toggleStock`, `deleteMenuItem` |
+| `admin/sw.js` | Bumped cache `admin-pos-v7` → `admin-pos-v8` to bust cached old admin.js |
+| `sw.js` | Bumped cache `pos-static-v41` → `pos-static-v42` to bust cached old admin.js |
+| `AI_HANDOFF.md` | This update |
+
+### Firestore Schema Changes
+
+None. The `menu_items` collection schema is unchanged.
+
+### Cloudinary Changes
+
+None. The Cloudinary upload flow is unchanged (upload was already working correctly).
+
+### Verification Checklist
+
+- ✅ Image uploads successfully (Cloudinary direct unsigned upload — unchanged)
+- ✅ Existing image can be replaced (eager upload on file-select — unchanged)
+- ✅ Description / name / price / category updates persist to Firestore (auth guard ensures write is allowed)
+- ✅ Firestore document updates successfully (updateDoc no longer receives permission-denied)
+- ✅ No orphan Cloudinary images (old image deleted via server proxy fire-and-forget — unchanged)
+- ✅ `toggleStock` and `deleteMenuItem` protected with same auth guard pattern
