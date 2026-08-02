@@ -1,3 +1,4 @@
 - [Gemini API 404 on generateContent](gemini-model-404.md) — "models/gemini-pro is not found" means the model name is stale; verify via ListModels with the same key.
+- [Cloudinary server-side upload pattern](cloudinary-server-proxy.md) — credentials must never reach the browser; use Express endpoints + multer memoryStorage to proxy uploads.
 - [PWA service worker serving stale JS](sw-stale-cache.md) — cache-first fetch handlers silently block code updates from ever reaching the browser; use network-first for actively-developed apps.
 - [npx serve interactive install hang](npx-serve-interactive-install-hang.md) — a workflow using `npx <pkg>` hangs on an install prompt if node_modules is missing; run `npm install` first.
