@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-01 (Auto-Expire Stale Pending Orders)
+> Last updated: 2026-08-01 (Online customer name badge in POS cart)
 
 ---
 
@@ -117,6 +117,72 @@ Added alongside `status: 'expired'`. The Customer Panel already hides orders who
 | Backfill run to clear existing ghost orders | ⚠️ Firestore returned 429 (daily read quota exhausted on Spark plan). Ghost orders will expire automatically on the next cron run (within 30 min). Re-run: `GET https://pizza-billing-functions.mishrarnav142.workers.dev/expireOrders` |
 | Customer Panel hides `expired` orders | ✅ (pre-existing) |
 | Billing Panel hides `expired` orders (not `pending`) | ✅ (pre-existing) |
+
+---
+
+## [AI UPDATE 2026-08-01] — Online Customer Name Badge in POS Cart
+
+### What Was Built
+
+When an operator accepts an online order ("Open in POS"), the customer's real name now appears as a highlighted badge at the top of the POS cart panel. The badge is invisible for manual/walk-in orders and disappears automatically when the order is completed or cancelled.
+
+### Design
+
+- Position: below the cart header ("🛒 Order Details"), above the item list — in a dedicated `<div id="onlineCustomerBadge">` element
+- Colour: amber `#f59e0b` (existing accent) — amber text, amber border, very faint amber background tint
+- Content: 👤 `CUSTOMER` label + customer name
+- Animation: `ocbPulse` — 5 s ease-in-out scale 1.0 → 1.035 → 1.0 (very slow, no flash)
+- Animation stops automatically when badge is hidden (`display:none` via `.ocb-hidden` class)
+
+### Data Flow
+
+```
+incoming-orders.js "Open in POS" click handler
+  ↓
+localStorage.setItem(`customerName_${tableName}_${customerSlot}`, customerName)
+  ↓
+window._posOpenTable(tableName, customerSlot)  ← triggers load-table-cart
+  ↓
+cart.js renderCart()
+  ↓
+localStorage.getItem(`customerName_${getCurrentTable()}_${getCurrentCustomer()}`)
+  ↓
+updates #onlineCustomerBadge innerHTML + removes .ocb-hidden class
+```
+
+### Lifecycle
+
+| Event | Badge state |
+|-------|------------|
+| Online order accepted → "Open in POS" | Badge shown with customer name |
+| Operator switches customer tab (C1→C2) | Badge updates to that slot's customer name, or hides if none |
+| Items removed until cart is empty | `saveLocalCart([])` clears `customerName_*` key → `renderCart()` hides badge |
+| Bill & Settle / Save & Exit / Cancel Order | Cart cleared → badge hidden |
+| Manual/walk-in order opened (no name key) | Badge stays hidden throughout |
+
+### New localStorage Key
+
+| Key | Scope | Written by | Cleared by |
+|-----|-------|-----------|-----------|
+| `customerName_${tableName}_${slot}` | Per slot | `incoming-orders.js` on "Open in POS" | `cart.js` `saveLocalCart([])` when cart empties |
+
+No new Firestore collections, no new network calls.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `index.html` | Added `@keyframes ocbPulse` + `.online-customer-badge` / `.ocb-*` CSS; added `<div id="onlineCustomerBadge">` between cart header and cart items |
+| `js/cart.js` | Added `getCustomerNameKey()` helper; `saveLocalCart([])` clears key; `renderCart()` reads key and updates badge |
+| `js/incoming-orders.js` | On "Open in POS": `localStorage.setItem('customerName_${table}_${slot}', customerName)` |
+| `sw.js` | Cache bumped `pos-static-v35` → `pos-static-v36` |
+
+### What Was NOT Changed
+
+- Billing flow, KOT generation, timers, cart calculations — untouched
+- Manual / walk-in orders — badge stays hidden; no behaviour change
+- Customer Panel — no changes
+- Any Firestore collections or documents
 
 ---
 

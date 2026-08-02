@@ -417,6 +417,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     const getCartKey = () => `cart_${getCurrentTable()}_${getCurrentCustomer()}`;
     const getKotTimeKey = () => `kotTime_${getCurrentTable()}_${getCurrentCustomer()}`;
+    // Key for the online customer name badge (per-slot, cleared when the cart empties).
+    const getCustomerNameKey = () => `customerName_${getCurrentTable()}_${getCurrentCustomer()}`;
 
     const getLocalCart = () => {
         const data = localStorage.getItem(getCartKey());
@@ -427,7 +429,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = getCartKey();
         if (cartData.length === 0) {
             localStorage.removeItem(key);
-            localStorage.removeItem(getKotTimeKey()); 
+            localStorage.removeItem(getKotTimeKey());
+            // Clear the customer name badge when the cart is emptied so it
+            // does not re-appear if the same slot is reopened for a walk-in order.
+            localStorage.removeItem(getCustomerNameKey());
         } else {
             localStorage.setItem(key, JSON.stringify(cartData));
         }
@@ -532,6 +537,27 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderCart() {
         cartItemsContainer.innerHTML = '';
         let totalAmount = 0;
+
+        // ── Online customer name badge ──────────────────────────────────────────
+        // Show the customer's real name (stored by incoming-orders.js when the
+        // operator taps "Open in POS") at the top of the cart panel.
+        // Only appears for online orders; hidden for manual/walk-in carts.
+        // Animation (ocbPulse) is declared in index.html <style> and stops
+        // automatically when the badge is hidden (display:none via ocb-hidden).
+        const _badgeEl = document.getElementById('onlineCustomerBadge');
+        if (_badgeEl) {
+            const _cname = localStorage.getItem(getCustomerNameKey());
+            if (_cname) {
+                _badgeEl.innerHTML =
+                    `<span class="ocb-icon">👤</span>` +
+                    `<span class="ocb-label">Customer</span>` +
+                    `<span class="ocb-name">${_cname}</span>`;
+                _badgeEl.classList.remove('ocb-hidden');
+            } else {
+                _badgeEl.classList.add('ocb-hidden');
+            }
+        }
+        // ── end badge ──────────────────────────────────────────────────────────
 
         let fullKotBtn = document.getElementById('fullKotBtn');
         const kotBtn = document.getElementById('kotBtn');

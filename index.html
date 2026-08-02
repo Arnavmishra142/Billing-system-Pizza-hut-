@@ -102,6 +102,47 @@
             font-weight: bold;
             font-size: 1rem;
         }
+
+        /* 5. Online Customer Name Badge — shown inside POS cart for online orders */
+        @keyframes ocbPulse {
+            0%, 100% { transform: scale(1);     }
+            50%       { transform: scale(1.035); }
+        }
+        .online-customer-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 10px 12px 2px;
+            padding: 7px 14px;
+            background: linear-gradient(135deg, rgba(245,158,11,0.13), rgba(251,191,36,0.06));
+            border: 1px solid rgba(245,158,11,0.30);
+            border-radius: 8px;
+            animation: ocbPulse 5s ease-in-out infinite;
+            transform-origin: center;
+            overflow: hidden;
+        }
+        .online-customer-badge.ocb-hidden {
+            display: none !important;
+            animation: none;
+        }
+        .ocb-icon { font-size: 0.95rem; line-height: 1; flex-shrink: 0; }
+        .ocb-label {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: rgba(245,158,11,0.65);
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            flex-shrink: 0;
+        }
+        .ocb-name {
+            font-size: 0.92rem;
+            font-weight: 700;
+            color: #f59e0b;
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
     </style>
 </head>
 
@@ -214,7 +255,10 @@
                     <h3 style="margin: 0; font-size: 1.3rem;">🛒 Order Details</h3>
                     <button id="closeCartBtn" class="close-cart-btn">Close ❌</button>
                 </div>
-                
+
+                <!-- Online customer name badge — shown only for imported online orders -->
+                <div id="onlineCustomerBadge" class="online-customer-badge ocb-hidden" aria-live="polite"></div>
+
                 <div class="cart-items" id="cartItems">
                 </div>
                 

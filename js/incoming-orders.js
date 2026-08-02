@@ -723,6 +723,11 @@ function renderDrawer(orders) {
             Object.assign(_prevSourceMap, _newSourceMapEntries);
             localStorage.setItem(`cartItemSourceMap_${tableName}`, JSON.stringify(_prevSourceMap));
 
+            // Store customer name for the POS cart badge (per-slot).
+            // cart.js reads this in renderCart() and shows the amber name badge.
+            // Cleared automatically when the cart empties (saveLocalCart([])).
+            localStorage.setItem(`customerName_${tableName}_${customerSlot}`, customerName);
+
             window.dispatchEvent(new Event('cart-updated'));
 
             // 2. Mark order as accepted in Firestore
