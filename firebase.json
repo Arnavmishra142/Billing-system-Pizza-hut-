@@ -3,6 +3,9 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "functions": {
     "source": "functions",
     "runtime": "nodejs20"
@@ -12,6 +15,7 @@
     "ignore": [
       "firebase.json",
       "firestore.rules",
+      "storage.rules",
       "functions/**",
       ".git/**",
       ".agents/**",

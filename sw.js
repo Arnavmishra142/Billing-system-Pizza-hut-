@@ -58,7 +58,9 @@
 // AI UPDATE [2026-07-31]: Bumped pos-static-v27 → pos-static-v28.
 // js/menu-management.js updated with Global Online Ordering Toggle feature.
 // All static files that make the app shell work offline
-const CACHE_NAME = 'pos-static-v38'; const STATIC_ASSETS = [
+// AI UPDATE [2026-08-02]: v38→v39 — bust cached js/admin.js after image upload
+// timeout fix (Promise.race + 30 s hard limit on uploadBytes + getDownloadURL).
+const CACHE_NAME = 'pos-static-v39'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',

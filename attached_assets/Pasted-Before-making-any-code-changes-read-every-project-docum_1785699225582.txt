@@ -1,0 +1,122 @@
+Before making any code changes, read every project documentation file first.
+
+Read:
+- ARCHITECTURE_LOCK.md
+- AI_HANDOFF.md
+
+Understand the existing image upload implementation before modifying anything.
+
+Do NOT rewrite the feature from scratch.
+
+Do NOT make assumptions.
+
+==================================================
+TASK
+==================================================
+
+Perform a COMPLETE audit of the Item Image upload system before attempting any fix.
+
+Current Issue:
+
+When selecting an image inside the Edit Item dialog (also verify Add Item dialog), the upload starts but never finishes.
+
+The UI remains stuck forever on:
+
+Uploading...
+
+with the loading spinner continuously spinning.
+
+The upload never completes.
+
+==================================================
+DO NOT GUESS
+==================================================
+
+Trace the entire upload lifecycle step by step.
+
+Inspect:
+
+• Image picker
+• File validation
+• Upload function
+• Firebase Storage initialization
+• Storage bucket configuration
+• Upload promise
+• Progress listener
+• Download URL generation
+• Firestore update
+• React state management
+• Loading state lifecycle
+• Error handling
+• Dialog lifecycle
+
+Determine exactly where execution stops.
+
+==================================================
+VERIFY
+==================================================
+
+Check whether:
+
+- Firebase Storage is correctly initialized.
+- Bucket name is correct.
+- UploadBytes / UploadBytesResumable is resolving.
+- getDownloadURL() is being called.
+- Firestore update is succeeding.
+- Loading state is reset inside finally{}.
+- Any exception is swallowed silently.
+- Any promise is never awaited.
+- Any async function exits early.
+- Any Storage security rule blocks uploads.
+- Any network request is failing.
+
+==================================================
+UI
+==================================================
+
+The loading spinner must ONLY appear while an upload is actively running.
+
+If upload succeeds:
+
+Loading stops.
+
+Preview updates.
+
+Save button becomes enabled.
+
+If upload fails:
+
+Loading stops.
+
+Show a meaningful error.
+
+Allow retry.
+
+The dialog must NEVER remain permanently stuck in Uploading...
+
+==================================================
+IMPORTANT
+==================================================
+
+Do NOT redesign the dialog.
+
+Do NOT rewrite unrelated code.
+
+Only identify the exact root cause and implement the smallest correct fix.
+
+If multiple issues are found, fix all of them.
+
+==================================================
+AFTER COMPLETION
+==================================================
+
+Update AI_HANDOFF.md with:
+
+• Root cause
+• Files modified
+• Upload flow
+• State lifecycle
+• Any Firebase Storage configuration changes
+• Any security rule changes required
+
+Do not leave undocumented architectural changes.

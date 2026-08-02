@@ -615,8 +615,37 @@ itemImageInput.addEventListener('change', async (e) => {
         const ext  = blob.type === 'image/webp' ? 'webp' : (file.name.split('.').pop() || 'jpg');
         const path = `menu-images/${Date.now()}.${ext}`;
         const imgRef = ref(storage, path);
-        await uploadBytes(imgRef, blob, { contentType: blob.type });
-        const newUrl = await getDownloadURL(imgRef);
+
+        // AI UPDATE [2026-08-02]: Wrap uploadBytes + getDownloadURL in a hard 30-second
+        // timeout via Promise.race.
+        //
+        // Root causes fixed here:
+        //   1. Firebase Storage had no rules deployed (storage.rules added alongside this
+        //      fix). Default rules are "deny all" — every upload was rejected with HTTP 403.
+        //   2. The Firebase Storage SDK has no per-request HTTP timeout. Its retry window
+        //      (maxUploadRetryTime = 600,000 ms = 10 min) means a retryable failure (5xx,
+        //      408, 429) causes silent retries for up to 10 minutes — the spinner appears
+        //      permanently stuck from the user's perspective because the await never settles
+        //      within any reasonable time.
+        //   3. getDownloadURL has the same problem (maxOperationRetryTime = 120,000 ms =
+        //      2 min).
+        //
+        // Promise.race ensures the upload chain surfaces a failure within 30 seconds
+        // regardless of what the Firebase SDK is doing internally. The underlying SDK
+        // request continues in the background but its result is discarded.
+        const newUrl = await Promise.race([
+            uploadBytes(imgRef, blob, { contentType: blob.type })
+                .then(() => getDownloadURL(imgRef)),
+            new Promise((_, reject) =>
+                setTimeout(
+                    () => reject(new Error(
+                        'Upload timed out after 30 s. ' +
+                        'Check internet connection and Firebase Storage rules, then try again.'
+                    )),
+                    30_000
+                )
+            )
+        ]);
 
         // Best-effort delete the image that was uploaded earlier this session (if any)
         if (_uploadedThisSession) {

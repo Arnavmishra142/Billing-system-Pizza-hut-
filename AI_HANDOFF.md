@@ -3638,8 +3638,123 @@ None of these are breaking — existing Customer Panel code continues to work un
 
 ## Next Steps for Next AI Agent
 
-1. **Deploy Firestore rules**: `firebase deploy --only firestore:rules` — required before order completion flow works end-to-end.
+1. **Deploy Firebase rules**: `firebase deploy --only firestore:rules,storage` — deploy both Firestore and the newly added Storage rules in one command. Required before image uploads and order completion work end-to-end.
 2. **Push updated `order-status.js` to Customer Panel** (see "Customer Panel Integration Status" section).
 3. **End-to-end test**: Customer places order → billing panel accepts → KOT printed → customer sees "Preparing 🍕 • X min" with ticking timer → Bill & Settle → customer sees order move to history.
 4. If `GROQ_API_KEY` is available, verify AI chat in `admin/chat.ai.html` works.
 5. **Customer Panel menu upgrade** — update `teamdovolve-hue/Order-` to consume `description`, `imageUrl`, `variants`, `extraOptions`, `active`, `displayOrder` fields now written by the Billing Panel (see compatibility notes above).
+
+---
+
+## [AI UPDATE 2026-08-02] — Image Upload Bug Fix (Add/Edit Item Dialog)
+
+### Symptom
+
+When selecting an image in the Add Item or Edit Item dialog, the spinner appeared and
+never cleared. The dialog was permanently stuck on "Uploading…" with no error shown.
+
+### Root Causes (two, both fixed)
+
+#### Root Cause 1 — Firebase Storage rules never deployed
+
+No `storage.rules` file existed in the repository. The `firebase.json` had no `storage`
+section. Firebase Storage was therefore running on its default rules.
+
+For **new Firebase projects** the default Storage rules are:
+```
+allow read, write: if false;   // deny all
+```
+
+Every upload attempt was rejected with HTTP 403 (Unauthorized). This alone should have
+surfaced an error quickly — but it compounds with Root Cause 2.
+
+#### Root Cause 2 — Firebase Storage SDK has no per-request HTTP timeout
+
+Firebase Storage SDK 10.8.1 constants (confirmed from CDN source):
+```
+_maxUploadRetryTime    = 600,000 ms  (10 minutes)
+_maxOperationRetryTime = 120,000 ms  (2 minutes)
+```
+
+These are **retry-window** values, not per-request timeouts. The SDK retries on HTTP
+5xx, 408, and 429. Critically, the underlying `NetworkRequest` (XHR) has **no
+individual request timeout**: if a request is in-flight and receives no response, the
+XHR waits indefinitely.
+
+Combined effect:
+- Upload request → Firebase Storage returns a retryable error
+  (e.g. 500 on bucket misconfiguration)
+- SDK silently retries with exponential backoff for up to **10 minutes**
+- The `await uploadBytes(...)` Promise never settles within any reasonable timeframe
+- The `finally` block that hides the spinner never executes
+- Dialog remains permanently stuck on "Uploading…"
+
+`getDownloadURL` has the same problem: up to **2 minutes** of silent retries.
+
+### Upload State Lifecycle (correct behavior after fix)
+
+```
+User selects file
+  → _uploadInProgress = true
+  → saveItemBtn disabled
+  → imgUploadBtn disabled
+  → spinner shown (imageUploadSpinner.classList.remove('hidden'))
+  → _toWebP() converts to WebP (falls back to original after 10 s timeout)
+  → Promise.race([
+        uploadBytes() + getDownloadURL(),   ← resolves/rejects within 30 s
+        30 s hard timeout                   ← rejects if SDK hangs
+    ])
+
+  SUCCESS path:
+    → _currentImageUrl = newUrl
+    → preview background-image updated
+    → spinner hidden (finally block)
+    → saveItemBtn re-enabled
+
+  FAILURE path (any error, including timeout):
+    → console.error with full error object
+    → _imgToast('Upload failed. Please try again.')
+    → preview restored to previous state (or empty)
+    → spinner hidden (finally block)
+    → saveItemBtn re-enabled
+    → _uploadInProgress = false
+    → MODAL IS NEVER STUCK
+```
+
+### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `storage.rules` | Billing Panel | **NEW FILE** — Firebase Storage rules: `menu-images/**` world-readable, write requires `request.auth != null`; all other paths denied |
+| `firebase.json` | Billing Panel | Added `"storage": { "rules": "storage.rules" }` section; added `storage.rules` to hosting ignore list |
+| `js/admin.js` | Billing Panel | Replaced bare `await uploadBytes(...); await getDownloadURL(...)` with `Promise.race([..., 30-second timeout])` to prevent infinite spinner |
+| `sw.js` | Billing Panel | Bumped cache v38 → v39 to bust cached `js/admin.js` |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+### Firebase Storage Configuration Changes Required
+
+The `storage.rules` file must be deployed to Firebase before uploads will work:
+
+```
+firebase deploy --only storage
+```
+
+Or deploy everything at once:
+
+```
+firebase deploy --only firestore:rules,storage
+```
+
+The rules allow:
+- `menu-images/**` — `read: if true` (public, for Customer Panel)
+- `menu-images/**` — `write: if request.auth != null` (any authenticated operator session)
+- All other paths — `read, write: if false`
+
+### No Security Rule Changes Required for Firestore
+
+The Firestore rules are unchanged. This fix only adds Storage rules.
+
+### No Customer Panel Changes Required
+
+The Customer Panel reads `imageUrl` from Firestore documents, not directly from Storage.
+Image upload is a Billing Panel–only operation. No cross-repo changes needed.

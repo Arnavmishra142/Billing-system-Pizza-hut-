@@ -1,0 +1,34 @@
+// storage.rules
+// Deploy with: firebase deploy --only storage
+//
+// AI UPDATE [2026-08-02]:
+//   Added for the first time — this file did not exist before.
+//   Root cause of the broken image upload: Firebase Storage had no rules deployed,
+//   so the default "deny all" rules blocked every upload with HTTP 403.
+//   Additionally, the Firebase Storage SDK retries on certain error codes for up to
+//   10 minutes (maxUploadRetryTime=600,000 ms), so even a quick 5xx failure could
+//   cause the spinner to appear frozen for minutes before the SDK gave up.
+//
+// Rules:
+//   • menu-images/ — world-readable (Customer Panel shows item images publicly);
+//                    write requires Firebase anonymous auth (any signed-in operator).
+//   • All other paths — denied (least-privilege default).
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ── Menu item images ──────────────────────────────────────────────────────
+    // Written by the Billing Panel admin (js/admin.js eager upload on file-select).
+    // Read by the Customer Panel to show item thumbnails.
+    match /menu-images/{allPaths=**} {
+      allow read:  if true;                    // public — Customer Panel reads these
+      allow write: if request.auth != null;   // any authenticated session (operator anonymous auth)
+    }
+
+    // ── Catch-all: deny everything else ──────────────────────────────────────
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+  }
+}
