@@ -1,50 +1,64 @@
 // cloudinary-upload.js
-// AI UPDATE [2026-08-02]: Reusable client-side service for Cloudinary image
-// uploads. All Cloudinary credentials stay server-side — this module only
-// sends fetch requests to the Express server endpoints:
-//   POST /api/upload-menu-image
-//   POST /api/delete-menu-image
+// AI UPDATE [2026-08-02]: Switched to direct Cloudinary unsigned upload API so
+// uploads work from any static host (GitHub Pages, Firebase Hosting, Replit).
+// No API Secret or API Key is used here — unsigned uploads require only the
+// cloud_name (public, in every CDN URL) and an upload_preset (not a secret).
 //
 // Public API:
 //   uploadMenuImage(file, oldPublicId?)  → Promise<{ url, publicId }>
 //   deleteMenuImage(publicId)            → Promise<void>  (best-effort, non-fatal)
 //   extractCloudinaryPublicId(url)       → string | null
 
+import { CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET } from './cloudinary-public.js';
+
 /**
- * Upload an image file to Cloudinary via the server-side proxy.
+ * Upload an image file directly to Cloudinary using an unsigned upload preset.
  *
- * No Cloudinary credentials are used here — the server handles signing.
+ * Works from any host — no server required. The browser posts multipart/form-data
+ * directly to the Cloudinary API. The API Secret never reaches the browser.
  * Automatically times out after 30 seconds so the UI is never left stuck.
  *
+ * If oldPublicId is provided, the previous image is deleted via the server-side
+ * proxy (best-effort, fire-and-forget — silently skipped on static hosts).
+ *
  * @param {File|Blob} file          - Image file to upload.
- * @param {string|null} oldPublicId - Cloudinary public_id of the image being
- *   replaced. The server will delete it as part of this call (best-effort).
+ * @param {string|null} oldPublicId - Cloudinary public_id of the image being replaced.
  * @returns {Promise<{ url: string, publicId: string }>}
  */
 export async function uploadMenuImage(file, oldPublicId = null) {
     const formData = new FormData();
-    // Provide a filename so multer and Cloudinary get the correct MIME type
-    formData.append('image', file, file.name || 'menu-image');
-    if (oldPublicId) formData.append('oldPublicId', oldPublicId);
+    formData.append('file', file, file.name || 'menu-image');
+    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    // folder is set by the upload preset on Cloudinary side — not passed here
 
     const controller = new AbortController();
     const timeout    = setTimeout(() => controller.abort(), 30_000);
 
     try {
-        const res = await fetch('/api/upload-menu-image', {
-            method: 'POST',
-            body:   formData,
-            signal: controller.signal,
-        });
+        const res = await fetch(
+            `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`,
+            { method: 'POST', body: formData, signal: controller.signal }
+        );
         clearTimeout(timeout);
 
         let data;
         try { data = await res.json(); } catch (_) { data = {}; }
 
-        if (!res.ok || !data.ok) {
-            throw new Error(data.error || `Upload failed (HTTP ${res.status})`);
+        if (!res.ok || !data.secure_url) {
+            throw new Error(data.error?.message || `Upload failed (HTTP ${res.status})`);
         }
-        return { url: data.url, publicId: data.publicId };
+
+        // Best-effort delete old image via server proxy.
+        // Silently skipped on static hosts (fetch fails → caught → ignored).
+        if (oldPublicId) {
+            fetch('/api/delete-menu-image', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ publicId: oldPublicId }),
+            }).catch(() => {}); // fire-and-forget, non-fatal
+        }
+
+        return { url: data.secure_url, publicId: data.public_id };
     } catch (err) {
         clearTimeout(timeout);
         if (err.name === 'AbortError') {
