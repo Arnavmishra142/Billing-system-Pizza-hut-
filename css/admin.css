@@ -860,6 +860,114 @@ input:checked + .slider::before { transform: translateX(18px); }
 .cust-ord-item-row .qty  { color: #8b949e; flex-shrink: 0; }
 .cust-ord-item-row .sub  { color: #8b949e; flex-shrink: 0; min-width: 52px; text-align: right; font-weight: 600; }
 
+/* =========================================
+   MENU ITEM MODAL — AI UPDATE [2026-08-02]
+   Description textarea + richer image UX
+   ========================================= */
+
+/* Textarea — matches existing form inputs */
+.form-group textarea {
+    width: 100%;
+    padding: 12px 14px;
+    background: #0d1117;
+    border: 1.5px solid #30363d;
+    border-radius: 10px;
+    color: #e6edf3;
+    font-size: 1rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+    resize: vertical;
+    min-height: 68px;
+    line-height: 1.5;
+    display: block;
+}
+.form-group textarea:focus { border-color: #58a6ff; }
+.form-group textarea::placeholder { color: #4b5563; }
+
+/* Image upload group — column layout so buttons sit below preview */
+.image-upload-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 20px;
+}
+
+/* image-preview needs relative position for the spinner overlay */
+.image-preview { position: relative; }
+
+/* Upload / Remove button row */
+.img-action-btns {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.img-upload-btn {
+    background: #21262d;
+    color: #58a6ff;
+    border: 1.5px solid #30363d;
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 7px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    font-family: inherit;
+}
+.img-upload-btn:hover:not(:disabled) { background: #30363d; border-color: #58a6ff; }
+.img-upload-btn:active:not(:disabled) { transform: scale(0.94); }
+.img-upload-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.img-remove-btn {
+    background: rgba(218,54,51,0.1);
+    color: #f85149;
+    border: 1.5px solid rgba(218,54,51,0.3);
+    font-size: 0.82rem;
+    font-weight: 700;
+    padding: 7px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    font-family: inherit;
+}
+.img-remove-btn:hover { background: #da3633; color: #fff; border-color: #da3633; }
+.img-remove-btn:active { transform: scale(0.94); }
+
+/* Spinner overlay — sits on top of the image-preview box */
+.img-spinner {
+    position: absolute;
+    inset: 0;
+    background: rgba(13,17,23,0.82);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #58a6ff;
+    letter-spacing: 0.3px;
+}
+.img-spinner::before {
+    content: '';
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(88,166,255,0.25);
+    border-top-color: #58a6ff;
+    border-radius: 50%;
+    animation: imgSpin 0.7s linear infinite;
+    flex-shrink: 0;
+}
+.img-spinner::after {
+    content: 'Uploading…';
+}
+@keyframes imgSpin { to { transform: rotate(360deg); } }
+
 /* ═══════════════════════════════════════════════
    SMART AI MANAGER — FAB
 ═══════════════════════════════════════════════ */

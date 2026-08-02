@@ -3524,9 +3524,79 @@ The Customer Panel's `js/menu.js` may still filter on `available` field instead 
 
 ---
 
+## [AI UPDATE 2026-08-02] — Menu Item Description, Image UX, and Extended Firestore Schema
+
+### What Was Built
+
+Upgraded the Admin Menu Management panel (Add/Edit item dialogs) with:
+
+**Feature 1 — Description field:** Optional free-text textarea on every menu item. Saved as `description: ''` if left blank. Shown/restored correctly when editing existing items.
+
+**Feature 2 — Eager image upload:** Image now uploads to Firebase Storage immediately on file select (not lazily on Save). Save button is disabled while upload is in progress. Spinner overlay appears on the preview during upload.
+
+**Feature 3 — WebP conversion:** Images are converted to WebP via the Canvas API before upload for optimised Storage size. Falls back to original format on any error.
+
+**Feature 3 — Replace/Remove buttons:** Explicit "Upload Image" / "🔄 Replace Image" / "✕ Remove" buttons replace the old "click preview" pattern. Remove best-effort deletes the session-uploaded image from Storage.
+
+**Feature 4–7 — Extended Firestore schema:** New items written with the full Customer Panel-compatible schema:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `description` | string | `''` if not set |
+| `imageUrl` | string \| null | Firebase Storage URL; stored under `menu-images/` |
+| `active` | boolean | `true` — soft-visible flag for Customer Panel |
+| `displayOrder` | number | `0` — sort hint for Customer Panel |
+| `variants` | array | `[]` — dynamic size/portion variants `[{ label, price }]` |
+| `extraOptions` | array | `[]` — add-on options `[{ name, price }]` |
+| `createdAt` | Timestamp | serverTimestamp() on first write |
+| `updatedAt` | Timestamp | serverTimestamp() on every write |
+
+Edit form updates only `name`, `price`, `category`, `description`, `imageUrl`, `updatedAt`. Does NOT overwrite `variants`, `extraOptions`, `active`, `displayOrder`, `createdAt`.
+
+### Storage Structure
+
+```
+Firebase Storage
+└── menu-images/
+    └── {timestamp}.{ext}   ← .webp when conversion succeeds, original ext otherwise
+```
+
+### Backward Compatibility
+
+- Old items have an `image` field (old name). Read everywhere as `item.imageUrl || item.image`. No migration needed — items pick up the new field name next time they are edited.
+- All new fields absent on old items. Treat absence as zero/default (`''`, `null`, `true`, `0`, `[]`).
+- `image` field is deprecated; never written by new code.
+
+### Customer Panel Compatibility Notes (future work)
+
+No Customer Panel changes are required for existing functionality. To expose the new fields to customers, update `teamdovolve-hue/Order-`:
+
+1. Read `item.imageUrl || item.image` — already required; only change is adding the `|| item.image` fallback.
+2. Show `item.description` under the item name.
+3. If `item.variants` is non-empty, show a size/portion selector; use variant price instead of flat `item.price`.
+4. If `item.extraOptions` is non-empty, show add-on checkboxes.
+5. Filter out items where `item.active === false` (in addition to `inStock`).
+6. Sort items within a category by `item.displayOrder` ascending.
+
+None of these are breaking — existing Customer Panel code continues to work unchanged.
+
+### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `admin/index.html` | Billing Panel | Added description textarea; replaced image section with Upload/Remove buttons + spinner overlay |
+| `js/admin.js` | Billing Panel | Added `serverTimestamp`, `deleteObject` imports; eager upload flow; `_toWebP`, `_storageRefFromUrl`, `_imgToast` helpers; full extended schema on addDoc; description + imageUrl on updateDoc; `imageUrl \|\| image` backward-compat in renderMenuCards |
+| `css/admin.css` | Billing Panel | Textarea styles; `.img-action-btns`, `.img-upload-btn`, `.img-remove-btn`, `.img-spinner`; column layout for `.image-upload-group`; `position:relative` on `.image-preview` |
+| `sw.js` | Billing Panel | Bumped cache v36 → v38 (covers slot fix + this feature) |
+| `ARCHITECTURE_LOCK.md` | Billing Panel | Updated `menu_items` schema with all new fields and deprecation note for `image` |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+---
+
 ## Next Steps for Next AI Agent
 
 1. **Deploy Firestore rules**: `firebase deploy --only firestore:rules` — required before order completion flow works end-to-end.
 2. **Push updated `order-status.js` to Customer Panel** (see "Customer Panel Integration Status" section).
 3. **End-to-end test**: Customer places order → billing panel accepts → KOT printed → customer sees "Preparing 🍕 • X min" with ticking timer → Bill & Settle → customer sees order move to history.
-4. If `GROQ_API_KErY` is available, verify AI chat in `admin/chat.ai.html` works.
+4. If `GROQ_API_KEY` is available, verify AI chat in `admin/chat.ai.html` works.
+5. **Customer Panel menu upgrade** — update `teamdovolve-hue/Order-` to consume `description`, `imageUrl`, `variants`, `extraOptions`, `active`, `displayOrder` fields now written by the Billing Panel (see compatibility notes above).
