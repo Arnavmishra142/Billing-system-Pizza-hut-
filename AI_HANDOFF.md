@@ -3514,6 +3514,49 @@ The Customer Panel's `js/menu.js` may still filter on `available` field instead 
 
 ---
 
+---
+
+## [AI UPDATE 2026-08-02] — Fix Customer Slot Number Inflation
+
+### Bug Fixed
+
+Customer numbers at a table were climbing indefinitely (C1 → C7 → C8…) instead of reusing low numbers after customers were billed.
+
+**Example of the bug:**
+- Table 4 has Customer 1 (billed and gone) and Customer 2 (billed and gone)
+- New phone places an order for Table 4
+- Expected: Customer 1 (lowest available)
+- Actual: Customer 7 (or whatever max+1 was)
+
+### Root Cause
+
+`_findOrAllocateCustomerSlot()` in `js/incoming-orders.js` used `max(existing slots) + 1` to pick a new slot. The `customerSlotMap_<table>` in localStorage was never cleaned up after a customer was billed — their entry remained even after `cart.js` removed their `cart_<table>_C*` key on settlement. So entries accumulated across sessions, and the max kept rising.
+
+### Fix
+
+Two changes inside `_findOrAllocateCustomerSlot()` (no other files touched):
+
+1. **Step 0 (new) — prune stale slotMap entries:** Before matching or allocating, remove any entry whose `cart_<table>_<slot>` key no longer exists in localStorage. A missing cart key means that customer has been billed/settled and their slot is free.
+
+2. **Step 2 (changed) — lowest-available scan instead of max+1:** Iterate from C1 upward and return the first number not present in the (now-pruned) slotMap and with no live cart key. This guarantees C2 is reused after C2 is billed, not incremented to C3.
+
+### Files Modified
+
+| File | Repo | Change |
+|------|------|--------|
+| `js/incoming-orders.js` | Billing Panel | `_findOrAllocateCustomerSlot`: added Step 0 (stale-entry pruning) + changed Step 2 (lowest-available scan instead of max+1) |
+| `sw.js` | Billing Panel | Bumped cache version v36 → v37 so browsers pick up the updated JS |
+| `AI_HANDOFF.md` | Billing Panel | This update |
+
+### What Was NOT Changed
+
+- Billing flow, incoming order flow, KOT flow, settlement flow — untouched
+- Firestore collections, document shapes, or status values — untouched
+- UI — untouched
+- Customer Panel (`teamdovolve-hue/Order-`) — no changes required; this bug was entirely local to the Billing Panel's localStorage slot-map logic
+
+---
+
 ## Remaining Known Issues ⚠️
 
 | Issue | Impact | Fix |
