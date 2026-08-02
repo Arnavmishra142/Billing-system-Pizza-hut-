@@ -255,14 +255,31 @@ Written once at account creation; username changes are a future feature.
 #### `menu_items/{itemId}` — Menu catalog
 ```
 {
-  name:      string
-  price:     number
-  category:  string
-  inStock:   boolean         // true or absent = available; false = out of stock
-  imageUrl:  string          // Firebase Storage URL (optional)
+  name:         string
+  price:        number
+  category:     string
+  inStock:      boolean         // true or absent = available; false = out of stock
+  active:       boolean         // true or absent = visible in Customer Panel; false = soft-hidden (added 2026-08-02)
+  description:  string          // optional human-readable description (added 2026-08-02; '' if not set)
+  imageUrl:     string          // Firebase Storage HTTPS URL, folder: menu-images/ (added 2026-08-02)
+  image:        string          // DEPRECATED — old field name for imageUrl; read as imageUrl || image; never written
+  displayOrder: number          // sort hint for Customer Panel; 0 = no preference (added 2026-08-02)
+  variants: [{                  // dynamic size/portion variants — Customer Panel picks one (added 2026-08-02)
+    label: string               //   e.g. "Regular", "Large", "Half", "Full"
+    price: number               //   variant-specific price
+  }]                            // Empty array = item uses flat `price` field instead
+  extraOptions: [{              // add-on options shown in Customer Panel (added 2026-08-02)
+    name:  string               //   e.g. "Extra Cheese"
+    price: number               //   additional charge, e.g. 50
+  }]
+  createdAt:    Timestamp       // serverTimestamp() on first addDoc (added 2026-08-02)
+  updatedAt:    Timestamp       // serverTimestamp() on every addDoc/updateDoc (added 2026-08-02)
   // Pizza variants include size in name, e.g. "Paneer Pizza (Large)"
 }
 ```
+**Backward-compatibility note:** Items created before 2026-08-02 may lack `description`, `imageUrl`, `active`, `displayOrder`, `variants`, `extraOptions`, `createdAt`, `updatedAt`. Treat absence of any field as its zero/default value (empty string, null, true, 0, [], absent). The Billing Panel reads `imageUrl || image` so old `image` field items display correctly.
+
+**`image` field deprecation:** The old field name was `image`. New writes use `imageUrl`. Old items continue to work via the `imageUrl || image` fallback read in `js/admin.js` and should be migrated to `imageUrl` if/when they are next edited through the admin panel (the edit form now writes `imageUrl`).
 
 #### `settings/pizza_sizes` — Pizza size availability flags
 ```

@@ -245,6 +245,11 @@
 </div>
 
 <!-- ── ITEM MODAL ── -->
+<!-- AI UPDATE [2026-08-02]: Added Description field (Feature 1) and
+     improved Image UX (Features 2–3): eager upload on file-select,
+     loading spinner, Replace/Remove buttons, WebP conversion.
+     New Firestore fields added on save: description, imageUrl, active,
+     createdAt, updatedAt, displayOrder, variants, extraOptions. -->
 <div id="itemModal" class="modal-overlay hidden">
     <div class="modal-box">
         <div class="modal-header">
@@ -252,9 +257,15 @@
             <button class="modal-close-x" id="closeModalBtn">✕</button>
         </div>
 
+        <!-- Image upload: eager upload on file-select, spinner overlay, Replace/Remove -->
         <div class="image-upload-group">
             <div class="image-preview" id="imagePreview">
-                <span id="imagePreviewText">📷<br><small>Tap to upload</small></span>
+                <span id="imagePreviewText">📷<br><small>No image</small></span>
+                <div id="imageUploadSpinner" class="img-spinner hidden"></div>
+            </div>
+            <div class="img-action-btns">
+                <button type="button" class="img-upload-btn" id="imgUploadBtn">📤 Upload Image</button>
+                <button type="button" class="img-remove-btn hidden" id="imgRemoveBtn">✕ Remove</button>
             </div>
             <input type="file" id="itemImageInput" accept="image/*" hidden>
         </div>
@@ -262,6 +273,11 @@
         <div class="form-group">
             <label>Item Name</label>
             <input type="text" id="itemNameInput" placeholder="e.g. Farmhouse Pizza">
+        </div>
+
+        <div class="form-group">
+            <label>Description <span style="font-weight:400;text-transform:none;font-size:0.78rem;opacity:0.55;">(optional)</span></label>
+            <textarea id="itemDescInput" placeholder="e.g. Fresh tomatoes, mozzarella, basil…" rows="2"></textarea>
         </div>
 
         <div class="form-row">

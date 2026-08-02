@@ -7,9 +7,10 @@ import { initCustomerManagement, refreshCustomerManagement } from './customers.j
 import { showAlert, showConfirm } from './dialog.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
-    getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot
+    getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot,
+    serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
-import { ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
 import { onAuthStateChanged, signInAnonymously, signOut }
     from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
@@ -364,14 +365,24 @@ document.getElementById('refreshBtn').addEventListener('click', async (e) => {
 //   Fix: saveItemBtn handler no longer calls loadMenuData().
 // =====================
 
-const itemModal        = document.getElementById('itemModal');
-const imagePreview     = document.getElementById('imagePreview');
-const itemImageInput   = document.getElementById('itemImageInput');
-const imagePreviewText = document.getElementById('imagePreviewText');
+const itemModal          = document.getElementById('itemModal');
+const imagePreview       = document.getElementById('imagePreview');
+const itemImageInput     = document.getElementById('itemImageInput');
+const imagePreviewText   = document.getElementById('imagePreviewText');
+const imageUploadSpinner = document.getElementById('imageUploadSpinner');
+const imgUploadBtn       = document.getElementById('imgUploadBtn');
+const imgRemoveBtn       = document.getElementById('imgRemoveBtn');
 
-let selectedImageFile = null;
-let currentEditId     = null;
-let allMenuItems      = [];
+// AI UPDATE [2026-08-02]: Replaced selectedImageFile (lazy upload on Save) with
+// eager upload model. _currentImageUrl is the effective URL that will be written
+// to Firestore; it is set as soon as the upload completes, not on Save.
+// _uploadedThisSession tracks a URL uploaded in the current modal session so it
+// can be cleaned up from Storage if the user removes it before saving.
+let _currentImageUrl     = null;
+let _uploadedThisSession = null;
+let _uploadInProgress    = false;
+let currentEditId        = null;
+let allMenuItems         = [];
 
 let _menuUnsub = null;
 
@@ -430,8 +441,11 @@ function renderMenuCards() {
             html += `<div class="menu-category-header">📌 ${item.category || 'Uncategorised'}</div>`;
         }
         const checked  = item.inStock !== false ? 'checked' : '';
-        const imgTag   = item.image
-            ? `<div class="menu-thumb"><img src="${item.image}" alt="${item.name}"></div>`
+        // AI UPDATE [2026-08-02]: Use imageUrl (new field); fall back to image (old field) for
+        // items that existed before the schema upgrade. Customer Panel does the same.
+        const _imgSrc  = item.imageUrl || item.image || null;
+        const imgTag   = _imgSrc
+            ? `<div class="menu-thumb"><img src="${_imgSrc}" alt="${item.name}"></div>`
             : `<div class="menu-thumb" style="font-size:1.4rem;">🍽️</div>`;
 
         html += `
@@ -488,15 +502,23 @@ document.getElementById('itemCategoryInput').addEventListener('change', (e) => {
 });
 
 document.getElementById('addNewItemBtn').addEventListener('click', () => {
-    currentEditId = null;
-    selectedImageFile = null;
+    currentEditId            = null;
+    _currentImageUrl         = null;
+    _uploadedThisSession     = null;
+    _uploadInProgress        = false;
     document.getElementById('modalTitle').textContent     = 'Add New Item';
     document.getElementById('saveItemBtn').textContent    = 'Save Item';
+    document.getElementById('saveItemBtn').disabled       = false;
     document.getElementById('itemNameInput').value        = '';
+    document.getElementById('itemDescInput').value        = '';
     document.getElementById('itemPriceInput').value       = '';
-    imagePreview.style.backgroundImage = 'none';
-    imagePreviewText.style.display = 'flex';
-    itemImageInput.value = '';
+    imagePreview.style.backgroundImage = '';
+    imagePreviewText.style.display     = 'flex';
+    imageUploadSpinner.classList.add('hidden');
+    imgRemoveBtn.classList.add('hidden');
+    imgUploadBtn.textContent           = '📤 Upload Image';
+    imgUploadBtn.disabled              = false;
+    itemImageInput.value               = '';
     populateCategoryDropdown();
     itemModal.classList.remove('hidden');
 });
@@ -504,49 +526,191 @@ document.getElementById('addNewItemBtn').addEventListener('click', () => {
 window.editMenuItem = function(id) {
     const item = allMenuItems.find(i => i.id === id);
     if (!item) return;
-    currentEditId     = id;
-    selectedImageFile = null;
+    currentEditId            = id;
+    _currentImageUrl         = item.imageUrl || item.image || null; // backward-compat: old field was `image`
+    _uploadedThisSession     = null;
+    _uploadInProgress        = false;
     document.getElementById('modalTitle').textContent     = 'Edit Item';
     document.getElementById('saveItemBtn').textContent    = 'Update Item';
-    document.getElementById('itemNameInput').value        = item.name;
-    document.getElementById('itemPriceInput').value       = item.price;
+    document.getElementById('saveItemBtn').disabled       = false;
+    document.getElementById('itemNameInput').value        = item.name        || '';
+    document.getElementById('itemDescInput').value        = item.description || '';
+    document.getElementById('itemPriceInput').value       = item.price       || '';
     populateCategoryDropdown(item.category);
-    if (item.image) {
-        imagePreview.style.backgroundImage = `url(${item.image})`;
-        imagePreviewText.style.display = 'none';
+    if (_currentImageUrl) {
+        imagePreview.style.backgroundImage = `url(${_currentImageUrl})`;
+        imagePreviewText.style.display     = 'none';
+        imgRemoveBtn.classList.remove('hidden');
+        imgUploadBtn.textContent           = '🔄 Replace Image';
     } else {
-        imagePreview.style.backgroundImage = 'none';
-        imagePreviewText.style.display = 'flex';
+        imagePreview.style.backgroundImage = '';
+        imagePreviewText.style.display     = 'flex';
+        imgRemoveBtn.classList.add('hidden');
+        imgUploadBtn.textContent           = '📤 Upload Image';
     }
-    itemImageInput.value = '';
+    imageUploadSpinner.classList.add('hidden');
+    imgUploadBtn.disabled = false;
+    itemImageInput.value  = '';
     itemModal.classList.remove('hidden');
 };
 
-function closeModal() { itemModal.classList.add('hidden'); }
+function closeModal() {
+    itemModal.classList.add('hidden');
+    // Reset upload state so stale state never leaks into the next modal open
+    _uploadInProgress = false;
+    imageUploadSpinner.classList.add('hidden');
+    imgUploadBtn.disabled = false;
+    document.getElementById('saveItemBtn').disabled = false;
+}
 document.getElementById('closeModalBtn').addEventListener('click', closeModal);
 document.getElementById('closeModalBtnBottom').addEventListener('click', closeModal);
 // Tap outside modal box to close
 itemModal.addEventListener('click', (e) => { if (e.target === itemModal) closeModal(); });
 
-imagePreview.addEventListener('click', () => itemImageInput.click());
-itemImageInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    selectedImageFile = file;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-        imagePreview.style.backgroundImage = `url(${ev.target.result})`;
-        imagePreviewText.style.display = 'none';
-    };
-    reader.readAsDataURL(file);
+// ── Image upload UX ───────────────────────────────────────────────────────────
+// AI UPDATE [2026-08-02]: Eager upload — image uploads on file select, not on
+// Save. Save is disabled while upload is in progress. Image is converted to WebP
+// for optimised storage. Old image is deleted from Storage (best-effort) when
+// replaced or removed.
+
+// Upload button and clicking the preview both open the file picker
+imgUploadBtn.addEventListener('click', () => { if (!_uploadInProgress) itemImageInput.click(); });
+imagePreview.addEventListener('click', () => { if (!_uploadInProgress) itemImageInput.click(); });
+
+// Remove button — clears the image URL and best-effort deletes a session-uploaded image
+imgRemoveBtn.addEventListener('click', () => {
+    if (_uploadInProgress) return;
+    if (_uploadedThisSession) {
+        const r = _storageRefFromUrl(_uploadedThisSession);
+        if (r) deleteObject(r).catch(() => {});
+        _uploadedThisSession = null;
+    }
+    _currentImageUrl               = null;
+    imagePreview.style.backgroundImage = '';
+    imagePreviewText.style.display     = 'flex';
+    imgRemoveBtn.classList.add('hidden');
+    imgUploadBtn.textContent           = '📤 Upload Image';
+    itemImageInput.value               = '';
 });
 
-document.getElementById('saveItemBtn').addEventListener('click', async () => {
-    const btn      = document.getElementById('saveItemBtn');
-    const name     = document.getElementById('itemNameInput').value.trim();
-    const price    = document.getElementById('itemPriceInput').value.trim();
-    let category   = document.getElementById('itemCategoryInput').value;
+// File selected → immediately upload to Firebase Storage (eager)
+itemImageInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    itemImageInput.value = ''; // reset so the same file can be re-selected later
+    if (!file) return;
 
+    _uploadInProgress = true;
+    document.getElementById('saveItemBtn').disabled = true;
+    imgUploadBtn.disabled                           = true;
+    imgRemoveBtn.classList.add('hidden');
+    imagePreview.style.backgroundImage              = '';
+    imagePreviewText.style.display                  = 'none';
+    imageUploadSpinner.classList.remove('hidden');
+
+    try {
+        // Convert to WebP for optimised storage (falls back to original on any failure)
+        const blob = await _toWebP(file);
+        const ext  = blob.type === 'image/webp' ? 'webp' : (file.name.split('.').pop() || 'jpg');
+        const path = `menu-images/${Date.now()}.${ext}`;
+        const imgRef = ref(storage, path);
+        await uploadBytes(imgRef, blob, { contentType: blob.type });
+        const newUrl = await getDownloadURL(imgRef);
+
+        // Best-effort delete the image that was uploaded earlier this session (if any)
+        if (_uploadedThisSession) {
+            const old = _storageRefFromUrl(_uploadedThisSession);
+            if (old) deleteObject(old).catch(() => {});
+        }
+
+        _uploadedThisSession               = newUrl;
+        _currentImageUrl                   = newUrl;
+        imagePreview.style.backgroundImage = `url(${newUrl})`;
+        imagePreviewText.style.display     = 'none';
+        imgRemoveBtn.classList.remove('hidden');
+        imgUploadBtn.textContent           = '🔄 Replace Image';
+        console.log('[menu-img] Uploaded:', path);
+    } catch (err) {
+        console.error('[menu-img] Upload failed:', err);
+        // Restore whatever was showing before the upload attempt
+        if (_currentImageUrl) {
+            imagePreview.style.backgroundImage = `url(${_currentImageUrl})`;
+            imagePreviewText.style.display     = 'none';
+            imgRemoveBtn.classList.remove('hidden');
+        } else {
+            imagePreview.style.backgroundImage = '';
+            imagePreviewText.style.display     = 'flex';
+        }
+        _imgToast('Upload failed. Please try again.');
+    } finally {
+        _uploadInProgress = false;
+        imageUploadSpinner.classList.add('hidden');
+        document.getElementById('saveItemBtn').disabled = false;
+        imgUploadBtn.disabled = false;
+    }
+});
+
+// Convert any image file to a WebP Blob using the Canvas API.
+// Falls back to the original File if conversion fails or is unsupported.
+function _toWebP(file) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            const canvas = document.createElement('canvas');
+            canvas.width  = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            canvas.getContext('2d').drawImage(img, 0, 0);
+            canvas.toBlob((blob) => resolve(blob || file), 'image/webp', 0.85);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+        img.src = url;
+    });
+}
+
+// Parse a Firebase Storage HTTPS download URL → a Storage ref for deleteObject.
+// Firebase Storage download URLs encode the path as /v0/b/{bucket}/o/{encoded-path}.
+function _storageRefFromUrl(url) {
+    if (!url) return null;
+    try {
+        const m = new URL(url).pathname.match(/\/v0\/b\/[^/]+\/o\/(.+)$/);
+        if (m) return ref(storage, decodeURIComponent(m[1]));
+    } catch (_) {}
+    return null;
+}
+
+// Non-blocking toast for image-related errors (non-modal so it doesn't interrupt flow)
+function _imgToast(msg) {
+    const t = document.createElement('div');
+    t.style.cssText = [
+        'position:fixed', 'bottom:160px', 'left:50%', 'transform:translateX(-50%)',
+        'background:#ef4444', 'color:#fff', 'border-radius:10px',
+        'padding:10px 20px', 'font-size:0.88rem', 'font-weight:600',
+        'z-index:99999', 'white-space:nowrap', 'box-shadow:0 4px 20px rgba(0,0,0,0.3)'
+    ].join(';');
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3500);
+}
+
+// AI UPDATE [2026-08-02]: Save handler no longer uploads the image — upload now
+// happens eagerly on file-select. Here we just use _currentImageUrl (already set).
+// New items get the full extended Firestore schema (description, imageUrl, active,
+// createdAt, updatedAt, displayOrder, variants, extraOptions).
+// Edits update only the mutable presentation fields; variants/extraOptions/active/
+// displayOrder/createdAt are intentionally NOT overwritten so future UI that manages
+// those fields won't have its data stomped by the basic edit form.
+document.getElementById('saveItemBtn').addEventListener('click', async () => {
+    const btn         = document.getElementById('saveItemBtn');
+    const name        = document.getElementById('itemNameInput').value.trim();
+    const price       = document.getElementById('itemPriceInput').value.trim();
+    const description = document.getElementById('itemDescInput').value.trim();
+    let   category    = document.getElementById('itemCategoryInput').value;
+
+    if (_uploadInProgress) {
+        await showAlert("Please wait for the image to finish uploading.", 'warning', 'Upload In Progress');
+        return;
+    }
     // AI UPDATE [2026-07-30]: Replaced alert() with custom dialogs.
     if (category === 'NEW_CATEGORY') {
         category = document.getElementById('newCategoryInput').value.trim();
@@ -554,24 +718,36 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
     }
     if (!name || !price) { await showAlert("Name and Price are required!", 'warning', 'Missing Fields'); return; }
 
-    btn.textContent = "Saving... ⏳";
+    btn.textContent = 'Saving… ⏳';
     btn.disabled    = true;
 
     try {
-        let imageUrl = null;
-        if (selectedImageFile) {
-            const imgRef = ref(storage, `menu_images/${Date.now()}_${selectedImageFile.name}`);
-            await uploadBytes(imgRef, selectedImageFile);
-            imageUrl = await getDownloadURL(imgRef);
-        }
-
         if (currentEditId) {
-            const update = { name, price: Number(price), category };
-            if (imageUrl) update.image = imageUrl;
-            await updateDoc(doc(db, "menu_items", currentEditId), update);
+            // Edit: update only the fields the form manages.
+            // variants, extraOptions, active, displayOrder, createdAt are NOT touched.
+            await updateDoc(doc(db, 'menu_items', currentEditId), {
+                name,
+                price:       Number(price),
+                category,
+                description: description || '',
+                imageUrl:    _currentImageUrl || null,
+                updatedAt:   serverTimestamp(),
+            });
         } else {
-            await addDoc(collection(db, "menu_items"), {
-                name, price: Number(price), category, image: imageUrl, inStock: true
+            // Add: write the complete extended document schema.
+            await addDoc(collection(db, 'menu_items'), {
+                name,
+                price:        Number(price),
+                category,
+                description:  description || '',
+                imageUrl:     _currentImageUrl || null,
+                inStock:      true,
+                active:       true,       // soft-visible flag (Customer Panel uses this)
+                displayOrder: 0,          // sort hint; 0 = no preference
+                variants:     [],         // e.g. [{ label:'Regular', price:120 }]
+                extraOptions: [],         // e.g. [{ name:'Extra Cheese', price:50 }]
+                createdAt:    serverTimestamp(),
+                updatedAt:    serverTimestamp(),
             });
         }
         closeModal();
@@ -581,9 +757,9 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
     } catch (e) {
         console.error(e);
         // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
-        await showAlert("Save failed! Check internet.", 'error', 'Save Failed');
+        await showAlert('Save failed! Check internet.', 'error', 'Save Failed');
     } finally {
-        btn.textContent = currentEditId ? "Update Item" : "Save Item";
+        btn.textContent = currentEditId ? 'Update Item' : 'Save Item';
         btn.disabled    = false;
     }
 });
