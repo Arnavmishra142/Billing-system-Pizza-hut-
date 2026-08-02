@@ -129,7 +129,7 @@ app.post('/api/notify-order', async (req, res) => {
                 user:     PUSHOVER_USER,
                 title,
                 message:  msg,
-                sound:    'notification',
+                sound:    'Notification',   // capital N — exact identifier per /1/sounds.json ("Order's notification")
                 priority: 2,    // Emergency: highest priority, bypasses DND/quiet hours
                 // AI UPDATE [2026-07-31]: retry corrected 5 → 30. Pushover requires
                 // retry ≥ 30 s for priority=2. This route is currently unused (client

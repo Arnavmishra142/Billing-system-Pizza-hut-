@@ -971,11 +971,19 @@ async function handleNotifyOrder(data, authCtx, baseUrl, db) {
 
   console.log(`[notifyOrder] Sending Priority 2 Emergency Pushover for order ${orderId} (${tableId})`);
 
+  // 'Notification' (capital N) is the custom sound registered on this Pushover
+  // account — verified via GET /1/sounds.json: { "Notification": "Order's notification" }.
+  // Without this field the Pushover app falls back to the Android channel default
+  // ("ting").  For Priority 2 (emergency) the sound also LOOPS every `retry` seconds
+  // until acknowledged, so the correct identifier here is critical.
+  // Note: the identifier IS case-sensitive — 'notification' (lowercase) is invalid and
+  // silently falls back to the device default, which was the original bug.
   const _pushoverPayload = {
     token:    PUSHOVER_TOKEN,
     user:     PUSHOVER_USER,
     title,
     message,
+    sound:    'Notification',   // custom sound: "Order's notification" — capital N required
     priority: 2,
     retry:    30,
     expire:   3600,

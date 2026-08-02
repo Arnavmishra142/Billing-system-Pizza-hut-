@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-01 (Online customer name badge in POS cart)
+> Last updated: 2026-08-02 (Pushover sound fix — sound: 'Notification')
 
 ---
 
