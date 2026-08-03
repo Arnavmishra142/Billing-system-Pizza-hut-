@@ -572,7 +572,6 @@ function _renderMenuSection() {
         <div id="amCatView">
             <div class="am-toolbar">
                 <span class="am-toolbar-title">📁 Categories</span>
-                <button class="am-btn am-btn-migrate" id="amMigrateBtn" title="Convert legacy menu_items to new structure">🔄 Migrate Legacy</button>
                 <button class="am-btn am-btn-primary" id="amAddCatBtn">+ Category</button>
             </div>
             <div id="amCatList"><div class="am-empty"><div class="am-empty-icon">⏳</div><div>Loading…</div></div></div>
@@ -586,11 +585,13 @@ function _renderMenuSection() {
             <div id="amProdList"><div class="am-empty"><div class="am-empty-icon">⏳</div><div>Loading…</div></div></div>
         </div>
     `;
+    // NOTE: "🔄 Migrate Legacy" button intentionally removed — migration is complete.
+    // The _showMigratePanel / _runMigration functions are preserved in this file
+    // for emergency re-use but are not wired to any UI element.
 
     document.getElementById('amAddCatBtn').addEventListener('click', () => _openCategoryModal(null));
     document.getElementById('amBackBtn').addEventListener('click', _closeProductsView);
     document.getElementById('amAddProdBtn').addEventListener('click', () => _openProductModal(null));
-    document.getElementById('amMigrateBtn').addEventListener('click', _showMigratePanel);
 }
 
 // ─── Category listener ────────────────────────────────────────────────────────
