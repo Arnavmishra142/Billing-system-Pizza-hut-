@@ -609,21 +609,20 @@ function _startCategoryListener() {
                 .map(d => ({ id: d.id, ...d.data() }))
                 .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0) || (a.name || '').localeCompare(b.name || ''));
 
-            // Auto-migrate from menu_items if categories is empty on first load
+            // Auto-migrate from menu_items if categories is empty on first load.
+            // Fire-and-forget: do NOT await and do NOT return — render the current
+            // (empty) state immediately so the UI is never stuck on "Loading…".
+            // The onSnapshot listener re-fires automatically once categories are
+            // written, replacing the empty state with the migrated data.
             if (_categories.length === 0 && !_migrationAttempted && _initted) {
                 _migrationAttempted = true;
-                try {
-                    const miSnap = await getDocs(collection(db, 'menu_items'));
+                getDocs(collection(db, 'menu_items')).then(miSnap => {
                     if (!miSnap.empty) {
                         console.log('[admin-menu] categories empty — auto-migrating from menu_items…');
                         _showToast('Migrating menu data… please wait', 'info');
-                        await _runSilentMigration(miSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-                        // onSnapshot fires again automatically once categories are written
-                        return;
+                        _runSilentMigration(miSnap.docs.map(d => ({ id: d.id, ...d.data() })));
                     }
-                } catch (e) {
-                    console.warn('[admin-menu] auto-migration check failed:', e);
-                }
+                }).catch(e => console.warn('[admin-menu] auto-migration check failed:', e));
             }
 
             if (!_currentCatId) _renderCategoriesView();
@@ -641,13 +640,9 @@ function _startCategoryListener() {
 // instead of the on-screen log panel. Called automatically when categories is
 // found empty but menu_items has data (post-architecture-change first load).
 async function _runSilentMigration(items) {
-    const user = await _waitForAuth();
-    if (!user) {
-        console.warn('[admin-menu] auto-migration: auth not available, skipping.');
-        _showToast('Auto-migration skipped — please log in and refresh.', 'warning');
-        return;
-    }
-
+    // No auth gate here — Firestore rules govern access.
+    // Removing the _waitForAuth check avoids blocking writes when Firebase auth
+    // state hasn't resolved yet (snapshot fires from cache before onAuthStateChanged).
     const VARIANT_RE = /\s*\(\s*(regular|medium|large|half|full|small|standard|family)\s*\)\s*$/i;
     const getBase    = (name) => (name || '').replace(VARIANT_RE, '').trim();
     const getVariant = (name) => { const m = (name || '').match(VARIANT_RE); return m ? m[1] : null; };
