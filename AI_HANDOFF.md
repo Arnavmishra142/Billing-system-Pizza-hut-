@@ -3967,3 +3967,235 @@ None. The Cloudinary upload flow is unchanged (upload was already working correc
 - ✅ Firestore document updates successfully (updateDoc no longer receives permission-denied)
 - ✅ No orphan Cloudinary images (old image deleted via server proxy fire-and-forget — unchanged)
 - ✅ `toggleStock` and `deleteMenuItem` protected with same auth guard pattern
+
+---
+
+## [AI UPDATE 2026-08-03] — Hierarchical Menu Architecture Redesign
+
+### What Was Built
+
+Complete redesign of the Menu Management system from a flat `menu_items` collection to a fully hierarchical `categories → products → variants` structure. The billing panel and customer panel continue to work during and after migration via a dual-read path that automatically selects the new architecture when the `products` collection is non-empty.
+
+---
+
+### New Firestore Collections
+
+#### `categories/{catId}`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `name` | string | Display name |
+| `imageUrl` | string \| null | Cloudinary URL |
+| `active` | boolean | `false` hides from customers |
+| `displayOrder` | number | Admin-controlled sort position |
+| `createdAt` | Timestamp | serverTimestamp on create |
+| `updatedAt` | Timestamp | serverTimestamp on every write |
+
+#### `products/{productId}`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `categoryId` | string | References `categories/{catId}` |
+| `categoryName` | string | Denormalized for display |
+| `name` | string | Product display name |
+| `description` | string | Optional free-text |
+| `imageUrl` | string \| null | Cloudinary URL |
+| `active` | boolean | Soft-visible flag |
+| `inStock` | boolean | Availability toggle |
+| `hasVariants` | boolean | `true` when variants subcollection has items |
+| `price` | number | Only used when `hasVariants: false` |
+| `variantsList` | array | Denormalized snapshot of all variants (for fast billing panel reads — see below) |
+| `extras` | array | `[{name, price, active}]` — add-ons attached to this product |
+| `flags` | object | `{recommended, mostOrdered, chefPick, casualSnack, newArrival}` — boolean each |
+| `displayOrder` | number | Admin-controlled sort position within category |
+| `createdAt` | Timestamp | — |
+| `updatedAt` | Timestamp | — |
+
+**Future modifier groups**: Add `modifierGroupIds: string[]` to reference `modifier_groups/{groupId}` docs. Do NOT redesign — the array placeholder is reserved.
+
+#### `products/{productId}/variants/{variantId}`
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `name` | string | e.g. "Regular", "Medium", "Large", "Half", "Full" |
+| `price` | number | Variant-specific price |
+| `imageUrl` | string \| null | Variant image (optional) |
+| `active` | boolean | — |
+| `inStock` | boolean | Individual variant availability |
+| `displayOrder` | number | Sort within product |
+| `createdAt` | Timestamp | — |
+| `updatedAt` | Timestamp | — |
+
+**Migration note**: When migrating from `menu_items`, the original `menu_items` doc ID is preserved as the variant's subcollection document ID for cart compatibility (existing carts use these IDs).
+
+#### `variantsList` denormalization
+
+`products/{productId}.variantsList` is an array of:
+```json
+{ "id": "<variantId>", "name": "Regular", "price": 120,
+  "imageUrl": null, "active": true, "inStock": true, "displayOrder": 0 }
+```
+
+This array is kept in sync whenever variants are saved. The billing panel (`js/menu.js`) reads `variantsList` from the product document to avoid making one query per product for variants — a single `products` collection read gives everything needed to render the billing grid.
+
+**Rule**: whenever a variant is created, updated, or deleted via `admin-menu.js`, the `variantsList` on the product document MUST be updated in the same write batch.
+
+---
+
+### Category Architecture
+
+Categories are first-class Firestore entities:
+
+- **Admin-controlled order** via `displayOrder` field. The admin can move categories up/down with arrow buttons in the Admin Panel → Menu → Categories view. The `categories` listener in `admin-menu.js` orders by `displayOrder`.
+- **Category image** displayed as thumbnail in admin cards and passed to the customer panel for image fallback.
+- **Active flag**: `active: false` marks a category as hidden. Admin can toggle this. Customer panel skips inactive categories.
+- **No hardcoded sort**: both admin panel and customer panel read `displayOrder` and sort by it.
+
+---
+
+### Product Architecture
+
+Products live inside a category (via `categoryId`):
+
+- **Product flags** enable smart sections on the customer panel: `recommended`, `mostOrdered`, `chefPick`, `casualSnack`, `newArrival`. Customer panel renders these as pinned sections at the top of the menu.
+- **Move to another category**: admin can change `categoryId` and `categoryName` without deleting/re-creating.
+- **Duplicate**: copies product + all variants to the same category.
+- **hasVariants flag**: `true` when the product has entries in its `variants` subcollection. Drives how the billing panel and customer panel render it.
+
+---
+
+### Variant Architecture
+
+Variants are a subcollection under each product:
+
+- **Billing panel**: products+variants are expanded into flat virtual items with `"ProductName (VariantName)"` names (e.g. `"Margherita (Regular)"`, `"Margherita (Large)"`). The existing triple-card / half-full-card rendering in `js/menu.js` detects these names via regex and works **without any code change**.
+- **Customer panel**: same flat expansion via `variantsList` in `loadMenuFromProducts()`.
+- **inStock on variants**: the toggle in the billing panel Menu drawer (`js/menu-management.js`) writes to `products/{productId}/variants/{variantId}` and also updates the denormalized `variantsList` on the product document.
+- **Pizza sizes**: the global pizza size toggle (`settings/pizza_sizes`) still works for backward compat. Individual variant `inStock` takes precedence per variant.
+
+---
+
+### Extras Architecture
+
+Extras (add-ons) are stored as an array on the product document:
+
+```json
+"extras": [
+  { "name": "Extra Cheese", "price": 30, "active": true },
+  { "name": "Extra Veggies", "price": 20, "active": true }
+]
+```
+
+- Extras are attached to the **product**, not the category or a separate collection.
+- Admin adds/removes extras in the product editor modal (Extras section).
+- Customer panel: read `product.extras` and render as checkboxes (not yet implemented on customer panel — documented here for future implementation).
+- Order payloads already support `extras[]` arrays (see `js/cart.js` and `js/incoming-orders.js`) — no billing panel changes needed.
+
+---
+
+### Future Modifier Groups Architecture
+
+Reserved interface. Do NOT implement yet. When needed:
+
+```
+modifier_groups/{groupId}
+  name: string           // "Crust Type", "Spice Level"
+  type: "single"|"multi"
+  required: boolean
+  options: [{id, name, price, active}]
+
+products/{productId}
+  modifierGroupIds: string[]   // reference to modifier_groups/{groupId}
+```
+
+The `products` schema already reserves `modifierGroupIds: []` (written as empty array). To activate: create `modifier_groups` collection, populate `modifierGroupIds` on products, update customer panel to render selectors.
+
+---
+
+### Search Architecture
+
+**Admin panel search** (billing panel drawer `#menuMgmtSearch`):
+
+The `_getFilteredNonPizza()` function in `js/menu-management.js` filters `_allItems` by `item.name.toLowerCase().includes(_search)`. In the new architecture `_allItems` contains expanded flat items (e.g. `"Margherita (Regular)"`), so search automatically matches:
+- Product name (part of every item name)
+- Variant name (e.g. searching "regular" finds all Regular variants)
+- Category (category pills still filter by exact match)
+
+**Customer panel search**: not yet implemented. Future: add a search bar to `customer.html` that filters the flat expanded items by `name`, `description`, and `category`.
+
+---
+
+### Image Fallback Logic
+
+The canonical fallback chain (applies everywhere — admin, billing panel, customer panel):
+
+```
+Variant imageUrl
+    ↓ (null/absent)
+Product imageUrl
+    ↓ (null/absent)
+Category imageUrl  (looked up via categoryId → _catImageMap)
+    ↓ (null/absent)
+Default placeholder (🍽️ emoji or CSS :before fallback)
+```
+
+**Implementation locations**:
+- `js/admin-menu.js`: `renderProductCards()` renders `prod.imageUrl || cat.imageUrl || '🍽️'`
+- `js/menu.js`: `processProductsToItems()` sets `imageUrl: v.imageUrl || prod.imageUrl || catImageMap[prod.categoryId] || null`
+- `customer.html`: `loadMenuFromProducts()` sets `imageUrl: v.imageUrl || prod.imageUrl || _catImageMap[prod.categoryId] || null`
+
+---
+
+### Migration Notes
+
+**How to migrate**: Admin Panel → Menu tab → "🔄 Migrate Legacy" button → "▶ Run Migration".
+
+The migration (`_runMigration()` in `js/admin-menu.js`):
+1. Reads all `menu_items` documents.
+2. Groups by `category` string → creates one `categories` doc per unique category.
+3. Groups items by "base name" (strips `(Regular)`, `(Medium)`, `(Large)`, `(Half)`, `(Full)` suffixes).
+4. Items with multiple variants → creates one `products` doc + one `variants` doc per size.
+5. Single-price items → creates one `products` doc with `hasVariants: false`.
+6. **Legacy `menu_items` are NOT deleted** — migration is safe to run and re-run.
+7. Variant IDs are set to the original `menu_items` doc ID for cart compatibility.
+
+**Before migrating**: close any open active bills. Cart items are keyed by doc ID; after migration, single-price items get new product IDs (old `menu_items` IDs no longer match). Variant items preserve their IDs.
+
+**After migrating**: the billing panel, admin panel, and customer panel automatically switch to the new architecture because:
+- `js/menu.js` / `js/menu-management.js` check if `products` is non-empty on startup and use it.
+- `customer.html` `initMenu()` does the same check.
+
+**Rollback**: delete the `categories` and `products` collections. All three clients fall back to `menu_items` automatically.
+
+---
+
+### Customer Panel Compatibility Notes
+
+`customer.html` in this repo has been updated to `loadMenuFromProducts()` (new architecture) with automatic fallback to `loadMenu()` (legacy `menu_items`).
+
+The external customer panel repo (`teamdovolve-hue/Order`) needs the same changes. Apply:
+
+1. **Import**: no new Firebase imports needed (uses same collections).
+2. **Architecture detection**: add `initMenu()` function that checks if `products` is non-empty and calls `loadMenuFromProducts()` vs `loadMenu()`.
+3. **`loadMenuFromProducts()`**: read `categories` (ordered by `displayOrder`) + `products` (with `variantsList`), expand variants into flat items with `"Product (Variant)"` names, build `menuMap`, render tabs and menu.
+4. **Image fallback**: use `v.imageUrl || prod.imageUrl || catImageMap[catId] || null`.
+5. **Smart sections**: if `prod.flags.recommended` etc. are set, render pinned sections at top.
+6. **`inStock` field**: on variants read from `variantsList`, check `v.inStock !== false && prod.inStock !== false` (both must be in stock). The pizza sizes toggle also still applies for backward compat.
+
+The reference implementation is in this repo's `customer.html` `loadMenuFromProducts()` function.
+
+---
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `js/admin-menu.js` | **NEW** — full hierarchical admin menu management (categories, products, variants, extras, migration) |
+| `admin/index.html` | Menu section simplified — old flat grid replaced by `#menuCardGrid` managed by `admin-menu.js` |
+| `js/admin.js` | Added `import { initAdminMenu, destroyAdminMenu }` from `admin-menu.js`; `switchTab('menu')` now calls `initAdminMenu()` |
+| `js/menu.js` | Added `processProductsToItems()` helper; `fetchMenuFromCloud()` tries `products` collection first, falls back to `menu_items` |
+| `js/menu-management.js` | Added `_usingProducts` flag, `_startProductsListener()`, `_startMenuItemsListener()`; `_toggle()` updated to write to correct collection; `destroyMenuManagement()` cleans up new listener |
+| `customer.html` | Added `loadMenuFromProducts()`, `renderCatTabsFromProducts()`, `renderMenuFromProducts()`, `initMenu()`; smart-section rendering; image fallback chain |
+| `firestore.rules` | Added rules for `categories`, `products`, `products/{productId}/variants/{variantId}` |
+| `AI_HANDOFF.md` | This update |
+

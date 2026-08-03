@@ -8,6 +8,9 @@ import { showAlert, showConfirm } from './dialog.js';
 // AI UPDATE [2026-08-02]: Switched menu image storage from Firebase Storage to Cloudinary.
 // Credentials are server-side only; this module calls the Express proxy endpoints.
 import { uploadMenuImage, deleteMenuImage, extractCloudinaryPublicId } from './cloudinary-upload.js';
+// AI UPDATE [2026-08-03]: New hierarchical menu management module.
+// Replaces the flat loadMenuData() / renderMenuCards() / editMenuItem() flow.
+import { initAdminMenu, destroyAdminMenu } from './admin-menu.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
     getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot,
@@ -122,7 +125,7 @@ window.switchTab = function(tabName, navBtn) {
     document.getElementById(tabName + 'Section').classList.add('active');
     if (navBtn) navBtn.classList.add('active');
 
-    if (tabName === 'menu') loadMenuData();
+    if (tabName === 'menu') initAdminMenu();
     if (tabName === 'expense') {
         const todayBtn = document.querySelector('#expenseSection .filter-pill[data-val="1"]');
         loadAdminExpenses('days', 1, todayBtn);

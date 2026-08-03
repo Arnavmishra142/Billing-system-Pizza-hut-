@@ -154,8 +154,31 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // ── menu_items ────────────────────────────────────────────────────────────
+    // ── menu_items (legacy — kept for backward compat) ───────────────────────
     match /menu_items/{itemId} {
+      allow read:  if true;
+      allow write: if isOperator();
+    }
+
+    // ── categories (new hierarchy — first-class category entities) ────────────
+    // AI UPDATE [2026-08-03]: New collection for hierarchical menu architecture.
+    // categories/{catId}: { name, imageUrl, active, displayOrder, createdAt, updatedAt }
+    match /categories/{catId} {
+      allow read:  if true;
+      allow write: if isOperator();
+    }
+
+    // ── products + variants (new hierarchy) ───────────────────────────────────
+    // AI UPDATE [2026-08-03]: Replaces flat menu_items with products → variants.
+    // products/{productId}: { categoryId, name, imageUrl, active, inStock,
+    //   hasVariants, price, variantsList[], extras[], flags{}, displayOrder, ... }
+    // products/{productId}/variants/{variantId}: { name, price, imageUrl,
+    //   active, inStock, displayOrder, createdAt, updatedAt }
+    match /products/{productId} {
+      allow read:  if true;
+      allow write: if isOperator();
+    }
+    match /products/{productId}/variants/{variantId} {
       allow read:  if true;
       allow write: if isOperator();
     }

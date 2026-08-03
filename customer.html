@@ -1542,8 +1542,27 @@ document.getElementById('placeOrderBtn').addEventListener('click', async () => {
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// MENU LOADING & RENDERING (unchanged from original)
+// MENU LOADING & RENDERING
+// AI UPDATE [2026-08-03]: loadMenu() now tries the new products collection first.
+//   If products collection is non-empty, uses the hierarchical read path:
+//     • categories collection → ordered tabs + category images
+//     • products collection   → products + variants (via variantsList)
+//     • image fallback chain: variant → product → category → placeholder
+//     • smart sections (Recommended, Most Ordered, Chef Pick, Casual Snack, New Arrival)
+//   Falls back to legacy menu_items when products collection is empty.
 // ════════════════════════════════════════════════════════════════════════════
+
+// Category image map (catId → imageUrl) — populated when using new architecture
+let _catImageMap = {};
+// Smart-section flags state
+const SMART_SECTIONS = [
+    { key: 'recommended', label: '⭐ Recommended' },
+    { key: 'mostOrdered', label: '🔥 Most Ordered' },
+    { key: 'chefPick',    label: '👨‍🍳 Chef Pick'   },
+    { key: 'casualSnack', label: '🥪 Casual Snack' },
+    { key: 'newArrival',  label: '🆕 New Arrivals' },
+];
+
 function isPizzaVariant(item) {
     return (item.category || '').toLowerCase() === 'pizza' &&
         /\(\s*(regular|medium|large)\s*\)/i.test(item.name || '');
@@ -1555,6 +1574,195 @@ function getPizzaSize(item) {
     return null;
 }
 
+// Resolve the best image for an item using the fallback chain:
+//   Variant image → Product image → Category image → null (placeholder rendered in CSS)
+function resolveItemImage(item) {
+    return item.imageUrl || item._productImageUrl || item._catImageUrl || null;
+}
+
+// ── New architecture: read from products + categories ─────────────────────────
+function loadMenuFromProducts() {
+    // 1. Listen to categories for ordered tabs + images
+    let catOrder = [];  // [{id, name, displayOrder, imageUrl}]
+    let productsLoaded = false;
+    let categoriesLoaded = false;
+    let rawProducts = [];
+
+    function rebuildMenu() {
+        if (!categoriesLoaded || !productsLoaded) return;
+
+        // Build category image map
+        _catImageMap = {};
+        catOrder.forEach(c => { _catImageMap[c.id] = c.imageUrl || null; });
+
+        menuMap = {};
+        const byCat = {};  // catName → items[]
+        const smartMap = {};  // sectionKey → items[]
+        SMART_SECTIONS.forEach(s => { smartMap[s.key] = []; });
+
+        rawProducts.forEach(prod => {
+            if (prod.active === false || prod.inStock === false) return;
+            const catName = prod.categoryName || 'Other';
+            if (!byCat[catName]) byCat[catName] = [];
+
+            if (prod.hasVariants && prod.variantsList && prod.variantsList.length > 0) {
+                prod.variantsList.forEach(v => {
+                    if (v.active === false || v.inStock === false) return;
+                    const item = {
+                        id:               v.id,
+                        name:             `${prod.name} (${v.name})`,
+                        price:            v.price || 0,
+                        category:         catName,
+                        categoryId:       prod.categoryId,
+                        inStock:          true,
+                        imageUrl:         v.imageUrl || prod.imageUrl || _catImageMap[prod.categoryId] || null,
+                        _productImageUrl: prod.imageUrl || null,
+                        _catImageUrl:     _catImageMap[prod.categoryId] || null,
+                        description:      prod.description || '',
+                        _productId:       prod.id,
+                        _variantName:     v.name,
+                    };
+                    menuMap[v.id] = item;
+                    byCat[catName].push(item);
+                });
+            } else {
+                const item = {
+                    id:               prod.id,
+                    name:             prod.name,
+                    price:            prod.price || 0,
+                    category:         catName,
+                    categoryId:       prod.categoryId,
+                    inStock:          true,
+                    imageUrl:         prod.imageUrl || _catImageMap[prod.categoryId] || null,
+                    _productImageUrl: prod.imageUrl || null,
+                    _catImageUrl:     _catImageMap[prod.categoryId] || null,
+                    description:      prod.description || '',
+                    _productId:       prod.id,
+                };
+                menuMap[prod.id] = item;
+                byCat[catName].push(item);
+            }
+
+            // Smart sections — only for single-variant entry (use first variant for multi-variant products)
+            SMART_SECTIONS.forEach(s => {
+                if (prod.flags && prod.flags[s.key]) {
+                    const representative = byCat[catName][byCat[catName].length - 1];
+                    if (representative && !smartMap[s.key].find(x => x._productId === prod.id)) {
+                        smartMap[s.key].push(representative);
+                    }
+                }
+            });
+        });
+
+        // Ordered categories from categories collection
+        const orderedCatNames = catOrder
+            .map(c => c.name)
+            .filter(n => byCat[n]);  // only show categories that have visible items
+        // Add any categories that exist in byCat but not in catOrder
+        Object.keys(byCat).forEach(n => { if (!orderedCatNames.includes(n)) orderedCatNames.push(n); });
+
+        allCategories = orderedCatNames;
+        _lastByCat    = byCat;
+
+        renderCatTabsFromProducts(allCategories, catOrder);
+        renderMenuFromProducts(byCat, orderedCatNames, smartMap);
+        restoreCartCounts();
+    }
+
+    // Listen to categories
+    onSnapshot(collection(db, 'categories'), (snap) => {
+        catOrder = snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0) || (a.name || '').localeCompare(b.name || ''));
+        categoriesLoaded = true;
+        rebuildMenu();
+    }, () => { categoriesLoaded = true; rebuildMenu(); });
+
+    // Listen to products
+    onSnapshot(collection(db, 'products'), (snap) => {
+        rawProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        productsLoaded = true;
+        rebuildMenu();
+    }, () => {
+        document.getElementById('menuContainer').innerHTML =
+            `<div class="empty-menu">⚠️ Menu load failed.<br>Please check your connection.</div>`;
+    });
+
+    // Also listen to pizza sizes (backward compat — pizza category inStock may use this)
+    onSnapshot(doc(db, 'settings', 'pizza_sizes'), (snap) => {
+        pizzaSizes = snap.exists()
+            ? { regular: true, medium: true, large: true, ...snap.data() }
+            : { regular: true, medium: true, large: true };
+        if (Object.keys(_lastByCat).length > 0) {
+            renderMenuFromProducts(_lastByCat, allCategories, {});
+            restoreCartCounts();
+        }
+    });
+}
+
+// Render category tabs with optional category images
+function renderCatTabsFromProducts(cats, catOrder) {
+    const tabs = document.getElementById('catTabs');
+    const activeCat = tabs.querySelector('.cat-tab.active')?.dataset.cat || '';
+    tabs.innerHTML = '';
+    cats.forEach((cat, i) => {
+        const catMeta = catOrder.find(c => c.name === cat);
+        const btn = document.createElement('button');
+        const isActive = activeCat ? cat === activeCat : i === 0;
+        btn.className = 'cat-tab' + (isActive ? ' active' : '');
+        btn.dataset.cat = cat;
+        btn.textContent = cat;
+        if (catMeta?.imageUrl) {
+            btn.style.setProperty('--cat-img', `url(${catMeta.imageUrl})`);
+        }
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.cat-tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            const section = document.getElementById('sec-' + CSS.escape(cat));
+            if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+        tabs.appendChild(btn);
+    });
+}
+
+// Render menu from products data
+function renderMenuFromProducts(byCat, orderedCats, smartMap) {
+    const container = document.getElementById('menuContainer');
+    const scrollY   = window.scrollY;
+    container.innerHTML = '';
+
+    // Smart sections (pinned at top)
+    if (smartMap) {
+        SMART_SECTIONS.forEach(s => {
+            const items = smartMap[s.key];
+            if (!items || items.length === 0) return;
+            const section = document.createElement('div');
+            section.className = 'menu-section menu-smart-section';
+            section.id = 'sec-smart-' + s.key;
+            section.innerHTML = `<div class="section-title">${s.label}</div><div class="items-list" id="list-smart-${s.key}"></div>`;
+            container.appendChild(section);
+            const list = section.querySelector('.items-list');
+            items.forEach(item => list.appendChild(buildItemCard(item)));
+        });
+    }
+
+    // Regular category sections (in display order)
+    orderedCats.forEach(cat => {
+        const items = byCat[cat];
+        if (!items || items.length === 0) return;
+        const section = document.createElement('div');
+        section.className = 'menu-section';
+        section.id = 'sec-' + cat;
+        section.innerHTML = `<div class="section-title">${cat}</div><div class="items-list" id="list-${cat}"></div>`;
+        container.appendChild(section);
+        const list = section.querySelector('.items-list');
+        items.forEach(item => list.appendChild(buildItemCard(item)));
+    });
+
+    window.scrollTo({ top: scrollY, behavior: 'instant' });
+}
+
+// ── Legacy architecture: read from menu_items ─────────────────────────────────
 function loadMenu() {
     const q = query(collection(db, 'menu_items'), orderBy('category'));
     onSnapshot(q, (snap) => {
@@ -1586,6 +1794,20 @@ function loadMenu() {
             restoreCartCounts();
         }
     });
+}
+
+// ── Auto-select architecture based on whether products collection has data ────
+async function initMenu() {
+    // getDocs and collection are already imported at the top of this script
+    try {
+        const snap = await getDocs(collection(db, 'products'));
+        if (!snap.empty) {
+            loadMenuFromProducts();
+            return;
+        }
+    } catch (_) {}
+    // Fall back to legacy menu_items
+    loadMenu();
 }
 
 function renderCatTabs(cats) {
@@ -1691,7 +1913,9 @@ function updateCartBar() {
     }
 }
 
-loadMenu();
+// AI UPDATE [2026-08-03]: initMenu() tries products collection first (new
+// hierarchical architecture), falling back to menu_items if products is empty.
+initMenu();
 </script>
 </body>
 </html>
