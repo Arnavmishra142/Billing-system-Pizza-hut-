@@ -546,7 +546,14 @@ document.getElementById('itemCategoryInput').addEventListener('change', (e) => {
     if (show) document.getElementById('newCategoryInput').focus();
 });
 
-document.getElementById('addNewItemBtn').addEventListener('click', () => {
+// AI FIX: addNewItemBtn was removed from admin/index.html when admin-menu.js took over
+// the Menu section (AI UPDATE 2026-08-03). The bare getElementById call was crashing
+// admin.js at module load time (TypeError: Cannot read properties of null), halting
+// execution before window.loadAdminExpenses (line ~970) was ever defined — which caused
+// the Expenses tab to show ₹0 with no history. Null-guarded so the legacy modal handler
+// is only wired when the element exists (e.g. if the old menu UI is ever restored).
+const _legacyAddItemBtn = document.getElementById('addNewItemBtn');
+if (_legacyAddItemBtn) _legacyAddItemBtn.addEventListener('click', () => {
     currentEditId            = null;
     _currentImageUrl         = null;
     _currentPublicId         = null;

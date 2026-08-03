@@ -31,6 +31,9 @@ let _currentCatName    = '';
 let _unsubCategories   = null;
 let _unsubProducts     = null;
 let _initted           = false;
+// AI FIX: tracks whether the one-time auto-migration from menu_items has been
+// attempted so the check never runs more than once per initAdminMenu() lifecycle.
+let _migrationAttempted = false;
 
 // Product modal state
 let _editingProductId  = null;   // null = new product
@@ -551,11 +554,12 @@ export function initAdminMenu() {
 export function destroyAdminMenu() {
     if (_unsubCategories) { _unsubCategories(); _unsubCategories = null; }
     if (_unsubProducts)   { _unsubProducts();   _unsubProducts   = null; }
-    _initted        = false;
-    _categories     = [];
-    _products       = [];
-    _currentCatId   = null;
-    _currentCatName = '';
+    _initted             = false;
+    _migrationAttempted  = false;
+    _categories          = [];
+    _products            = [];
+    _currentCatId        = null;
+    _currentCatName      = '';
 }
 
 // ─── Section scaffold ─────────────────────────────────────────────────────────
@@ -590,14 +594,38 @@ function _renderMenuSection() {
 }
 
 // ─── Category listener ────────────────────────────────────────────────────────
+// AI FIX [2026-08-03]: When the first snapshot returns 0 categories, auto-check
+// whether menu_items still holds the data (i.e. the code architecture changed but
+// the one-time data migration was never run). If menu_items is non-empty, silently
+// run the migration so the categories view populates without user intervention.
+// The onSnapshot will re-fire automatically after categories are written, showing
+// the migrated data. _migrationAttempted prevents this from looping.
 function _startCategoryListener() {
     if (_unsubCategories) { _unsubCategories(); _unsubCategories = null; }
     _unsubCategories = onSnapshot(
         collection(db, 'categories'),
-        (snap) => {
+        async (snap) => {
             _categories = snap.docs
                 .map(d => ({ id: d.id, ...d.data() }))
                 .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0) || (a.name || '').localeCompare(b.name || ''));
+
+            // Auto-migrate from menu_items if categories is empty on first load
+            if (_categories.length === 0 && !_migrationAttempted && _initted) {
+                _migrationAttempted = true;
+                try {
+                    const miSnap = await getDocs(collection(db, 'menu_items'));
+                    if (!miSnap.empty) {
+                        console.log('[admin-menu] categories empty — auto-migrating from menu_items…');
+                        _showToast('Migrating menu data… please wait', 'info');
+                        await _runSilentMigration(miSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+                        // onSnapshot fires again automatically once categories are written
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('[admin-menu] auto-migration check failed:', e);
+                }
+            }
+
             if (!_currentCatId) _renderCategoriesView();
         },
         (err) => {
@@ -606,6 +634,113 @@ function _startCategoryListener() {
             setTimeout(() => { if (_initted && !_unsubCategories) _startCategoryListener(); }, 5000);
         }
     );
+}
+
+// ─── Silent migration (auto-triggered) ───────────────────────────────────────
+// Mirrors _runMigration() but without DOM dependencies — uses console + toast
+// instead of the on-screen log panel. Called automatically when categories is
+// found empty but menu_items has data (post-architecture-change first load).
+async function _runSilentMigration(items) {
+    const user = await _waitForAuth();
+    if (!user) {
+        console.warn('[admin-menu] auto-migration: auth not available, skipping.');
+        _showToast('Auto-migration skipped — please log in and refresh.', 'warning');
+        return;
+    }
+
+    const VARIANT_RE = /\s*\(\s*(regular|medium|large|half|full|small|standard|family)\s*\)\s*$/i;
+    const getBase    = (name) => (name || '').replace(VARIANT_RE, '').trim();
+    const getVariant = (name) => { const m = (name || '').match(VARIANT_RE); return m ? m[1] : null; };
+
+    // Group by category → base product name
+    const catMap = {};
+    items.forEach(item => {
+        const cat  = item.category || 'Other';
+        const base = getBase(item.name);
+        if (!catMap[cat]) catMap[cat] = {};
+        if (!catMap[cat][base]) catMap[cat][base] = [];
+        catMap[cat][base].push(item);
+    });
+
+    // Step 1: Create categories (skip if already exists)
+    const catIdMap  = {};
+    const catNames  = Object.keys(catMap).sort();
+    const existSnap = await getDocs(collection(db, 'categories'));
+    existSnap.docs.forEach(d => { catIdMap[d.data().name] = d.id; });
+
+    for (let i = 0; i < catNames.length; i++) {
+        const catName = catNames[i];
+        if (catIdMap[catName]) continue; // already exists
+        try {
+            const ref = await addDoc(collection(db, 'categories'), {
+                name: catName, imageUrl: null, active: true,
+                displayOrder: i, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+            });
+            catIdMap[catName] = ref.id;
+            console.log(`[admin-menu] auto-migration: created category "${catName}"`);
+        } catch (e) {
+            console.error(`[admin-menu] auto-migration: category "${catName}" failed:`, e);
+        }
+    }
+
+    // Step 2: Create products + variants (skip products whose base name already exists in that category)
+    let prodCount = 0, varCount = 0;
+    for (const [catName, products] of Object.entries(catMap)) {
+        const catId = catIdMap[catName];
+        if (!catId) continue;
+        let prodIdx = 0;
+        for (const [baseName, variants] of Object.entries(products)) {
+            try {
+                const first      = variants[0];
+                const hasVariants = variants.length > 1 || !!getVariant(first.name);
+                const productData = {
+                    categoryId: catId, categoryName: catName,
+                    name: baseName,
+                    description: first.description || '',
+                    imageUrl: first.imageUrl || first.image || null,
+                    active: first.active !== false,
+                    inStock: first.inStock !== false,
+                    hasVariants: !!hasVariants,
+                    price: hasVariants ? 0 : (Number(first.price) || 0),
+                    flags: { recommended: false, mostOrdered: false, chefPick: false, casualSnack: false, newArrival: false },
+                    extras: (first.extraOptions || []).map(eo => ({ name: eo.name || '', price: eo.price || 0, active: true })),
+                    displayOrder: prodIdx++,
+                    variantsList: [],
+                    createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+                };
+                const prodRef = await addDoc(collection(db, 'products'), productData);
+                prodCount++;
+
+                if (hasVariants) {
+                    const variantsList = [];
+                    const vBatch = writeBatch(db);
+                    variants.forEach((item, vi) => {
+                        const varName  = getVariant(item.name) || 'Standard';
+                        const varLabel = varName.charAt(0).toUpperCase() + varName.slice(1).toLowerCase();
+                        const varRef   = doc(db, 'products', prodRef.id, 'variants', item.id);
+                        const varData  = {
+                            name: varLabel, price: Number(item.price) || 0,
+                            imageUrl: item.imageUrl || item.image || null,
+                            active: item.active !== false, inStock: item.inStock !== false,
+                            displayOrder: vi, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+                        };
+                        vBatch.set(varRef, varData);
+                        variantsList.push({ id: item.id, name: varLabel, price: Number(item.price) || 0,
+                            imageUrl: varData.imageUrl, active: varData.active, inStock: varData.inStock, displayOrder: vi });
+                        varCount++;
+                    });
+                    await vBatch.commit();
+                    await updateDoc(prodRef, { variantsList });
+                }
+            } catch (e) {
+                console.error(`[admin-menu] auto-migration: product "${baseName}" failed:`, e);
+            }
+        }
+    }
+
+    console.log(`[admin-menu] auto-migration complete: ${prodCount} products, ${varCount} variants.`);
+    _showToast(`Migration complete — ${prodCount} products loaded ✓`, 'success');
+    // The categories onSnapshot listener fires automatically now
 }
 
 // ─── Categories view ──────────────────────────────────────────────────────────
