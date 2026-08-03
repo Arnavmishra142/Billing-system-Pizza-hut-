@@ -913,10 +913,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!currentCart || currentCart.length === 0) return;
         
         const itemsToPrint = isFullKot 
-            ? currentCart.map(item => ({id: item.id, name: item.name, printQty: item.qty}))
+            ? currentCart.map(item => ({
+                id:             item.id,
+                name:           item.name,
+                printQty:       item.qty,
+                extras:         Array.isArray(item.extras) ? item.extras : [],
+                specialRequest: item.specialRequest || '',
+              }))
             : currentCart
                 .filter(item => item.qty > (item.printedQty || 0))
-                .map(item => ({id: item.id, name: item.name, printQty: item.qty - (item.printedQty || 0)}));
+                .map(item => ({
+                    id:             item.id,
+                    name:           item.name,
+                    printQty:       item.qty - (item.printedQty || 0),
+                    extras:         Array.isArray(item.extras) ? item.extras : [],
+                    specialRequest: item.specialRequest || '',
+                }));
 
         if (itemsToPrint.length === 0) {
             // AI UPDATE [2026-07-30]: Replaced alert() with custom dialog.
@@ -1049,18 +1061,33 @@ document.addEventListener('DOMContentLoaded', () => {
         kotText += `Time: ${timeStr}\n`;
         kotText += `Table: ${getDisplayTitle()}\n\n`;
 
-        // Dine-In items (unchanged behaviour)
+        // Helper: renders one KOT item with its extras and special request
+        const _renderKOTItem = (item) => {
+            let s = `${item.name} (${item.printQty})\n`;
+            if (Array.isArray(item.extras) && item.extras.length > 0) {
+                for (const extra of item.extras) {
+                    s += `+ ${extra.name}\n`;
+                }
+            }
+            if (item.specialRequest) {
+                s += `\nSpecial Request:\n${item.specialRequest}\n`;
+            }
+            s += `\n`;  // blank line between items
+            return s;
+        };
+
+        // Dine-In items
         for (const item of _dineInToPrint) {
-            kotText += `${item.name} (${item.printQty})\n`;
+            kotText += _renderKOTItem(item);
         }
 
         // Parcel items — printed under a clear separator so kitchen knows to pack them
         if (_parcelToPrint.length > 0) {
-            kotText += `\n----------------------\n`;
+            kotText += `----------------------\n`;
             kotText += `[PARCEL]\n`;
             kotText += `----------------------\n`;
             for (const item of _parcelToPrint) {
-                kotText += `${item.name} (${item.printQty})\n`;
+                kotText += _renderKOTItem(item);
             }
         }
 
@@ -1127,6 +1154,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentCart.forEach(item => {
                     legacyTotalQty += item.qty;
                     billText += formatBillRow(item.name, item.qty, item.price, item.price * item.qty);
+                    // Render extras dynamically — specialRequest intentionally omitted from bill
+                    if (Array.isArray(item.extras) && item.extras.length > 0) {
+                        item.extras.forEach(e => { billText += `  + ${e.name}\n`; });
+                    }
                 });
                 billText += "\n";
                 billText += `Total Items: ${currentCart.length}\n`;

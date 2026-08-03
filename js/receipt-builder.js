@@ -136,13 +136,21 @@ export function buildBillReceipt(cart, title, billNo, dateStr) {
             .bold(false)
             .line(DIVIDER);
 
-        // ── 5. Item rows (library handles long-name wrapping) ─────────────────
-        const rows = cart.map(item => [
-            item.name,
-            String(item.qty),
-            `Rs${item.price * item.qty}`,
-        ]);
-        enc = enc.table(TABLE_COLS, rows);
+        // ── 5. Item rows with extras (rendered per-item so extras can follow) ───
+        // extras are rendered dynamically — never hardcoded by name.
+        // specialRequest is intentionally omitted from the customer bill.
+        for (const item of cart) {
+            enc = enc.table(TABLE_COLS, [[
+                item.name,
+                String(item.qty),
+                `Rs${item.price * item.qty}`,
+            ]]);
+            if (Array.isArray(item.extras) && item.extras.length > 0) {
+                for (const extra of item.extras) {
+                    enc = enc.line(`  + ${extra.name}`);
+                }
+            }
+        }
 
         // ── 6. Totals ──────────────────────────────────────────────────────────
         const total    = cart.reduce((sum, i) => sum + i.price * i.qty, 0);

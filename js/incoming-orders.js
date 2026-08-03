@@ -644,8 +644,19 @@ function renderDrawer(orders) {
             ? new Date(createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             : '';
 
-        // Fix 1: use item.quantity
-        const itemsText = items.map(i => `${i.name} ×${i.quantity}`).join(', ') || 'No item details';
+        // Build a richer items summary: name × qty, then extras/special request on sub-lines
+        const itemsText = items.length > 0
+            ? items.map(i => {
+                let line = `${i.name} ×${i.quantity}`;
+                if (Array.isArray(i.extras) && i.extras.length > 0) {
+                    line += ' [' + i.extras.map(e => e.name).join(', ') + ']';
+                }
+                if (i.specialRequest) {
+                    line += ` 📝${i.specialRequest}`;
+                }
+                return line;
+              }).join('<br>&#8203;')
+            : 'No item details';
 
         // Fix 3: ordinal order count
         const count   = await getCustomerOrderCount(customer.phone);
@@ -721,13 +732,19 @@ function renderDrawer(orders) {
                 const found = existing.find(i => i.id === resolvedId);
                 if (found) {
                     found.qty += incomingQty;
+                    // Update extras/specialRequest in case this is a re-merge
+                    if (newItem.extras        !== undefined) found.extras        = newItem.extras;
+                    if (newItem.specialRequest !== undefined) found.specialRequest = newItem.specialRequest;
                 } else {
                     existing.push({
-                        id:         resolvedId,
-                        name:       resolvedName,
-                        price:      resolvedPrice,
-                        qty:        incomingQty,
-                        printedQty: 0
+                        id:             resolvedId,
+                        name:           resolvedName,
+                        price:          resolvedPrice,
+                        qty:            incomingQty,
+                        printedQty:     0,
+                        // Preserve variant/extras/specialRequest from Customer Panel payload
+                        extras:         Array.isArray(newItem.extras) ? newItem.extras : [],
+                        specialRequest: newItem.specialRequest || '',
                     });
                 }
 

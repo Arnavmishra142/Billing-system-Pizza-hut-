@@ -155,6 +155,19 @@
         }
         .item-row:last-child { border-bottom: none; }
         .item-name { font-size: 0.93rem; font-weight: 600; }
+        .item-extra {
+            font-size: 0.8rem;
+            color: var(--accent, #f59e0b);
+            padding: 1px 0 1px 8px;
+        }
+        .item-special-request {
+            font-size: 0.78rem;
+            color: var(--muted);
+            font-style: italic;
+            padding: 2px 0 4px 8px;
+            border-left: 2px solid var(--border);
+            margin-left: 4px;
+        }
         .item-qty {
             font-size: 0.85rem;
             color: var(--muted);
@@ -353,6 +366,10 @@
             let q = String(item.qty).padStart(2, " ") + "x";
             let a = String(item.price * item.qty).padStart(6, " ");
             billText += `${n}    ${q}   ${a}\n`;
+            // Render extras dynamically — specialRequest intentionally omitted from bill
+            if (Array.isArray(item.extras) && item.extras.length > 0) {
+                item.extras.forEach(e => { billText += `  + ${e.name}\n`; });
+            }
         });
 
         billText += "--------------------------------\n";
@@ -413,6 +430,12 @@
                         <span class="item-qty">${item.qty}x</span>
                         <span class="item-amt">₹${item.price * item.qty}</span>
                     </div>
+                    ${Array.isArray(item.extras) && item.extras.length > 0
+                        ? item.extras.map(e => `<div class="item-extra">+ ${e.name}</div>`).join('')
+                        : ''}
+                    ${item.specialRequest
+                        ? `<div class="item-special-request">📝 ${item.specialRequest}</div>`
+                        : ''}
                 `).join('')}
             </div>
         ` : `
