@@ -450,6 +450,45 @@ function _getPizzaSize(item) {
         .light-mode .mm-slider { background: rgba(0,0,0,0.15); }
         .light-mode .mm-slider::before { background: rgba(0,0,0,0.4); }
         .light-mode .mm-toggle input:checked + .mm-slider::before { background: #fff; }
+
+        /* ── Product group (multi-size products in new architecture) ── */
+        .mm-product-group {
+            background: rgba(99,102,241,0.04);
+            border: 1px solid rgba(99,102,241,0.15);
+            border-radius: 10px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .mm-product-group-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 9px 14px;
+            background: rgba(99,102,241,0.06);
+            border-bottom: 1px solid rgba(99,102,241,0.12);
+        }
+        .mm-product-group-name {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: #a5b4fc;
+        }
+        /* Variant rows inside a product group — slightly indented */
+        .mm-variant-row {
+            border-radius: 0;
+            margin-bottom: 0;
+            border: none;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            background: transparent;
+            padding-left: 20px;
+        }
+        .mm-variant-row:last-child { border-bottom: none; }
+        .light-mode .mm-product-group {
+            background: rgba(99,102,241,0.03);
+            border-color: rgba(99,102,241,0.18);
+        }
+        .light-mode .mm-product-group-header { background: rgba(99,102,241,0.05); border-color: rgba(99,102,241,0.14); }
+        .light-mode .mm-product-group-name { color: #4f46e5; }
+        .light-mode .mm-variant-row { border-bottom-color: rgba(0,0,0,0.05); }
     `;
     document.head.appendChild(s);
 })();
@@ -654,14 +693,15 @@ function _startProductsListener() {
                 if (prod.hasVariants && prod.variantsList && prod.variantsList.length > 0) {
                     prod.variantsList.forEach(v => {
                         flat.push({
-                            id:          v.id,
-                            name:        `${prod.name} (${v.name})`,
-                            price:       v.price || 0,
-                            category:    prod.categoryName || prod.category || 'Other',
-                            inStock:     v.inStock !== false && prod.inStock !== false,
-                            imageUrl:    v.imageUrl || prod.imageUrl || null,
-                            _type:       'variant',
-                            _productId:  prod.id,
+                            id:           v.id,
+                            name:         `${prod.name} (${v.name})`,
+                            price:        v.price || 0,
+                            category:     prod.categoryName || prod.category || 'Other',
+                            inStock:      v.inStock !== false && prod.inStock !== false,
+                            imageUrl:     v.imageUrl || prod.imageUrl || null,
+                            _type:        'variant',
+                            _productId:   prod.id,
+                            _productName: prod.name,
                             _variantName: v.name,
                         });
                     });
@@ -1025,21 +1065,77 @@ function _buildItemsHtml(items) {
             ? `${catItems.length} items · <span style="color:#ef4444;">${offCount} off</span>`
             : `${catItems.length} items`;
 
-        const rows = catItems.map(item => {
-            const isOn     = item.inStock !== false;
-            const isSaving = _toggling.has(item.id);
+        // ── Sub-group variant items by _productId (new products architecture) ──
+        // Items with _type==='variant' and _productId are shown as ONE expandable
+        // product entry with variant sub-rows (e.g. Frooti → 125ml / 250ml / 600ml).
+        // Items without _productId (legacy menu_items or single-product entries)
+        // are shown as individual toggle rows.
+        const processedProductIds = new Set();
+        const renderEntries = [];
+
+        catItems.forEach(item => {
+            if (item._type === 'variant' && item._productId) {
+                if (processedProductIds.has(item._productId)) return;
+                processedProductIds.add(item._productId);
+                const variants = catItems.filter(i => i._productId === item._productId);
+                renderEntries.push({ _isGroup: true, productName: item._productName || item.name.replace(/\s*\([^)]*\)\s*$/, '').trim(), variants });
+            } else {
+                renderEntries.push(item);
+            }
+        });
+
+        const rows = renderEntries.map(entry => {
+            if (entry._isGroup) {
+                // ── Product group with variant sub-rows ──
+                const offV    = entry.variants.filter(v => v.inStock === false).length;
+                const groupStats = offV > 0
+                    ? `${entry.variants.length} sizes · <span style="color:#ef4444;">${offV} off</span>`
+                    : `${entry.variants.length} sizes`;
+                const variantRows = entry.variants.map(v => {
+                    const isOn     = v.inStock !== false;
+                    const isSaving = _toggling.has(v.id);
+                    return `
+                        <div class="mm-item mm-variant-row ${isOn ? '' : 'mm-off'}">
+                            <div class="mm-item-info">
+                                <div class="mm-item-name">
+                                    ${_esc(v._variantName || v.name)}
+                                    ${!isOn ? '<span class="mm-oos-badge">OFF</span>' : ''}
+                                </div>
+                                <div class="mm-item-meta mm-item-price">₹${v.price || 0}</div>
+                            </div>
+                            <label class="mm-toggle ${isSaving ? 'saving' : ''}"
+                                   title="${isOn ? 'Turn off (out of stock)' : 'Turn on (available)'}">
+                                <input type="checkbox" ${isOn ? 'checked' : ''} data-id="${_esc(v.id)}" ${isSaving ? 'disabled' : ''}>
+                                <span class="mm-slider"></span>
+                            </label>
+                        </div>
+                    `;
+                }).join('');
+                return `
+                    <div class="mm-product-group">
+                        <div class="mm-product-group-header">
+                            <span class="mm-product-group-name">${_esc(entry.productName)}</span>
+                            <span class="mm-cat-stats">${groupStats}</span>
+                        </div>
+                        ${variantRows}
+                    </div>
+                `;
+            }
+            // ── Single item row (legacy or no-variant product) ──
+            const isOn     = entry.inStock !== false;
+            const isSaving = _toggling.has(entry.id);
             return `
                 <div class="mm-item ${isOn ? '' : 'mm-off'}">
                     <div class="mm-item-info">
                         <div class="mm-item-name">
-                            ${_esc(item.name)}
+                            ${_esc(entry.name)}
                             ${!isOn ? '<span class="mm-oos-badge">OFF</span>' : ''}
                         </div>
-                        <div class="mm-item-meta mm-item-price">₹${item.price || 0}</div>
+                        <div class="mm-item-meta mm-item-price">₹${entry.price || 0}</div>
                     </div>
                     <label class="mm-toggle ${isSaving ? 'saving' : ''}"
                            title="${isOn ? 'Turn off (out of stock)' : 'Turn on (available)'}">
-                        <input type="checkbox" ${isOn ? 'checked' : ''} data-id="${item.id}" ${isSaving ? 'disabled' : ''}>
+                        <input type="checkbox" ${isOn ? 'checked' : ''} data-id="${_esc(entry.id)}" ${isSaving ? 'disabled' : ''}>
                         <span class="mm-slider"></span>
                     </label>
                 </div>

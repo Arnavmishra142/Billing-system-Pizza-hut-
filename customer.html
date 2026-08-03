@@ -137,6 +137,59 @@
         .item-card.oos { opacity: 0.55; }
         .item-card.oos .qty-ctrl { display: none; }
         .item-card.oos .qty-btn  { pointer-events: none; }
+
+        /* ── VARIANT GROUP CARD (multi-size products) ── */
+        .variant-group-card {
+            background: #13161f;
+            border: 1px solid #1f2937;
+            border-radius: 12px;
+            overflow: hidden;
+            transition: border-color 0.2s;
+        }
+        .variant-group-card.has-cart-item { border-color: #f97316; }
+        .vg-heading {
+            padding: 10px 14px 8px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #e2e8f0;
+            border-bottom: 1px solid #1f2937;
+        }
+        .vg-body {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: stretch;
+        }
+        .vg-side {
+            flex: 1;
+            min-width: 80px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 8px;
+            gap: 6px;
+            border-right: 1px solid #1f2937;
+            transition: background 0.15s;
+        }
+        .vg-side:last-child { border-right: none; }
+        .vg-side.in-cart    { background: rgba(249,115,22,0.08); }
+        .vg-label {
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            text-align: center;
+        }
+        .vg-price {
+            font-size: 0.88rem;
+            color: #10b981;
+            font-weight: 700;
+        }
+        .vg-qty-ctrl { display: flex; align-items: center; gap: 4px; }
+        .vg-qty-ctrl .qty-btn  { width: 26px; height: 26px; font-size: 1rem; }
+        .vg-qty-ctrl .qty-num  { font-size: 0.88rem; min-width: 16px; }
+
         .oos-label {
             font-size: 0.72rem; font-weight: 700;
             color: #ef4444; background: rgba(239,68,68,0.12);
@@ -1606,25 +1659,43 @@ function loadMenuFromProducts() {
             if (!byCat[catName]) byCat[catName] = [];
 
             if (prod.hasVariants && prod.variantsList && prod.variantsList.length > 0) {
+                // Collect active variants
+                const activeVariants = [];
                 prod.variantsList.forEach(v => {
                     if (v.active === false || v.inStock === false) return;
                     const item = {
-                        id:               v.id,
-                        name:             `${prod.name} (${v.name})`,
-                        price:            v.price || 0,
-                        category:         catName,
-                        categoryId:       prod.categoryId,
-                        inStock:          true,
-                        imageUrl:         v.imageUrl || prod.imageUrl || _catImageMap[prod.categoryId] || null,
+                        id:           v.id,
+                        name:         `${prod.name} (${v.name})`,
+                        variantLabel: v.name,
+                        price:        v.price || 0,
+                        category:     catName,
+                        categoryId:   prod.categoryId,
+                        inStock:      true,
+                        imageUrl:     v.imageUrl || prod.imageUrl || _catImageMap[prod.categoryId] || null,
                         _productImageUrl: prod.imageUrl || null,
                         _catImageUrl:     _catImageMap[prod.categoryId] || null,
-                        description:      prod.description || '',
-                        _productId:       prod.id,
-                        _variantName:     v.name,
+                        description:  prod.description || '',
+                        _productId:   prod.id,
+                        _variantName: v.name,
                     };
-                    menuMap[v.id] = item;
-                    byCat[catName].push(item);
+                    menuMap[v.id] = item;   // always register for cart lookups
+                    activeVariants.push(item);
                 });
+                if (activeVariants.length === 0) return;   // all out of stock — skip product
+                if (activeVariants.length === 1) {
+                    // Only one size available — show as a plain item
+                    byCat[catName].push(activeVariants[0]);
+                } else {
+                    // Multiple sizes — push ONE grouped entry (rendered as variant-group-card)
+                    byCat[catName].push({
+                        _isProductGroup: true,
+                        _productId:      prod.id,
+                        name:            prod.name,
+                        imageUrl:        prod.imageUrl || _catImageMap[prod.categoryId] || null,
+                        variants:        activeVariants,
+                        category:        catName,
+                    });
+                }
             } else {
                 const item = {
                     id:               prod.id,
@@ -1846,6 +1917,11 @@ function renderMenu(byCat) {
 }
 
 function buildItemCard(item) {
+    // Multi-size product group → render as variant-group-card
+    if (item._isProductGroup) {
+        return buildVariantGroupCard(item);
+    }
+
     let isAvailable;
     if (isPizzaVariant(item)) {
         const size = getPizzaSize(item);
@@ -1873,6 +1949,42 @@ function buildItemCard(item) {
         card.querySelector('.qty-plus').addEventListener('click',  () => changeQty(item.id,  1));
         card.querySelector('.qty-minus').addEventListener('click', () => changeQty(item.id, -1));
     }
+    return card;
+}
+
+// ── Variant Group Card ────────────────────────────────────────────────────────
+// Renders a single card for a multi-size product (Frooti, Cold Drinks, etc.)
+// showing all size options with their own qty +/- controls.
+// Each variant's id is still stored individually in cart{} and menuMap{}.
+function buildVariantGroupCard(group) {
+    const card = document.createElement('div');
+    card.className = 'variant-group-card';
+    card.dataset.productId = group._productId;
+
+    const sidesHtml = group.variants.map(v => `
+        <div class="vg-side" id="card-${v.id}" data-id="${v.id}">
+            <div class="vg-label">${esc(v.variantLabel || v._variantName || '')}</div>
+            <div class="vg-price">₹${v.price}</div>
+            <div class="qty-ctrl vg-qty-ctrl">
+                <button class="qty-btn qty-minus" data-id="${v.id}">−</button>
+                <span class="qty-num" id="qty-${v.id}">0</span>
+                <button class="qty-btn qty-plus" data-id="${v.id}">+</button>
+            </div>
+        </div>
+    `).join('');
+
+    card.innerHTML = `
+        <div class="vg-heading">${esc(group.name)}</div>
+        <div class="vg-body">${sidesHtml}</div>
+    `;
+
+    card.querySelectorAll('.qty-plus').forEach(btn => {
+        btn.addEventListener('click', () => changeQty(btn.dataset.id, 1));
+    });
+    card.querySelectorAll('.qty-minus').forEach(btn => {
+        btn.addEventListener('click', () => changeQty(btn.dataset.id, -1));
+    });
+
     return card;
 }
 

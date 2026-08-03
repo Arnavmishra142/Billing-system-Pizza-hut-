@@ -563,6 +563,98 @@ body {
     color: #10b981;
 }
 
+/* ==========================================
+   MULTI-SIZE CARD (any number of size variants)
+   Used for Cold Drinks, Coffee, Shake, Juice,
+   Water, Momo, Fried Rice, Noodles, and any
+   multi-size product from the new products
+   collection architecture.
+   ========================================== */
+.multi-size-card {
+    grid-column: 1 / -1;
+    background: #171921;
+    border: 1px solid #262a35;
+    border-radius: 12px;
+    overflow: visible;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    transition: box-shadow 0.2s, border-color 0.15s;
+}
+.multi-size-card:hover {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    border-color: #3a3f4d;
+}
+.multi-size-heading {
+    text-align: center;
+    padding: 10px 12px 8px;
+    font-weight: 900;
+    font-size: 1.05rem;
+    color: #f1f5f9;
+    border-bottom: 1px solid #262a35;
+    letter-spacing: 0.2px;
+}
+.multi-size-body {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    min-height: 80px;
+}
+.ms-side {
+    flex: 1;
+    min-width: 70px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 14px 8px 18px;
+    cursor: pointer;
+    gap: 5px;
+    transition: background 0.15s;
+    overflow: visible;
+}
+.ms-side:hover  { background: rgba(255,255,255,0.04); }
+.ms-side:active { background: rgba(99,102,241,0.08); }
+.ms-divider {
+    width: 1px;
+    background: #262a35;
+    flex-shrink: 0;
+    align-self: stretch;
+    margin: 8px 0;
+}
+.ms-label {
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    text-align: center;
+}
+.ms-price {
+    color: #34d399;
+    font-weight: 800;
+    font-size: 1.3rem;
+}
+/* Qty badge — top-right corner of each size section */
+.ms-side .ms-qty {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    display: none;
+}
+/* Remove badge — top-left corner of each size section */
+.ms-side .ms-remove {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    display: none;
+}
+.ms-side.in-cart {
+    background: rgba(16,185,129,0.07);
+}
+.ms-side.in-cart .ms-price {
+    color: #10b981;
+}
+
 .item-card { 
     background: #171921; 
     border: 1px solid #262a35; 

@@ -53,15 +53,16 @@ async function processProductsToItems(productsSnap) {
             prod.variantsList.forEach(v => {
                 if (v.active === false || v.inStock === false) return;
                 items.push({
-                    id:          v.id,
-                    name:        `${prod.name} (${v.name})`,
-                    price:       v.price || 0,
-                    category:    catName,
-                    categoryId:  prod.categoryId,
-                    inStock:     true,
-                    imageUrl:    v.imageUrl || prod.imageUrl || catImageMap[prod.categoryId] || null,
-                    description: prod.description || '',
-                    _productId:  prod.id,
+                    id:           v.id,
+                    name:         `${prod.name} (${v.name})`,
+                    price:        v.price || 0,
+                    category:     catName,
+                    categoryId:   prod.categoryId,
+                    inStock:      true,
+                    imageUrl:     v.imageUrl || prod.imageUrl || catImageMap[prod.categoryId] || null,
+                    description:  prod.description || '',
+                    _productId:   prod.id,
+                    _productName: prod.name,
                     _variantName: v.name,
                     _catDisplayOrder: catOrderMap[prod.categoryId] ?? 999,
                     _displayOrder:    prod.displayOrder ?? 999,
@@ -423,11 +424,23 @@ function syncItemBadges() {
         if (qtyBadge)    qtyBadge.style.display    = inCart ? 'flex' : 'none';
     });
 
-    // Triple card sides (Regular / Medium / Large)
+    // Triple card sides (Regular / Medium / Large) — legacy menu_items path
     document.querySelectorAll('.triple-side').forEach(side => {
         const qty = qtyMap[side.dataset.id] || 0;
         const qtyBadge    = side.querySelector('.triple-qty');
         const removeBadge = side.querySelector('.triple-remove');
+        if (qtyBadge) qtyBadge.innerText = qty;
+        const inCart = qty > 0;
+        side.classList.toggle('in-cart', inCart);
+        if (removeBadge) removeBadge.style.display = inCart ? 'flex' : 'none';
+        if (qtyBadge)    qtyBadge.style.display    = inCart ? 'flex' : 'none';
+    });
+
+    // Multi-size card sides — new products architecture
+    document.querySelectorAll('.ms-side').forEach(side => {
+        const qty = qtyMap[side.dataset.id] || 0;
+        const qtyBadge    = side.querySelector('.ms-qty');
+        const removeBadge = side.querySelector('.ms-remove');
         if (qtyBadge) qtyBadge.innerText = qty;
         const inCart = qty > 0;
         side.classList.toggle('in-cart', inCart);
@@ -468,11 +481,30 @@ function displayTripleBaseName(name) {
 // Shared renderer — used by loadItems AND search
 function renderItemsToGrid(itemsToShow, grid) {
     const processed = new Set();
+    const processedProductIds = new Set();
 
     itemsToShow.forEach(item => {
         if (processed.has(item.id)) return;
 
-        // ── Triple card: Regular / Medium / Large ──
+        // ── Multi-size product group (new products architecture) ──
+        // Any product with _productId + _variantName is from the new hierarchy.
+        // Group all its visible variants into ONE card regardless of category.
+        if (item._productId && item._variantName) {
+            const productId = item._productId;
+            if (processedProductIds.has(productId)) return;
+            const groupItems = itemsToShow.filter(
+                i => i._productId === productId && !processed.has(i.id)
+            );
+            if (groupItems.length > 0) {
+                const productName = item._productName || item.name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+                grid.appendChild(createMultiSizeCard(productName, groupItems));
+                groupItems.forEach(i => processed.add(i.id));
+                processedProductIds.add(productId);
+            }
+            return;
+        }
+
+        // ── Legacy triple card: Regular / Medium / Large (menu_items path) ──
         if (isTripleVariant(item.name)) {
             const base = getTripleBase(item.name);
             const regularItem = itemsToShow.find(i => !processed.has(i.id) && isRegularVariant(i.name) && getTripleBase(i.name) === base);
@@ -487,7 +519,7 @@ function renderItemsToGrid(itemsToShow, grid) {
             }
         }
 
-        // ── Half / Full card ──
+        // ── Legacy Half / Full card (menu_items path) ──
         if (isHalfVariant(item.name)) {
             const base = getHalfFullBase(item.name);
             const fullItem = itemsToShow.find(i =>
@@ -515,6 +547,74 @@ function renderItemsToGrid(itemsToShow, grid) {
         grid.appendChild(createItemCard(item));
         processed.add(item.id);
     });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MULTI-SIZE CARD — supports any number of size variants (2, 3, 4, 5+)
+// Used for Cold Drinks, Coffee, Shake, Juice, Water, Momo, etc.
+// and also for Pizza when loaded via the new products architecture.
+// ─────────────────────────────────────────────────────────────────
+function createMultiSizeCard(productName, variantItems) {
+    const card = document.createElement('div');
+    card.className = 'multi-size-card';
+
+    // Build each size section
+    const makeSide = (item) => {
+        const label = item._variantName || item.name.replace(/.*\((.+)\)$/, '$1').trim();
+        return `
+            <div class="ms-side" data-id="${item.id}">
+                <div class="item-remove-badge ms-remove" data-id="${item.id}" title="Remove">✕</div>
+                <div class="ms-label">${label}</div>
+                <div class="ms-price">₹${item.price}</div>
+                <div class="item-qty-badge ms-qty" data-id="${item.id}">0</div>
+            </div>
+        `;
+    };
+
+    // Insert dividers between sides
+    const sidesHtml = variantItems.map((item, i) =>
+        (i > 0 ? '<div class="ms-divider"></div>' : '') + makeSide(item)
+    ).join('');
+
+    card.innerHTML = `
+        <div class="multi-size-heading">${productName}</div>
+        <div class="multi-size-body">${sidesHtml}</div>
+    `;
+
+    // Build lookup for item data
+    const itemsById = {};
+    variantItems.forEach(i => { itemsById[i.id] = i; });
+
+    // Side click → add to cart
+    card.querySelectorAll('.ms-side').forEach(side => {
+        side.addEventListener('click', (e) => {
+            if (e.target.closest('.ms-remove') || e.target.closest('.ms-qty')) return;
+            window.dispatchEvent(new CustomEvent('add-to-cart', { detail: itemsById[side.dataset.id] }));
+        });
+    });
+
+    // Remove badges → zero out qty
+    card.querySelectorAll('.ms-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const it = itemsById[btn.dataset.id];
+            window.dispatchEvent(new CustomEvent('set-cart-quantity', {
+                detail: { id: it.id, name: it.name, price: it.price, qty: 0 }
+            }));
+        });
+    });
+
+    // Qty badges → open qty-edit modal
+    card.querySelectorAll('.ms-qty').forEach(badge => {
+        badge.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const it = itemsById[badge.dataset.id];
+            const currentQty = getCurrentCartItems().find(i => i.id === it.id)?.qty || 0;
+            openQtyEditModal(it, currentQty);
+        });
+    });
+
+    return card;
 }
 
 // Combined Regular + Medium + Large card (Pizza variants)
