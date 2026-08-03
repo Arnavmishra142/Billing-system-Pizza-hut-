@@ -604,7 +604,7 @@ function _startCategoryListener() {
     if (_unsubCategories) { _unsubCategories(); _unsubCategories = null; }
     _unsubCategories = onSnapshot(
         collection(db, 'categories'),
-        async (snap) => {
+        (snap) => {
             _categories = snap.docs
                 .map(d => ({ id: d.id, ...d.data() }))
                 .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0) || (a.name || '').localeCompare(b.name || ''));
@@ -630,6 +630,18 @@ function _startCategoryListener() {
         (err) => {
             console.error('[admin-menu] categories listener error:', err);
             _unsubCategories = null;
+            // Show an error state so the UI never hangs forever on "Loading…"
+            const el = document.getElementById('amCatList');
+            if (el) {
+                const hint = err.code === 'permission-denied'
+                    ? 'Firestore rules not deployed — run: firebase deploy --only firestore:rules'
+                    : err.message;
+                el.innerHTML = `<div class="am-empty">
+                    <div class="am-empty-icon">⚠️</div>
+                    <div style="color:#ef4444;">Failed to load categories.<br>
+                    <small style="opacity:0.7;">${hint}</small></div>
+                </div>`;
+            }
             setTimeout(() => { if (_initted && !_unsubCategories) _startCategoryListener(); }, 5000);
         }
     );
