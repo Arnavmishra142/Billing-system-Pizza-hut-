@@ -843,14 +843,21 @@ function _closeProductsView() {
 
 function _startProductsListener(catId) {
     if (_unsubProducts) { _unsubProducts(); _unsubProducts = null; }
-    const q = query(collection(db, 'products'),
-        orderBy('categoryId'), orderBy('displayOrder'));
-    _unsubProducts = onSnapshot(q,
+    // AI FIX [2026-08-03]: Previously used
+    //   query(collection(db, 'products'), orderBy('categoryId'), orderBy('displayOrder'))
+    // A two-field orderBy requires a Firestore composite index that does not exist in
+    // this project. Without it, onSnapshot fires the *error* callback every time,
+    // _products stays [], and the UI always shows "No products in this category."
+    // The fix: query the plain collection (no orderBy — no composite index needed).
+    // Client-side .filter(categoryId) + .sort(displayOrder/name) already handle
+    // both concerns correctly.
+    _unsubProducts = onSnapshot(collection(db, 'products'),
         (snap) => {
             _products = snap.docs
                 .map(d => ({ id: d.id, ...d.data() }))
                 .filter(p => p.categoryId === catId)
                 .sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0) || (a.name || '').localeCompare(b.name || ''));
+            console.log(`[admin-menu] products listener: catId=${catId}, total docs=${snap.docs.length}, matched=${_products.length}`);
             _renderProductsView();
         },
         (err) => {
@@ -1636,124 +1643,155 @@ async function _runMigration() {
     btn.disabled = true; btn.textContent = 'Running…';
     const addLog = (msg) => { log.innerHTML += msg + '<br>'; log.scrollTop = log.scrollHeight; };
 
-    const user = await _waitForAuth();
-    if (!user) { addLog('❌ Auth failed.'); btn.disabled = false; btn.textContent = '▶ Run Migration'; return; }
-
-    addLog('📖 Reading menu_items…');
-    let items = [];
+    // AI FIX [2026-08-03]: Wrap entire migration in try/finally so the button is
+    // always reset, even if an unexpected exception fires outside the inner
+    // try/catch blocks. Without this, any unhandled throw left the button
+    // permanently showing "Running…" with no way to retry.
     try {
-        const snap = await getDocs(collection(db, 'menu_items'));
-        items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        addLog(`✅ Found ${items.length} items.`);
-    } catch (e) {
-        addLog('❌ Failed to read menu_items: ' + e.message);
-        btn.disabled = false; btn.textContent = '▶ Run Migration'; return;
-    }
+        const user = await _waitForAuth();
+        if (!user) { addLog('❌ Auth failed — reload the page and try again.'); return; }
 
-    if (!items.length) { addLog('ℹ️ No items to migrate.'); btn.disabled = false; btn.textContent = '✅ Done'; return; }
-
-    // ── Step 1: Detect variants by name suffix ──
-    const VARIANT_RE = /\s*\(\s*(regular|medium|large|half|full|small|standard|family)\s*\)\s*$/i;
-    const getBase = (name) => (name || '').replace(VARIANT_RE, '').trim();
-    const getVariant = (name) => { const m = (name || '').match(VARIANT_RE); return m ? m[1] : null; };
-
-    // Group by category → base product name
-    const catMap = {};
-    items.forEach(item => {
-        const cat  = item.category || 'Other';
-        const base = getBase(item.name);
-        if (!catMap[cat]) catMap[cat] = {};
-        if (!catMap[cat][base]) catMap[cat][base] = [];
-        catMap[cat][base].push(item);
-    });
-
-    // ── Step 2: Create categories ──
-    addLog('📁 Creating categories…');
-    const catIdMap = {};   // catName → Firestore catId
-    const catNames = Object.keys(catMap).sort();
-    for (let i = 0; i < catNames.length; i++) {
-        const catName = catNames[i];
+        addLog('📖 Reading menu_items…');
+        let items = [];
         try {
-            // Check if category already exists
-            const existingSnap = await getDocs(collection(db, 'categories'));
-            const existing = existingSnap.docs.find(d => d.data().name === catName);
-            if (existing) {
-                catIdMap[catName] = existing.id;
+            const snap = await getDocs(collection(db, 'menu_items'));
+            items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            addLog(`✅ Found ${items.length} items.`);
+        } catch (e) {
+            addLog('❌ Failed to read menu_items: ' + (e.message || e));
+            return;
+        }
+
+        if (!items.length) { addLog('ℹ️ No items to migrate.'); btn.textContent = '✅ Done'; return; }
+
+        // ── Step 1: Detect variants by name suffix ──
+        const VARIANT_RE = /\s*\(\s*(regular|medium|large|half|full|small|standard|family)\s*\)\s*$/i;
+        const getBase = (name) => (name || '').replace(VARIANT_RE, '').trim();
+        const getVariant = (name) => { const m = (name || '').match(VARIANT_RE); return m ? m[1] : null; };
+
+        // Group by category → base product name
+        const catMap = {};
+        items.forEach(item => {
+            const cat  = item.category || 'Other';
+            const base = getBase(item.name);
+            if (!catMap[cat]) catMap[cat] = {};
+            if (!catMap[cat][base]) catMap[cat][base] = [];
+            catMap[cat][base].push(item);
+        });
+
+        // ── Step 2: Create categories ──
+        addLog('📁 Creating categories…');
+        const catIdMap = {};   // catName → Firestore catId
+        const catNames = Object.keys(catMap).sort();
+        // Fetch all existing categories once (not per-category to avoid N+1 queries)
+        let existingCatSnap;
+        try {
+            existingCatSnap = await getDocs(collection(db, 'categories'));
+            existingCatSnap.docs.forEach(d => { catIdMap[d.data().name] = d.id; });
+        } catch (e) {
+            addLog('❌ Failed to read categories: ' + (e.message || e));
+            return;
+        }
+        for (let i = 0; i < catNames.length; i++) {
+            const catName = catNames[i];
+            if (catIdMap[catName]) {
                 addLog(`  ↩ Category "${catName}" already exists.`);
-            } else {
+                continue;
+            }
+            try {
                 const ref = await addDoc(collection(db, 'categories'), {
                     name: catName, imageUrl: null, active: true,
                     displayOrder: i, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
                 });
                 catIdMap[catName] = ref.id;
                 addLog(`  ✅ Created category "${catName}"`);
-            }
-        } catch (e) { addLog(`  ❌ Category "${catName}": ${e.message}`); }
-    }
+            } catch (e) { addLog(`  ❌ Category "${catName}": ${e.code || ''} ${e.message || e}`); }
+        }
 
-    // ── Step 3: Create products + variants ──
-    addLog('🍽️ Creating products…');
-    let prodCount = 0, varCount = 0;
-    for (const [catName, products] of Object.entries(catMap)) {
-        const catId = catIdMap[catName];
-        if (!catId) continue;
-        let prodIdx = 0;
-        for (const [baseName, variants] of Object.entries(products)) {
-            try {
-                const first = variants[0];
-                const hasVariants = variants.length > 1 || getVariant(first.name);
+        // ── Step 3: Create products + variants ──
+        addLog('🍽️ Creating products…');
+        let prodCount = 0, varCount = 0, errCount = 0;
+        for (const [catName, products] of Object.entries(catMap)) {
+            const catId = catIdMap[catName];
+            if (!catId) { addLog(`  ⚠️ Skipping "${catName}" — category not created.`); continue; }
+            let prodIdx = 0;
+            for (const [baseName, variants] of Object.entries(products)) {
+                addLog(`  ⏳ "${baseName}" (${catName})…`);
+                try {
+                    const first = variants[0];
+                    const hasVariants = variants.length > 1 || getVariant(first.name);
 
-                const productData = {
-                    categoryId: catId, categoryName: catName,
-                    name: baseName,
-                    description: first.description || '',
-                    imageUrl: first.imageUrl || first.image || null,
-                    active: first.active !== false,
-                    inStock: first.inStock !== false,
-                    hasVariants: !!hasVariants,
-                    price: hasVariants ? 0 : (Number(first.price) || 0),
-                    flags: { recommended: false, mostOrdered: false, chefPick: false, casualSnack: false, newArrival: false },
-                    extras: (first.extraOptions || []).map(eo => ({ name: eo.name || '', price: eo.price || 0, active: true })),
-                    displayOrder: prodIdx++,
-                    variantsList: [],
-                    createdAt: serverTimestamp(), updatedAt: serverTimestamp()
-                };
+                    const productData = {
+                        categoryId: catId, categoryName: catName,
+                        name: baseName,
+                        description: first.description || '',
+                        imageUrl: first.imageUrl || first.image || null,
+                        active: first.active !== false,
+                        inStock: first.inStock !== false,
+                        hasVariants: !!hasVariants,
+                        price: hasVariants ? 0 : (Number(first.price) || 0),
+                        flags: { recommended: false, mostOrdered: false, chefPick: false, casualSnack: false, newArrival: false },
+                        extras: (first.extraOptions || []).map(eo => ({ name: eo.name || '', price: eo.price || 0, active: true })),
+                        displayOrder: prodIdx++,
+                        variantsList: [],
+                        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+                    };
 
-                const prodRef = await addDoc(collection(db, 'products'), productData);
-                prodCount++;
+                    const prodRef = await addDoc(collection(db, 'products'), productData);
+                    prodCount++;
 
-                // Write variants
-                if (hasVariants) {
-                    const variantsList = [];
-                    const vBatch = writeBatch(db);
-                    variants.forEach((item, vi) => {
-                        const varName  = getVariant(item.name) || 'Standard';
-                        const varLabel = varName.charAt(0).toUpperCase() + varName.slice(1).toLowerCase();
-                        // Use original menu_items ID as variant ID for cart compat
-                        const varRef = doc(db, 'products', prodRef.id, 'variants', item.id);
-                        const varData = {
-                            name: varLabel, price: Number(item.price) || 0,
-                            imageUrl: item.imageUrl || item.image || null,
-                            active: item.active !== false, inStock: item.inStock !== false,
-                            displayOrder: vi, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
-                        };
-                        vBatch.set(varRef, varData);
-                        variantsList.push({ id: item.id, name: varLabel, price: Number(item.price) || 0,
-                            imageUrl: varData.imageUrl, active: varData.active, inStock: varData.inStock, displayOrder: vi });
-                        varCount++;
-                    });
-                    await vBatch.commit();
-                    await updateDoc(prodRef, { variantsList });
+                    // Write variants
+                    if (hasVariants) {
+                        const variantsList = [];
+                        const vBatch = writeBatch(db);
+                        variants.forEach((item, vi) => {
+                            const varName  = getVariant(item.name) || 'Standard';
+                            const varLabel = varName.charAt(0).toUpperCase() + varName.slice(1).toLowerCase();
+                            // Use original menu_items ID as variant ID for cart compat
+                            const varRef = doc(db, 'products', prodRef.id, 'variants', item.id);
+                            const varData = {
+                                name: varLabel, price: Number(item.price) || 0,
+                                imageUrl: item.imageUrl || item.image || null,
+                                active: item.active !== false, inStock: item.inStock !== false,
+                                displayOrder: vi, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+                            };
+                            vBatch.set(varRef, varData);
+                            variantsList.push({ id: item.id, name: varLabel, price: Number(item.price) || 0,
+                                imageUrl: varData.imageUrl, active: varData.active, inStock: varData.inStock, displayOrder: vi });
+                            varCount++;
+                        });
+                        await vBatch.commit();
+                        await updateDoc(prodRef, { variantsList });
+                        addLog(`  ✅ "${baseName}" — ${variants.length} variants`);
+                    } else {
+                        addLog(`  ✅ "${baseName}"`);
+                    }
+                } catch (e) {
+                    errCount++;
+                    addLog(`  ❌ "${baseName}": ${e.code || ''} ${e.message || e}`);
                 }
-            } catch (e) {
-                addLog(`  ❌ Product "${baseName}": ${e.message}`);
             }
         }
-    }
 
-    addLog(`✅ Migration complete: ${prodCount} products, ${varCount} variants.`);
-    addLog('ℹ️ Legacy menu_items preserved. New data is in categories + products.');
-    btn.textContent = '✅ Done';
+        if (errCount > 0) {
+            addLog(`⚠️ Migration finished with ${errCount} error(s). ${prodCount} products written, ${varCount} variants.`);
+            addLog('ℹ️ Check the ❌ lines above. Common cause: Firestore permission-denied — make sure you are logged in and rules allow writes.');
+            btn.textContent = '⚠️ Done (with errors)';
+        } else {
+            addLog(`✅ Migration complete: ${prodCount} products, ${varCount} variants.`);
+            addLog('ℹ️ Legacy menu_items preserved. New data is in categories + products.');
+            btn.textContent = '✅ Done';
+        }
+    } catch (outerErr) {
+        // Catch any unexpected exception so the button is never left "Running…" forever
+        addLog(`❌ Unexpected error: ${outerErr.code || ''} ${outerErr.message || outerErr}`);
+        addLog('ℹ️ Migration stopped early. Fix the error above and run again.');
+        btn.textContent = '▶ Run Migration';
+        btn.disabled = false;
+    } finally {
+        // Always re-enable the button (text was already set above in each branch)
+        btn.disabled = false;
+    }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
