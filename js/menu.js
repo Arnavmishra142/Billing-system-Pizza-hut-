@@ -1,9 +1,15 @@
 // AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert().
+// AI UPDATE [2026-08-03]: Added products-based read path for new hierarchical
+//   menu architecture. fetchMenuFromCloud() now tries the products collection
+//   first (new architecture), falling back to menu_items (legacy) when the
+//   products collection is empty. The billing panel rendering code (triple-card,
+//   half-full-card) is unchanged — products+variants are expanded into flat items
+//   with "ProductName (VariantName)" names so existing regex detection still works.
 import { showAlert } from './dialog.js';
 import { db } from './firebase-config.js';
 import {
     collection, getDocs, addDoc,
-    getDocsFromCache, getDocsFromServer
+    getDocsFromCache, getDocsFromServer, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
 let allItems = [];
@@ -15,6 +21,100 @@ document.addEventListener('DOMContentLoaded', () => {
     setupQuickAddPopups();
     setupSearch();
 });
+
+// ── Helper: expand products+variants into the flat menu_items-compatible format ──
+// Called when the new products collection has data. Expands each product+variant
+// pair into a virtual item with "ProductName (VariantName)" name so the existing
+// triple-card / half-full-card rendering code works without modification.
+// Category order is respected via the `displayOrder` field on category docs.
+async function processProductsToItems(productsSnap) {
+    // Attempt to load categories for ordering
+    let catOrderMap = {}; // catId → displayOrder
+    let catImageMap = {}; // catId → imageUrl
+    try {
+        const catSnap = await getDocsFromServer(collection(db, 'categories'));
+        catSnap.docs.forEach(d => {
+            catOrderMap[d.id] = d.data().displayOrder ?? 999;
+            catImageMap[d.id] = d.data().imageUrl || null;
+        });
+    } catch (_) {} // non-fatal; categories may not exist yet
+
+    const items = [];
+    const catSet = new Set(['All']);
+
+    productsSnap.docs.forEach(d => {
+        const prod = { id: d.id, ...d.data() };
+        if (prod.active === false || prod.inStock === false) return;
+
+        const catName = prod.categoryName || prod.category || 'Other';
+        catSet.add(catName);
+
+        if (prod.hasVariants && prod.variantsList && prod.variantsList.length > 0) {
+            prod.variantsList.forEach(v => {
+                if (v.active === false || v.inStock === false) return;
+                items.push({
+                    id:          v.id,
+                    name:        `${prod.name} (${v.name})`,
+                    price:       v.price || 0,
+                    category:    catName,
+                    categoryId:  prod.categoryId,
+                    inStock:     true,
+                    imageUrl:    v.imageUrl || prod.imageUrl || catImageMap[prod.categoryId] || null,
+                    description: prod.description || '',
+                    _productId:  prod.id,
+                    _variantName: v.name,
+                    _catDisplayOrder: catOrderMap[prod.categoryId] ?? 999,
+                    _displayOrder:    prod.displayOrder ?? 999,
+                });
+            });
+        } else {
+            items.push({
+                id:          prod.id,
+                name:        prod.name,
+                price:       prod.price || 0,
+                category:    catName,
+                categoryId:  prod.categoryId,
+                inStock:     true,
+                imageUrl:    prod.imageUrl || catImageMap[prod.categoryId] || null,
+                description: prod.description || '',
+                _productId:  prod.id,
+                _catDisplayOrder: catOrderMap[prod.categoryId] ?? 999,
+                _displayOrder:    prod.displayOrder ?? 999,
+            });
+        }
+    });
+
+    // Sort by category display order, then product display order, then price
+    const PIZZA_RE = /\(\s*(regular|medium|large)\s*\)/i;
+    const pizzaGroupMin = {};
+    items.forEach(item => {
+        if ((item.category || '').toLowerCase() === 'pizza' && PIZZA_RE.test(item.name)) {
+            const base = item.name.split('(')[0].trim().toLowerCase();
+            const price = Number(item.price) || 0;
+            if (!(base in pizzaGroupMin) || price < pizzaGroupMin[base]) pizzaGroupMin[base] = price;
+        }
+    });
+
+    items.sort((a, b) => {
+        if (a._catDisplayOrder !== b._catDisplayOrder) return a._catDisplayOrder - b._catDisplayOrder;
+        if (a.category !== b.category) return a.category.localeCompare(b.category);
+        if (a._displayOrder !== b._displayOrder) return a._displayOrder - b._displayOrder;
+        // Within same product/category: sort by price for variants
+        return (Number(a.price) || 0) - (Number(b.price) || 0);
+    });
+
+    // Build ordered categories list
+    const catsByOrder = [...catSet].filter(c => c !== 'All').sort((a, b) => {
+        const catAId = items.find(i => i.category === a)?.categoryId;
+        const catBId = items.find(i => i.category === b)?.categoryId;
+        const orderA = catAId ? (catOrderMap[catAId] ?? 999) : 999;
+        const orderB = catBId ? (catOrderMap[catBId] ?? 999) : 999;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.localeCompare(b);
+    });
+
+    return { items, cats: ['All', ...catsByOrder] };
+}
 
 // ── Helper: parse a Firestore snapshot into allItems + categories ──
 const MENU_SORT_BASE = (name) =>
@@ -109,6 +209,11 @@ function applyMenuData(items, cats) {
 }
 
 // 1. FIREBASE SE MENU LAO  (two-phase: cache → network)
+// AI UPDATE [2026-08-03]: Tries the new products collection first.
+// If products collection is non-empty, uses the new hierarchical read path
+// (processProductsToItems) which expands products+variants into flat items
+// with "ProductName (VariantName)" names so existing triple/half-full card
+// rendering works unchanged. Falls back to legacy menu_items if products is empty.
 export async function fetchMenuFromCloud() {
     const grid = document.getElementById('itemsGrid');
     if (!grid) return;
@@ -117,7 +222,6 @@ export async function fetchMenuFromCloud() {
     const cached = loadMenuFromLS();
     if (cached && cached.items && cached.items.length > 0) {
         applyMenuData(cached.items, cached.cats);
-        // Show a subtle "refreshing" note instead of full spinner
         const note = document.createElement('div');
         note.id = 'menuRefreshNote';
         note.style.cssText = 'position:fixed;bottom:160px;left:50%;transform:translateX(-50%);background:#1f2937;color:#9ca3af;padding:6px 16px;border-radius:20px;font-size:0.82rem;z-index:9995;pointer-events:none;';
@@ -129,33 +233,48 @@ export async function fetchMenuFromCloud() {
 
     // ── Phase 1: Firestore IndexedDB cache (near-instant, no network) ──
     try {
-        const cacheSnap = await getDocsFromCache(collection(db, "menu_items"));
-        if (!cacheSnap.empty) {
-            const { items, cats } = processSnapshot(cacheSnap);
-            applyMenuData(items, cats);
-            saveMenuToLS(items, cats);
+        // Try new products collection first
+        const prodCacheSnap = await getDocsFromCache(collection(db, 'products'));
+        if (!prodCacheSnap.empty) {
+            const { items, cats } = await processProductsToItems(prodCacheSnap);
+            if (items.length > 0) { applyMenuData(items, cats); saveMenuToLS(items, cats); }
+        } else {
+            // Fallback to legacy menu_items cache
+            const cacheSnap = await getDocsFromCache(collection(db, 'menu_items'));
+            if (!cacheSnap.empty) {
+                const { items, cats } = processSnapshot(cacheSnap);
+                applyMenuData(items, cats);
+                saveMenuToLS(items, cats);
+            }
         }
-    } catch (e) {
-        // No Firestore cache yet — that's fine, continue to server fetch
-    }
+    } catch (e) { /* No cache yet — fine, continue to server fetch */ }
 
     // ── Phase 2: Live server fetch (always runs to get fresh data) ──
     try {
-        const serverSnap = await getDocsFromServer(collection(db, "menu_items"));
+        // Try new products collection first
+        const prodSnap = await getDocsFromServer(collection(db, 'products'));
+        if (!prodSnap.empty) {
+            const { items, cats } = await processProductsToItems(prodSnap);
+            if (items.length > 0) {
+                applyMenuData(items, cats);
+                saveMenuToLS(items, cats);
+                document.getElementById('menuRefreshNote')?.remove();
+                return;
+            }
+        }
+        // Fallback to legacy menu_items
+        const serverSnap = await getDocsFromServer(collection(db, 'menu_items'));
         const { items, cats } = processSnapshot(serverSnap);
         applyMenuData(items, cats);
         saveMenuToLS(items, cats);
     } catch (e) {
-        console.error("Server fetch error:", e);
-        // If we already rendered from cache, this is silent — user sees menu fine
+        console.error('Server fetch error:', e);
         if (!cached || !cached.items || cached.items.length === 0) {
             grid.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Menu load nahi hua.<br>Internet check karo ya refresh karo.</div>';
         }
     }
 
-    // Remove sync note
-    const note = document.getElementById('menuRefreshNote');
-    if (note) note.remove();
+    document.getElementById('menuRefreshNote')?.remove();
 }
 
 // 2. RENDER CATEGORIES

@@ -71,13 +71,21 @@
 //   Fix: stats now include pizza variant items.
 // =====================
 
+// AI UPDATE [2026-08-03]: Added products-collection support to the stock-toggle
+// drawer (billing panel Menu tab). When the products collection is non-empty,
+// items are read from products+variantsList instead of menu_items. Toggle writes
+// go to the products or variants subcollection. Falls back to menu_items when
+// products is empty. All rendering code is unchanged (flat items array format).
 import { db, auth } from './firebase-config.js';
 import {
     collection,
     onSnapshot,
     doc,
     updateDoc,
-    setDoc
+    setDoc,
+    getDocs,
+    getDocsFromServer,
+    writeBatch
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
@@ -88,6 +96,9 @@ let _search                 = '';
 let _activeCat              = 'All';
 let _unsubItems             = null;
 let _unsubPizzaSizes        = null;
+// AI UPDATE [2026-08-03]: New-architecture state
+let _usingProducts          = false;   // true when reading from products collection
+let _unsubProducts          = null;    // listener for products collection
 // AI UPDATE [2026-07-31]: Global Online Ordering state.
 // _orderingEnabled mirrors settings/restaurant_status.onlineOrderingEnabled.
 // Defaults to true so nothing breaks if the document doesn't exist yet.
@@ -450,23 +461,20 @@ export function initMenuManagement() {
         // First call — set up search bar and start all listeners.
         _initted = true;
         _setupSearch();
-        _renderGlobalToggle(); // AI UPDATE [2026-07-31]: render global ordering toggle
+        _renderGlobalToggle();
         _showLoading();
-        _startItemsListener();
+        _startItemsListener();   // detects architecture and starts correct listener
         _startPizzaSizesListener();
-        _startRestaurantStatusListener(); // AI UPDATE [2026-07-31]: global ordering
-    } else if (!_unsubItems || !_unsubPizzaSizes || !_unsubRestaurantStatus) {
-        // Listeners were dropped (network error / auth expiry) — restart them.
-        // Don't re-setup search (already wired) and avoid a loading flash if we
-        // already have cached items to display.
-        if (!_unsubItems) {
+        _startRestaurantStatusListener();
+    } else if (!_unsubItems && !_unsubProducts || !_unsubPizzaSizes || !_unsubRestaurantStatus) {
+        // AI UPDATE [2026-08-03]: check both _unsubItems (legacy) and _unsubProducts (new)
+        if (!_unsubItems && !_unsubProducts) {
             if (_allItems.length === 0) _showLoading();
             _startItemsListener();
         }
         if (!_unsubPizzaSizes) {
             _startPizzaSizesListener();
         }
-        // AI UPDATE [2026-07-31]: restart global ordering listener if dropped
         if (!_unsubRestaurantStatus) {
             _startRestaurantStatusListener();
         }
@@ -479,9 +487,11 @@ export function initMenuManagement() {
 export function destroyMenuManagement() {
     if (_unsubItems)             { _unsubItems();             _unsubItems             = null; }
     if (_unsubPizzaSizes)        { _unsubPizzaSizes();        _unsubPizzaSizes        = null; }
-    // AI UPDATE [2026-07-31]: unsubscribe global ordering listener on tab close
     if (_unsubRestaurantStatus)  { _unsubRestaurantStatus();  _unsubRestaurantStatus  = null; }
+    // AI UPDATE [2026-08-03]: clean up products listener
+    if (_unsubProducts)          { _unsubProducts();          _unsubProducts          = null; }
     _initted              = false;
+    _usingProducts        = false;
     _allItems             = [];
     _pizzaSizes           = { regular: true, medium: true, large: true };
     _orderingEnabled      = true;
@@ -607,7 +617,86 @@ function _renderGlobalToggle() {
 
 // ── Firestore listeners ───────────────────────────────────────────────────────
 
+// AI UPDATE [2026-08-03]: _startItemsListener now tries the products collection
+// first. If products is non-empty, items are read from products + variantsList
+// (denormalized); if products is empty, falls back to menu_items.
 function _startItemsListener() {
+    if (_unsubItems) { _unsubItems(); _unsubItems = null; }
+    if (_unsubProducts) { _unsubProducts(); _unsubProducts = null; }
+
+    // Try products collection first (one-shot check)
+    getDocs(collection(db, 'products')).then((prodSnap) => {
+        if (!prodSnap.empty) {
+            // New architecture — listen to products
+            _usingProducts = true;
+            _startProductsListener();
+        } else {
+            // Legacy architecture — listen to menu_items
+            _usingProducts = false;
+            _startMenuItemsListener();
+        }
+    }).catch(() => {
+        // On error, fall back to menu_items
+        _usingProducts = false;
+        _startMenuItemsListener();
+    });
+}
+
+// New architecture listener: reads from products collection
+function _startProductsListener() {
+    if (_unsubProducts) { _unsubProducts(); _unsubProducts = null; }
+    _unsubProducts = onSnapshot(
+        collection(db, 'products'),
+        (snap) => {
+            const flat = [];
+            snap.docs.forEach(d => {
+                const prod = { id: d.id, ...d.data() };
+                if (prod.hasVariants && prod.variantsList && prod.variantsList.length > 0) {
+                    prod.variantsList.forEach(v => {
+                        flat.push({
+                            id:          v.id,
+                            name:        `${prod.name} (${v.name})`,
+                            price:       v.price || 0,
+                            category:    prod.categoryName || prod.category || 'Other',
+                            inStock:     v.inStock !== false && prod.inStock !== false,
+                            imageUrl:    v.imageUrl || prod.imageUrl || null,
+                            _type:       'variant',
+                            _productId:  prod.id,
+                            _variantName: v.name,
+                        });
+                    });
+                } else {
+                    flat.push({
+                        id:       prod.id,
+                        name:     prod.name,
+                        price:    prod.price || 0,
+                        category: prod.categoryName || prod.category || 'Other',
+                        inStock:  prod.inStock !== false,
+                        imageUrl: prod.imageUrl || null,
+                        _type:    'product',
+                    });
+                }
+            });
+            _allItems = flat.sort((a, b) => {
+                const ca = (a.category || 'Other').toLowerCase();
+                const cb = (b.category || 'Other').toLowerCase();
+                if (ca !== cb) return ca < cb ? -1 : 1;
+                return (a.name || '').toLowerCase() < (b.name || '').toLowerCase() ? -1 : 1;
+            });
+            _render();
+        },
+        (err) => {
+            console.error('[menu-mgmt] products listener error:', err);
+            _unsubProducts = null;
+            const el = document.getElementById('menuMgmtItems');
+            if (el) el.innerHTML = `<div class="mm-empty"><div class="mm-empty-icon">⚠️</div><div>Failed to load menu. Retrying…</div></div>`;
+            setTimeout(() => { if (!_unsubProducts && _initted) _startProductsListener(); }, 5000);
+        }
+    );
+}
+
+// Legacy architecture listener: reads from menu_items
+function _startMenuItemsListener() {
     if (_unsubItems) { _unsubItems(); _unsubItems = null; }
     _unsubItems = onSnapshot(
         collection(db, 'menu_items'),
@@ -624,17 +713,10 @@ function _startItemsListener() {
         },
         (err) => {
             console.error('[menu-mgmt] items listener error:', err);
-            // Mark listener as dropped so initMenuManagement() can restart it.
             _unsubItems = null;
             const el = document.getElementById('menuMgmtItems');
-            if (el) el.innerHTML = `<div class="mm-empty">
-                <div class="mm-empty-icon">⚠️</div>
-                <div>Failed to load menu. Retrying…</div>
-            </div>`;
-            // Auto-retry after 5 s if the component is still mounted.
-            setTimeout(() => {
-                if (!_unsubItems && _initted) _startItemsListener();
-            }, 5000);
+            if (el) el.innerHTML = `<div class="mm-empty"><div class="mm-empty-icon">⚠️</div><div>Failed to load menu. Retrying…</div></div>`;
+            setTimeout(() => { if (!_unsubItems && _initted) _startMenuItemsListener(); }, 5000);
         }
     );
 }
@@ -684,12 +766,6 @@ async function _toggle(id) {
     const item = _allItems.find(i => i.id === id);
     if (!item) return;
 
-    // Guard: Firestore write rule requires isOperator() → request.auth != null.
-    // Menu items may load from IndexedDB cache before signInAnonymously() resolves,
-    // making items visible while auth is still pending.
-    // incoming-orders.js now bootstraps anonymous auth for the billing panel, so
-    // auth.currentUser should be set by the time the user reaches this toggle.
-    // If for any reason it is not, wait up to 5 s for auth rather than bailing.
     if (!auth.currentUser) {
         const user = await _waitForAuth(5000);
         if (!user) {
@@ -704,7 +780,26 @@ async function _toggle(id) {
     _render();
 
     try {
-        await updateDoc(doc(db, 'menu_items', id), { inStock: !wasOn });
+        // AI UPDATE [2026-08-03]: Route toggle to correct collection based on architecture.
+        if (_usingProducts && item._type === 'variant' && item._productId) {
+            // Toggle variant inStock in the variants subcollection
+            await updateDoc(doc(db, 'products', item._productId, 'variants', id), { inStock: !wasOn });
+            // Also update the denormalized variantsList on the product document
+            // so billing panel reads get the updated inStock immediately
+            const prodItems = _allItems.filter(i => i._type === 'variant' && i._productId === item._productId);
+            const updatedList = prodItems.map(v => ({
+                id: v.id, name: (v._variantName || v.name), price: v.price || 0,
+                imageUrl: v.imageUrl || null, active: v.active !== false,
+                inStock: v.id === id ? !wasOn : v.inStock !== false,
+                displayOrder: v.displayOrder || 0
+            }));
+            updateDoc(doc(db, 'products', item._productId), { variantsList: updatedList }).catch(() => {});
+        } else if (_usingProducts && item._type === 'product') {
+            await updateDoc(doc(db, 'products', id), { inStock: !wasOn });
+        } else {
+            // Legacy: toggle on menu_items
+            await updateDoc(doc(db, 'menu_items', id), { inStock: !wasOn });
+        }
     } catch (e) {
         console.error('[menu-mgmt] item toggle failed:', e);
         item.inStock = wasOn;
