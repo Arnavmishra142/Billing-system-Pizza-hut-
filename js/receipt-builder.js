@@ -140,20 +140,28 @@ export function buildBillReceipt(cart, title, billNo, dateStr) {
         // extras are rendered dynamically — never hardcoded by name.
         // specialRequest is intentionally omitted from the customer bill.
         for (const item of cart) {
+            const _ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+            const _itemTotal = (item.price + _ep) * item.qty;
             enc = enc.table(TABLE_COLS, [[
                 item.name,
                 String(item.qty),
-                `Rs${item.price * item.qty}`,
+                `Rs${_itemTotal}`,
             ]]);
             if (Array.isArray(item.extras) && item.extras.length > 0) {
                 for (const extra of item.extras) {
-                    enc = enc.line(`  + ${extra.name}`);
+                    enc = enc.line(`  + ${extra.name}${extra.price ? ` (+Rs${extra.price})` : ''}`);
                 }
+            }
+            if (item.specialRequest) {
+                enc = enc.line(`  > ${item.specialRequest}`);
             }
         }
 
         // ── 6. Totals ──────────────────────────────────────────────────────────
-        const total    = cart.reduce((sum, i) => sum + i.price * i.qty, 0);
+        const total    = cart.reduce((sum, i) => {
+            const ep = Array.isArray(i.extras) ? i.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+            return sum + (i.price + ep) * i.qty;
+        }, 0);
         const totalQty = cart.reduce((sum, i) => sum + i.qty, 0);
 
         enc = enc

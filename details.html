@@ -323,6 +323,14 @@
     document.getElementById('themeBtn').textContent =
         document.documentElement.classList.contains('light-mode') ? '🌙' : '☀️';
 
+    // Escape customer-controlled strings before inserting into innerHTML.
+    const _esc = s => String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
     // ── Read bill from localStorage ──
     function getGhostHistory() {
         try { return JSON.parse(localStorage.getItem('pos_24h_history') || '[]'); } catch(e) { return []; }
@@ -361,19 +369,23 @@
         billText += "Item                Qty      Amt\n";
         billText += "--------------------------------\n";
 
+        let _printTotal = 0;
         bill.items.forEach(item => {
+            const _ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+            const _itemAmt = (item.price + _ep) * item.qty;
+            _printTotal += _itemAmt;
             let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
             let q = String(item.qty).padStart(2, " ") + "x";
-            let a = String(item.price * item.qty).padStart(6, " ");
+            let a = String(_itemAmt).padStart(6, " ");
             billText += `${n}    ${q}   ${a}\n`;
-            // Render extras dynamically — specialRequest intentionally omitted from bill
             if (Array.isArray(item.extras) && item.extras.length > 0) {
-                item.extras.forEach(e => { billText += `  + ${e.name}\n`; });
+                item.extras.forEach(e => { billText += `  + ${e.name}${e.price ? ` (+Rs${e.price})` : ''}\n`; });
             }
+            if (item.specialRequest) { billText += `  > ${item.specialRequest}\n`; }
         });
 
         billText += "--------------------------------\n";
-        billText += rightText(`TOTAL: Rs ${bill.total}`) + "\n";
+        billText += rightText(`TOTAL: Rs ${_printTotal}`) + "\n";
         billText += "--------------------------------\n";
         billText += centerText("Thank You! Visit Again") + "\n\n";
         billText += centerText("--- UPI PAYMENT ---") + "\n";
@@ -416,6 +428,15 @@
 
         const hasItems = Array.isArray(bill.items) && bill.items.length > 0;
 
+        // Derive total from items (includes extras) so it's always consistent with row amounts.
+        // Falls back to stored bill.total for old records that pre-date extras support.
+        const _derivedTotal = hasItems
+            ? bill.items.reduce((sum, item) => {
+                const ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+                return sum + (item.price + ep) * item.qty;
+            }, 0)
+            : (bill.total || 0);
+
         const itemsHTML = hasItems ? `
             <div class="items-section">
                 <div class="items-heading">Items Ordered</div>
@@ -424,19 +445,23 @@
                     <span>Qty</span>
                     <span>Amount</span>
                 </div>
-                ${bill.items.map(item => `
+                ${bill.items.map(item => {
+                    const _ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+                    const _amt = (item.price + _ep) * item.qty;
+                    return `
                     <div class="item-row">
-                        <span class="item-name">${item.name}</span>
+                        <span class="item-name">${_esc(item.name)}</span>
                         <span class="item-qty">${item.qty}x</span>
-                        <span class="item-amt">₹${item.price * item.qty}</span>
+                        <span class="item-amt">₹${_amt}</span>
                     </div>
                     ${Array.isArray(item.extras) && item.extras.length > 0
-                        ? item.extras.map(e => `<div class="item-extra">+ ${e.name}</div>`).join('')
+                        ? item.extras.map(e => `<div class="item-extra">+ ${_esc(e.name)}${e.price ? ' (+₹' + Number(e.price) + ')' : ''}</div>`).join('')
                         : ''}
                     ${item.specialRequest
-                        ? `<div class="item-special-request">📝 ${item.specialRequest}</div>`
+                        ? `<div class="item-special-request">📝 ${_esc(item.specialRequest)}</div>`
                         : ''}
-                `).join('')}
+                `;
+                }).join('')}
             </div>
         ` : `
             <div class="items-section" style="text-align:center; padding: 20px; color: var(--muted); font-size: 0.9rem;">
@@ -466,7 +491,7 @@
 
                 <div class="total-section">
                     <span class="total-label">TOTAL</span>
-                    <span class="total-amount">₹${bill.total}</span>
+                    <span class="total-amount">₹${_derivedTotal}</span>
                 </div>
 
                 <div class="upi-section">

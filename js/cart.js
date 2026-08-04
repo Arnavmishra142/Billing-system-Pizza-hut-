@@ -178,12 +178,17 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
                     tableId:          tableName,
                     customerName,
                     customerPhone,
-                    items: cartSnapshot.map(i => ({
-                        name:     i.name,
-                        price:    i.price,
-                        quantity: i.qty,
-                        subtotal: +(i.price * i.qty).toFixed(2),
-                    })),
+                    items: cartSnapshot.map(i => {
+                        const ep = Array.isArray(i.extras) ? i.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+                        return {
+                            name:           i.name,
+                            price:          i.price,
+                            quantity:       i.qty,
+                            extras:         Array.isArray(i.extras) ? i.extras : [],
+                            specialRequest: i.specialRequest || '',
+                            subtotal:       +((i.price + ep) * i.qty).toFixed(2),
+                        };
+                    }),
                     total:            +total.toFixed(2),
                     completedAt:      serverTimestamp(),
                     completionReason,          // 'bill_settle' | 'save_exit'
@@ -400,6 +405,14 @@ function _showReleaseError(message) {
 // Fire-and-forget — printing falls back gracefully if logo isn't ready yet.
 initReceiptPrinter();
 
+/** Escape customer-controlled strings before inserting into innerHTML. */
+const _escHtml = s => String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 document.addEventListener('DOMContentLoaded', () => {
     const cartItemsContainer = document.getElementById('cartItems');
     const cartTotalElement = document.getElementById('cartTotal');
@@ -466,9 +479,26 @@ document.addEventListener('DOMContentLoaded', () => {
         const existingItem = currentCart.find(i => i.id === item.id);
         if (existingItem) {
             existingItem.qty += 1;
+            // Only update extras/specialRequest when the payload explicitly provides them
+            // (property-presence check). A menu-panel event omits these keys entirely, so
+            // existing addon metadata is preserved; a customer-panel re-merge supplies them.
+            if ('extras' in item) {
+                existingItem.extras = Array.isArray(item.extras) ? item.extras : [];
+            }
+            if ('specialRequest' in item) {
+                existingItem.specialRequest = item.specialRequest || '';
+            }
         } else {
-            // AI UPDATE [2026-08-01]: Added parcel:false default — item-level parcel toggle (Table Orders only).
-            currentCart.push({ id: item.id, name: item.name, price: item.price, qty: 1, printedQty: 0, parcel: false });
+            currentCart.push({
+                id:             item.id,
+                name:           item.name,
+                price:          item.price,
+                qty:            1,
+                printedQty:     0,
+                parcel:         false,
+                extras:         Array.isArray(item.extras) ? item.extras : [],
+                specialRequest: item.specialRequest || '',
+            });
         }
         saveLocalCart(currentCart);
         renderCart();
@@ -495,9 +525,27 @@ document.addEventListener('DOMContentLoaded', () => {
             if ((currentCart[existingIndex].printedQty || 0) > item.qty) {
                 currentCart[existingIndex].printedQty = item.qty;
             }
+            // Property-presence check: only overwrite extras/specialRequest when the
+            // payload explicitly contains the key. Menu quantity events omit these fields
+            // entirely so existing addon metadata is never silently cleared; an explicit
+            // empty value (e.g. extras: []) intentionally clears them.
+            if ('extras' in item) {
+                currentCart[existingIndex].extras = Array.isArray(item.extras) ? item.extras : [];
+            }
+            if ('specialRequest' in item) {
+                currentCart[existingIndex].specialRequest = item.specialRequest || '';
+            }
         } else {
-            // AI UPDATE [2026-08-01]: Added parcel:false default — item-level parcel toggle (Table Orders only).
-            currentCart.push({ id: item.id, name: item.name, price: item.price, qty: item.qty, printedQty: 0, parcel: false });
+            currentCart.push({
+                id:             item.id,
+                name:           item.name,
+                price:          item.price,
+                qty:            item.qty,
+                printedQty:     0,
+                parcel:         false,
+                extras:         Array.isArray(item.extras) ? item.extras : [],
+                specialRequest: item.specialRequest || '',
+            });
         }
 
         saveLocalCart(currentCart);
@@ -612,7 +660,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const _isTableOrder = !getCurrentTable().includes('Parcel') && getCurrentTable() !== 'Direct Entry';
 
         currentCart.forEach(item => {
-            const itemTotal = item.price * item.qty;
+            const _extraPrice = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+            const itemTotal = (item.price + _extraPrice) * item.qty;
             totalAmount += itemTotal;
 
             // Backward compat: items saved before this feature have no parcel field → treat as false.
@@ -627,6 +676,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // Parcel toggle button — only rendered in Table Order sessions
             const _parcelToggle = _isTableOrder
                 ? `<button class="parcel-toggle-btn${_isParcel ? ' active' : ''}" data-id="${item.id}" title="${_isParcel ? 'Marked as Parcel — tap to set Dine-In' : 'Tap to mark as Parcel'}">📦</button>`
+                : '';
+
+            // Extras and special request HTML (pre-computed to avoid nested template literal issues)
+            const _extrasHTML = Array.isArray(item.extras) && item.extras.length > 0
+                ? '<div style="margin-top:4px;padding:0 2px;">' +
+                  item.extras.map(e => '<span style="display:inline-block;font-size:0.72rem;background:rgba(245,158,11,0.12);color:#f59e0b;border:1px solid rgba(245,158,11,0.25);border-radius:4px;padding:2px 6px;margin:2px 2px 0 0;">+ ' + _escHtml(e.name) + (e.price ? ' (+₹' + Number(e.price) + ')' : '') + '</span>').join('') +
+                  '</div>'
+                : '';
+            const _noteHTML = item.specialRequest
+                ? '<div style="margin-top:5px;padding:5px 8px;background:rgba(99,102,241,0.10);border-left:2px solid #6366f1;border-radius:0 4px 4px 0;font-size:0.75rem;color:#a5b4fc;">📝 ' + _escHtml(item.specialRequest) + '</div>'
                 : '';
 
             const cartItemDiv = document.createElement('div');
@@ -647,6 +706,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button class="qty-btn qty-plus" data-id="${item.id}">+</button>
                     </div>
                 </div>
+                ${_extrasHTML}${_noteHTML}
                 ${_renderSourceMap.hasOwnProperty(item.id) ? `
                 <div style="margin-top:6px;">
                     <button class="mark-served-btn${_servedItems.has(item.id) ? ' served' : ''}"
@@ -1115,7 +1175,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const tableName    = getCurrentTable();
             const customerName = getCurrentCustomer();
-            const total        = currentCart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+            const total        = currentCart.reduce((sum, item) => {
+                const ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+                return sum + (item.price + ep) * item.qty;
+            }, 0);
 
             // ── Snapshot cart before clearing ─────────────────────────────────
             const cartSnapshot = currentCart.slice();
@@ -1151,19 +1214,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 billText += `Bill To: ${getDisplayTitle()}\n\n`;
                 billText += "Item Name      Qty Rate  Total\n\n";
                 let legacyTotalQty = 0;
+                let _legacyTotal = 0;
                 currentCart.forEach(item => {
+                    const _ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+                    const _itemAmt = (item.price + _ep) * item.qty;
+                    _legacyTotal += _itemAmt;
                     legacyTotalQty += item.qty;
-                    billText += formatBillRow(item.name, item.qty, item.price, item.price * item.qty);
-                    // Render extras dynamically — specialRequest intentionally omitted from bill
+                    billText += formatBillRow(item.name, item.qty, item.price + _ep, _itemAmt);
                     if (Array.isArray(item.extras) && item.extras.length > 0) {
-                        item.extras.forEach(e => { billText += `  + ${e.name}\n`; });
+                        item.extras.forEach(e => { billText += `  + ${e.name}${e.price ? ` (+Rs${e.price})` : ''}\n`; });
                     }
+                    if (item.specialRequest) { billText += `  > ${item.specialRequest}\n`; }
                 });
                 billText += "\n";
                 billText += `Total Items: ${currentCart.length}\n`;
                 billText += `Total Quantity: ${legacyTotalQty}\n`;
-                billText += `Sub Total`.padEnd(25, ' ') + String(total).padStart(7, ' ') + "\n\n";
-                billText += centerText(`TOTAL: Rs ${total}`) + "\n\n";
+                billText += `Sub Total`.padEnd(25, ' ') + String(_legacyTotal).padStart(7, ' ') + "\n\n";
+                billText += centerText(`TOTAL: Rs ${_legacyTotal}`) + "\n\n";
                 billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
                 triggerRawBTPrint(billText);
             }
@@ -1208,7 +1275,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const tableName    = getCurrentTable();
             const customerName = getCurrentCustomer();
             const cartSnapshot = currentCart.slice();
-            const total        = cartSnapshot.reduce((sum, item) => sum + (item.price * item.qty), 0);
+            const total        = cartSnapshot.reduce((sum, item) => {
+                const ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+                return sum + (item.price + ep) * item.qty;
+            }, 0);
 
             // ── Clear cart and navigate back immediately ───────────────────────
             saveLocalCart([]);
