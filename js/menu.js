@@ -85,22 +85,26 @@ async function processProductsToItems(productsSnap) {
         }
     });
 
-    // Sort by category display order, then product display order, then price
-    const PIZZA_RE = /\(\s*(regular|medium|large)\s*\)/i;
-    const pizzaGroupMin = {};
+    // Sort: category display order → min variant price per product → variant price within product
+    // Pre-compute the minimum price across all variants of each product so that
+    // products are ordered cheapest-first regardless of how many size variants they have.
+    const productMinPrice = {};
     items.forEach(item => {
-        if ((item.category || '').toLowerCase() === 'pizza' && PIZZA_RE.test(item.name)) {
-            const base = item.name.split('(')[0].trim().toLowerCase();
-            const price = Number(item.price) || 0;
-            if (!(base in pizzaGroupMin) || price < pizzaGroupMin[base]) pizzaGroupMin[base] = price;
+        const pid = item._productId || item.id;
+        const price = Number(item.price) || 0;
+        if (!(pid in productMinPrice) || price < productMinPrice[pid]) {
+            productMinPrice[pid] = price;
         }
     });
 
     items.sort((a, b) => {
         if (a._catDisplayOrder !== b._catDisplayOrder) return a._catDisplayOrder - b._catDisplayOrder;
         if (a.category !== b.category) return a.category.localeCompare(b.category);
-        if (a._displayOrder !== b._displayOrder) return a._displayOrder - b._displayOrder;
-        // Within same product/category: sort by price for variants
+        // Sort products by their minimum variant price (cheapest product first)
+        const minA = productMinPrice[a._productId || a.id] || 0;
+        const minB = productMinPrice[b._productId || b.id] || 0;
+        if (minA !== minB) return minA - minB;
+        // Within the same product: sort individual variants by their own price
         return (Number(a.price) || 0) - (Number(b.price) || 0);
     });
 
@@ -161,11 +165,15 @@ function processSnapshot(querySnapshot) {
             return (Number(a.price) || 0) - (Number(b.price) || 0);
         }
 
-        // Both non-pizza → alphabetical
+        // Both non-pizza → sort by price ascending (cheapest product first)
+        // For items with variants (Half/Full), baseA/baseB are the same for the pair,
+        // so they stay grouped together; the lower-priced variant naturally comes first.
         if (!isPizzaA && !isPizzaB) {
+            if ((Number(a.price) || 0) !== (Number(b.price) || 0))
+                return (Number(a.price) || 0) - (Number(b.price) || 0);
             if (baseA < baseB) return -1;
             if (baseA > baseB) return 1;
-            return (Number(a.price) || 0) - (Number(b.price) || 0);
+            return 0;
         }
 
         // Mixed → keep category alphabetical order
@@ -182,7 +190,7 @@ function processSnapshot(querySnapshot) {
 }
 
 // ── Save / load menu from localStorage (instant fallback) ──
-const MENU_LS_KEY = 'pos_menu_cache_v1';
+const MENU_LS_KEY = 'pos_menu_cache_v2'; // v2: sort by min price per product (was v1: sort by displayOrder/alphabetical)
 
 function saveMenuToLS(items, cats) {
     try {
