@@ -694,7 +694,9 @@ function _startProductsListener() {
                     prod.variantsList.forEach(v => {
                         flat.push({
                             id:           v.id,
-                            name:         `${prod.name} (${v.name})`,
+                            // AI UPDATE [2026-08-05]: When variant name is empty, use only the product
+                            // name to avoid "Munch Chocolate ()" as the menu-management row label.
+                            name:         v.name ? `${prod.name} (${v.name})` : prod.name,
                             price:        v.price || 0,
                             category:     prod.categoryName || prod.category || 'Other',
                             inStock:      v.inStock !== false && prod.inStock !== false,
@@ -1098,8 +1100,10 @@ function _buildItemsHtml(items) {
                         <div class="mm-item mm-variant-row ${isOn ? '' : 'mm-off'}">
                             <div class="mm-item-info">
                                 <div class="mm-item-name">
-                                    ${_esc(v._variantName || v.name)}
+                                    ${v._variantName ? _esc(v._variantName) : ''}
                                     ${!isOn ? '<span class="mm-oos-badge">OFF</span>' : ''}
+                                    <!-- AI UPDATE [2026-08-05]: was `v._variantName || v.name`
+                                         which showed the full "ProductName ()" when name is empty -->
                                 </div>
                                 <div class="mm-item-meta mm-item-price">₹${v.price || 0}</div>
                             </div>

@@ -54,7 +54,9 @@ async function processProductsToItems(productsSnap) {
                 if (v.active === false || v.inStock === false) return;
                 items.push({
                     id:           v.id,
-                    name:         `${prod.name} (${v.name})`,
+                    // AI UPDATE [2026-08-05]: When variant name is empty, use only the product name
+                    // to avoid "Munch Chocolate ()" in cart and card labels.
+                    name:         v.name ? `${prod.name} (${v.name})` : prod.name,
                     price:        v.price || 0,
                     category:     catName,
                     categoryId:   prod.categoryId,
@@ -495,9 +497,13 @@ function renderItemsToGrid(itemsToShow, grid) {
         if (processed.has(item.id)) return;
 
         // ── Multi-size product group (new products architecture) ──
-        // Any product with _productId + _variantName is from the new hierarchy.
+        // Any product with _productId is from the new hierarchy.
         // Group all its visible variants into ONE card regardless of category.
-        if (item._productId && item._variantName) {
+        // AI UPDATE [2026-08-05]: Condition was `item._productId && item._variantName`,
+        // which skipped grouping when _variantName is "" (empty/falsy) — causing each
+        // unnamed variant to render as a separate card. Now keyed on _productId alone
+        // so nameless variants are always grouped correctly.
+        if (item._productId) {
             const productId = item._productId;
             if (processedProductIds.has(productId)) return;
             const groupItems = itemsToShow.filter(
@@ -567,12 +573,14 @@ function createMultiSizeCard(productName, variantItems) {
     card.className = 'multi-size-card';
 
     // Build each size section
+    // AI UPDATE [2026-08-05]: When _variantName is empty the label div is omitted entirely
+    // so unnamed variants show only the price button with no "()" or stray text.
     const makeSide = (item) => {
-        const label = item._variantName || item.name.replace(/.*\((.+)\)$/, '$1').trim();
+        const label = item._variantName || '';
         return `
             <div class="ms-side" data-id="${item.id}">
                 <div class="item-remove-badge ms-remove" data-id="${item.id}" title="Remove">✕</div>
-                <div class="ms-label">${label}</div>
+                ${label ? `<div class="ms-label">${label}</div>` : ''}
                 <div class="ms-price">₹${item.price}</div>
                 <div class="item-qty-badge ms-qty" data-id="${item.id}">0</div>
             </div>

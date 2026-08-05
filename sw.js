@@ -62,7 +62,8 @@
 // timeout fix (Promise.race + 30 s hard limit on uploadBytes + getDownloadURL).
 // AI UPDATE [2026-08-02]: Bumped v40 → v41 — js/cloudinary-upload.js and js/cloudinary-public.js changed (direct Cloudinary upload).
 // AI UPDATE [2026-08-02]: Bumped v41 → v42 — js/admin.js: auth guard fix for saveItemBtn / toggleStock / deleteMenuItem.
-const CACHE_NAME = 'pos-static-v42'; const STATIC_ASSETS = [
+// AI UPDATE [2026-08-05]: bumped v42 → v43 — js/menu.js + js/menu-management.js variant-name fixes
+const CACHE_NAME = 'pos-static-v43'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',

@@ -1,6 +1,62 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-02 (Pushover sound fix — sound: 'Notification')
+> Last updated: 2026-08-05 (Unnamed variant grouping fix — billing panel card rendering)
+
+---
+
+## [AI UPDATE 2026-08-05] — Unnamed Variant Grouping Fix (Billing Panel)
+
+### Problem
+When a product's variants had empty names (`v.name === ""`), the billing panel rendered each variant as a **separate item card** instead of grouping them. The broken display looked like:
+
+```
+Munch Chocolate ()   Munch Chocolate ()
+₹5                   ₹10
+```
+
+### Root Cause (5 bugs across 2 files)
+
+| # | File | Line | Bug |
+|---|------|------|-----|
+| 1 | `js/menu.js` | ~57 | `name: \`${prod.name} (${v.name})\`` produced `"Munch Chocolate ()"` for empty variant names |
+| 2 | `js/menu.js` | ~500 | `if (item._productId && item._variantName)` — `_variantName === ""` is falsy, so grouping was skipped entirely; each variant fell through to a solo `createItemCard()` call |
+| 3 | `js/menu.js` | ~571 | `item._variantName \|\| item.name.replace(...)` — fell back to extracting label from the `"ProductName ()"` string, producing stray/wrong labels |
+| 4 | `js/menu-management.js` | ~697 | Same `"ProductName ()"` name bug |
+| 5 | `js/menu-management.js` | ~1101 | `v._variantName \|\| v.name` — showed full `"ProductName ()"` as the variant-row label in the menu management drawer |
+
+### Fixes Applied
+
+| File | Change |
+|------|--------|
+| `js/menu.js` | Bug 1: name now `v.name ? \`${prod.name} (${v.name})\` : prod.name` |
+| `js/menu.js` | Bug 2: grouping condition is now `if (item._productId)` only |
+| `js/menu.js` | Bug 3: label is `item._variantName \|\| ''`; label `div` omitted entirely when empty |
+| `js/menu-management.js` | Bug 4: same name fix as Bug 1 |
+| `js/menu-management.js` | Bug 5: label is now `v._variantName ? _esc(v._variantName) : ''` |
+| `sw.js` | Cache bumped `v42 → v43` (JS files modified) |
+
+### Result
+Unnamed variants are now grouped into one card exactly like named variants (Pizza Regular/Medium/Large), but without any label text. Only the price buttons are shown:
+
+```
+Munch Chocolate
+₹5    ₹10
+```
+
+### Files Modified
+| File | Repo | Change |
+|------|------|--------|
+| `js/menu.js` | Billing Panel | Bugs 1, 2, 3 — grouping + name + label |
+| `js/menu-management.js` | Billing Panel | Bugs 4, 5 — name + drawer row label |
+| `sw.js` | Billing Panel | Cache version bump v42 → v43 |
+
+### No Cross-Repo Changes Required
+This fix is purely within the Billing Panel's rendering logic. No Firestore fields, shared contracts, or Customer Panel files were changed.
+
+### Known Remaining Issues
+None introduced by this change.
+
+---
 
 ---
 
