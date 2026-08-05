@@ -1202,6 +1202,12 @@ function _renderProductModal(prod) {
                     <label>Description <span style="font-weight:400;font-size:0.75rem;opacity:0.5;">(optional)</span></label>
                     <textarea id="amProdDescInput" placeholder="Ingredients, notes…">${esc(prod?.description || '')}</textarea>
                 </div>
+                <!-- AI UPDATE [2026-08-05]: Product Price field — shown only when no variants exist.
+                     Hidden/shown by _refreshVariantList(). Variants override this price. -->
+                <div class="am-form-group" id="amBasePriceGroup">
+                    <label>Product Price (₹) <span style="font-weight:400;font-size:0.75rem;opacity:0.5;">— single-price product</span></label>
+                    <input type="number" id="amProdBasePrice" value="${prod && !prod.hasVariants ? (prod.price ?? '') : ''}" placeholder="e.g. 50" min="0" step="1">
+                </div>
                 <div class="am-section-divider"><span>Status</span><hr></div>
                 <div class="am-toggle-row">
                     <span class="am-toggle-label">Active</span>
@@ -1300,18 +1306,25 @@ function _refreshProdImageUI() {
 }
 
 // ── Variant list ──────────────────────────────────────────────────────────────
+// AI UPDATE [2026-08-05]: Show/hide Product Price field based on variant count.
+// Variant name is now optional — a blank-name variant with a price is valid.
 function _refreshVariantList() {
     const el = document.getElementById('amVariantList');
     if (!el) return;
     const active = _variantEditors.filter(v => !v._deleted);
+
+    // Show Product Price field only when no variants exist
+    const priceGroup = document.getElementById('amBasePriceGroup');
+    if (priceGroup) priceGroup.classList.toggle('hidden', active.length > 0);
+
     if (!active.length) {
         el.innerHTML = `<div style="font-size:0.8rem;color:rgba(255,255,255,0.3);padding:6px 0;margin-bottom:8px;">
-            No variants — product has a single price. Add a variant to enable size/portion selection.</div>`;
+            No variants — set the Product Price above. Add a variant to enable size/portion selection.</div>`;
         return;
     }
     el.innerHTML = active.map(v => `
         <div class="am-variant-row" data-vkey="${v._key}">
-            <input type="text" class="am-variant-name"  placeholder="Name (e.g. Regular)" value="${esc(v.name)}" data-field="name">
+            <input type="text" class="am-variant-name"  placeholder="Name (optional, e.g. Regular)" value="${esc(v.name)}" data-field="name">
             <input type="number" class="am-variant-price" placeholder="₹Price" value="${v.price || ''}" data-field="price" min="0" step="1">
             <button class="am-variant-del" data-vkey="${v._key}" title="Remove variant">✕</button>
         </div>
@@ -1400,8 +1413,10 @@ async function _saveProductModal() {
     const flags = {};
     document.querySelectorAll('[data-flag]').forEach(chk => { flags[chk.dataset.flag] = chk.checked; });
 
-    // Collect variants (non-deleted, non-empty name)
-    const variantsToKeep = _variantEditors.filter(v => !v._deleted && v.name.trim());
+    // AI UPDATE [2026-08-05]: Variant name is now optional.
+    // Keep a variant if it has a price (even with empty name), or if it has a name.
+    // A completely blank row (no name, no price) is discarded.
+    const variantsToKeep = _variantEditors.filter(v => !v._deleted && (v.name.trim() !== '' || v.price > 0));
     const hasVariants    = variantsToKeep.length > 0;
 
     // Build variantsList for denormalized billing panel reads
@@ -1443,10 +1458,11 @@ async function _saveProductModal() {
         };
 
         if (!hasVariants) {
-            // For single-price products, get price from the first variant if transitioning,
-            // or preserve existing price, or set 0
-            const existing = _editingProductId ? _products.find(p => p.id === _editingProductId) : null;
-            productData.price = existing?.price ?? 0;
+            // AI UPDATE [2026-08-05]: Read price from the Product Price input field.
+            // Previously this preserved the existing Firestore value (which defaulted to 0
+            // for new products because no input existed). Now the operator can set it explicitly.
+            const basePriceEl = document.getElementById('amProdBasePrice');
+            productData.price = basePriceEl ? (Number(basePriceEl.value) || 0) : 0;
         }
 
         if (_editingProductId) {

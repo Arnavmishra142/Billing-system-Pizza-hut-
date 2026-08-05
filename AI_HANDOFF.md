@@ -1,6 +1,62 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-02 (Pushover sound fix — sound: 'Notification')
+> Last updated: 2026-08-05 (Single-price products + optional variant names)
+
+---
+
+## [AI UPDATE 2026-08-05] — Single-Price Products & Optional Variant Names
+
+### What Was Built
+
+Two UX fixes to the product editor in the admin panel:
+
+**Part 1 — Single-price products now have a price field.**
+Products with no variants previously had no way to enter a price in the admin product editor (`js/admin-menu.js`). New products always defaulted to `₹0`. A "Product Price (₹)" input field (`#amBasePriceGroup` / `#amProdBasePrice`) is now shown whenever the variant list is empty. It is automatically hidden when one or more variants are added (variants override the base price). On save, the field value is written to `products.price` in Firestore.
+
+**Part 2 — Variant Name is now optional.**
+The variant save filter previously discarded any variant row whose name was empty. It now keeps a variant row if it has a price even when the name is empty. Nameless variants are stored with `name: ""` in Firestore. Both the customer panel display (`customer.html`) and KOT/bill item naming already use `item.name`, which is now built correctly — no `"()"` suffix is ever appended when the variant name is blank.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `js/admin-menu.js` | Added `#amBasePriceGroup` price input to `_renderProductModal`; added show/hide logic in `_refreshVariantList`; changed variant filter in `_saveProductModal` to allow empty-name variants; changed price read in `_saveProductModal` to use the new input field |
+| `customer.html` | `loadMenuFromProducts`: item name now uses `v.name ? \`${prod.name} (${v.name})\` : prod.name` (no `"()"` for nameless variants); `buildVariantGroupCard`: `vg-label` div only rendered when label is non-empty |
+| `sw.js` | Bumped cache `v42 → v43` |
+| `admin/sw.js` | Bumped cache `v8 → v9` |
+
+### Behavior Summary
+
+| Scenario | Admin list | Customer panel | KOT / Bill |
+|----------|-----------|----------------|------------|
+| No variants, price set | `₹{price}` | `₹{price}` (plain item card) | `Product Name` |
+| Variants with names | `N variants` | Variant group card with labels | `Product Name (Variant Name)` |
+| Variants without names | `N variants` | Variant group card — price only, no label row | `Product Name` (no suffix) |
+
+### What Was NOT Changed
+
+- No Firestore schema changes (no new fields, no renamed fields).
+- No changes to the billing workflow (`js/cart.js`), KOT printing, incoming orders, or any frozen system.
+- No changes to `menu_items` (legacy flat collection) — only the new `products` collection editor is affected.
+- Existing Pizza, Burger, Frooti and other variant products are unaffected.
+
+### Customer Panel Changes Required (teamdovolve-hue/Order-)
+
+The customer panel at Netlify (`teamdovolve-hue/Order-`) has its own copy of the menu rendering code. To apply the same nameless-variant fix there, the following change is needed:
+
+**File:** `js/menu.js` (or wherever `loadMenuFromProducts` / variant card building lives)
+
+**Change 1 — Item name building:** Wherever a variant item name is constructed as `` `${prod.name} (${v.name})` ``, replace with:
+```js
+v.name ? `${prod.name} (${v.name})` : prod.name
+```
+
+**Change 2 — Variant label rendering:** Wherever `vg-label` (or equivalent) is rendered for a variant, make it conditional:
+```js
+${label ? `<div class="vg-label">${esc(label)}</div>` : ''}
+```
+
+The `customer.html` in this billing repo has already been updated. The Netlify copy needs the same fix applied independently.
 
 ---
 
