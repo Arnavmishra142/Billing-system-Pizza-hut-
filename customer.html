@@ -1663,9 +1663,11 @@ function loadMenuFromProducts() {
                 const activeVariants = [];
                 prod.variantsList.forEach(v => {
                     if (v.active === false || v.inStock === false) return;
+                    // AI UPDATE [2026-08-05]: If variant name is empty, use product name alone
+                    // (avoids "Munch Chocolate ()" on KOT / bill / cart).
                     const item = {
                         id:           v.id,
-                        name:         `${prod.name} (${v.name})`,
+                        name:         v.name ? `${prod.name} (${v.name})` : prod.name,
                         variantLabel: v.name,
                         price:        v.price || 0,
                         category:     catName,
@@ -1961,9 +1963,13 @@ function buildVariantGroupCard(group) {
     card.className = 'variant-group-card';
     card.dataset.productId = group._productId;
 
-    const sidesHtml = group.variants.map(v => `
+    // AI UPDATE [2026-08-05]: Only render vg-label when variant name is non-empty.
+    // Empty name = show price only, no label row.
+    const sidesHtml = group.variants.map(v => {
+        const label = v.variantLabel || v._variantName || '';
+        return `
         <div class="vg-side" id="card-${v.id}" data-id="${v.id}">
-            <div class="vg-label">${esc(v.variantLabel || v._variantName || '')}</div>
+            ${label ? `<div class="vg-label">${esc(label)}</div>` : ''}
             <div class="vg-price">₹${v.price}</div>
             <div class="qty-ctrl vg-qty-ctrl">
                 <button class="qty-btn qty-minus" data-id="${v.id}">−</button>
@@ -1971,7 +1977,7 @@ function buildVariantGroupCard(group) {
                 <button class="qty-btn qty-plus" data-id="${v.id}">+</button>
             </div>
         </div>
-    `).join('');
+    `; }).join('');
 
     card.innerHTML = `
         <div class="vg-heading">${esc(group.name)}</div>
