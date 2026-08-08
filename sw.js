@@ -63,7 +63,7 @@
 // AI UPDATE [2026-08-02]: Bumped v40 → v41 — js/cloudinary-upload.js and js/cloudinary-public.js changed (direct Cloudinary upload).
 // AI UPDATE [2026-08-02]: Bumped v41 → v42 — js/admin.js: auth guard fix for saveItemBtn / toggleStock / deleteMenuItem.
 // AI UPDATE [2026-08-05]: Bumped v42 → v43 — admin-menu.js + customer.html updated (single-price products, optional variant names); js/menu.js + js/menu-management.js variant-name grouping fixes.
-const CACHE_NAME = 'pos-static-v43'; const STATIC_ASSETS = [
+const CACHE_NAME = 'pos-static-v44'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
