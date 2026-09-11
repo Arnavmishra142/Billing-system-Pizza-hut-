@@ -373,6 +373,18 @@ window._custOpenDetail = async function(phone) {
     </div>` : ''}
 </div>`;
 
+    const recoveryHtml = `
+<!-- AI UPDATE [2026-09-11]: Staff-assisted password recovery -->
+<div style="padding:16px 0 0;">
+    <button class="btn full-width" style="padding:14px;font-size:1rem;justify-content:center;background:#1f6feb;color:#fff;border:none;"
+        onclick="window._custGenerateRecovery('${_esc(c.id)}')">
+        🔑 Generate Recovery Code
+    </button>
+    <div style="font-size:0.75rem;color:#8b949e;margin-top:8px;line-height:1.5;">
+        Read the code out to the customer. They set their own new password on their device. Valid 10 minutes, single use.
+    </div>
+</div>`;
+
     const deleteHtml = `
 <!-- Delete button -->
 <div style="padding:20px 0 4px;">
@@ -390,7 +402,7 @@ window._custOpenDetail = async function(phone) {
     c._historyLoaded
         ? _buildOrdersHtml(c.orders)
         : '<div class="loading-state">Loading orders… ☁️</div>'
-}</div>` + deleteHtml;
+}</div>` + recoveryHtml + deleteHtml;
     overlay.classList.remove('hidden');
 
     // Phase 2 — fetch history if not yet loaded, then update the container
@@ -507,4 +519,86 @@ window._custRefresh = async function() {
     if (btn) { btn.textContent = '⏳'; btn.disabled = true; }
     await refreshCustomerManagement();
     if (btn) { btn.textContent = '↻'; btn.disabled = false; }
+};
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// STAFF-ASSISTED PASSWORD RECOVERY  (AI UPDATE [2026-09-11])
+//
+// Staff press "Generate Recovery Code" on a customer. The Cloudflare Worker
+// (server-side, Firebase Admin credentials) creates a cryptographically random
+// 6-digit code, stores ONLY its hash in customer_recovery/{phone}, and returns
+// the plain code once for display here. Staff read it out verbally.
+//
+// Staff never see nor set the customer's new password — the customer enters
+// the code on their own device and chooses the password themselves.
+// ══════════════════════════════════════════════════════════════════════════
+
+const RECOVERY_FN_BASE = 'https://pizza-billing-functions.mishrarnav142.workers.dev';
+let _recoveryTimer = null;
+
+async function _callRecoveryFn(fnName, payload) {
+    const res  = await fetch(`${RECOVERY_FN_BASE}/${fnName}`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ data: payload }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error?.message || `Request failed (${res.status})`);
+    return json.result;
+}
+
+window._custGenerateRecovery = async function(phone) {
+    const c = _customers.find(x => x.id === phone);
+    const overlay = document.getElementById('custRecoveryOverlay');
+    const body    = document.getElementById('custRecoveryBody');
+    if (!overlay || !body) return;
+
+    body.innerHTML = `<div class="loading-state">Generating secure code… 🔐</div>`;
+    overlay.classList.remove('hidden');
+
+    try {
+        const r = await _callRecoveryFn('generateRecoveryCode', {
+            phone,
+            pin: window.__OPERATOR_PIN || '',
+        });
+
+        body.innerHTML = `
+<div style="text-align:center;padding:8px 0 4px;">
+    <div style="font-size:0.72rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:1px;">Recovery Code</div>
+    <div style="font-size:2.6rem;font-weight:900;color:#3fb950;letter-spacing:10px;margin:10px 0 6px;font-family:monospace;">${_esc(r.code)}</div>
+    <div style="font-size:0.95rem;color:#e6edf3;font-weight:700;">${_esc(r.name || c?.name || 'Customer')}</div>
+    <div style="font-size:0.9rem;color:#58a6ff;margin-top:2px;">${_esc(r.phone || phone)}</div>
+    <div id="custRecoveryTtl" style="font-size:0.85rem;color:#d29922;margin-top:12px;font-weight:700;">Expires in 10:00</div>
+    <div style="font-size:0.78rem;color:#8b949e;margin-top:14px;line-height:1.6;">
+        Tell this code to the customer. They enter it on their own device and create their own new password.<br>
+        <strong style="color:#f0883e;">Never ask the customer for their password.</strong>
+    </div>
+</div>`;
+
+        // Live countdown — display only; the Worker enforces the real expiry.
+        clearInterval(_recoveryTimer);
+        const endAt = Number(r.expiresAt) || (Date.now() + 10 * 60 * 1000);
+        const tick = () => {
+            const el = document.getElementById('custRecoveryTtl');
+            if (!el) { clearInterval(_recoveryTimer); return; }
+            const left = Math.max(0, Math.floor((endAt - Date.now()) / 1000));
+            const m = String(Math.floor(left / 60)).padStart(2, '0');
+            const sec = String(left % 60).padStart(2, '0');
+            el.textContent = left ? `Expires in ${m}:${sec}` : 'Code expired — generate a new one';
+            if (!left) { el.style.color = '#f85149'; clearInterval(_recoveryTimer); }
+        };
+        tick();
+        _recoveryTimer = setInterval(tick, 1000);
+
+    } catch (err) {
+        body.innerHTML = `<div class="empty-state">⚠️ Could not generate code.<br><small style="color:#8b949e">${_esc(err.message)}</small></div>`;
+    }
+};
+
+window._custCloseRecovery = function() {
+    clearInterval(_recoveryTimer);
+    document.getElementById('custRecoveryOverlay')?.classList.add('hidden');
+    const body = document.getElementById('custRecoveryBody');
+    if (body) body.innerHTML = '';   // never leave a code on screen
 };

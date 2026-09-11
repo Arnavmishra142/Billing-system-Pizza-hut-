@@ -1210,6 +1210,170 @@ async function handlePushoverCallback(url, db) {
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CUSTOMER PASSWORD RECOVERY  (AI UPDATE [2026-09-11])
+//
+// Staff-assisted recovery — NO SMS/email/WhatsApp OTP.
+//   1. generateRecoveryCode  (billing staff, PIN-authorised)  → returns plain code once
+//   2. verifyRecoveryCode    (customer, public)               → returns short-lived resetToken
+//   3. resetCustomerPassword (customer, needs resetToken)     → writes new passwordHash
+//
+// Storage: customer_recovery/{phone}  — Worker/Admin-only (Firestore catch-all
+// rule denies every client read/write on this collection).  Only HASHES of the
+// recovery code and of the reset token are stored; never the plaintext.
+//
+// Existing customer login format is preserved:
+//   customers/{phone}.passwordHash = SHA-256(password + ":" + phone)  (hex)
+// The customer panel computes that hash locally and sends only the hash.
+// ══════════════════════════════════════════════════════════════════════════════
+
+const RECOVERY_CODE_TTL_MS   = 10 * 60 * 1000;  // 10 minutes
+const RESET_TOKEN_TTL_MS     =  5 * 60 * 1000;  // 5 minutes after code verified
+const RECOVERY_MAX_ATTEMPTS  = 5;               // wrong-code guesses before lockout
+
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Cryptographically unpredictable 6-digit code (rejection sampling — uniform).
+function generateSecureCode() {
+  const buf = new Uint32Array(1);
+  let n;
+  do { crypto.getRandomValues(buf); n = buf[0]; } while (n >= 4294000000);
+  return String(n % 1000000).padStart(6, '0');
+}
+
+function randomTokenHex(bytes = 32) {
+  const b = new Uint8Array(bytes);
+  crypto.getRandomValues(b);
+  return [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+function timingSafeEqualHex(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+// Staff authorisation: a verified Firebase ID token carrying the billingOperator
+// claim (preferred), otherwise the operator PIN verified server-side against the
+// ADMIN_PIN Worker secret.  The PIN never leaves the authorised billing panel.
+function assertBillingStaff(data, authCtx, env) {
+  if (authCtx?.token?.billingOperator === true) return;
+  const pin = (data && data.pin) || '';
+  if (env.ADMIN_PIN && pin && pin === env.ADMIN_PIN) return;
+  throw new FnError('permission-denied', 'Only authorised billing staff can generate a recovery code.');
+}
+
+// ── generateRecoveryCode ──────────────────────────────────────────────────────
+async function handleGenerateRecoveryCode(data, authCtx, db, env) {
+  assertBillingStaff(data, authCtx, env);
+
+  const phone = normalizePhone(data?.phone);
+  const snap  = await db.get('customers', phone);
+  if (!snap.exists) throw new FnError('not-found', 'No customer account exists for this phone number.');
+
+  const code      = generateSecureCode();
+  const codeHash  = await sha256Hex(code + ':' + phone);
+  const expiresAt = Date.now() + RECOVERY_CODE_TTL_MS;
+
+  // set() overwrites → any previous outstanding code for this customer dies here.
+  await db.set('customer_recovery', phone, {
+    phone,
+    codeHash,
+    expiresAt,
+    attempts:  0,
+    used:      false,
+    resetTokenHash: null,
+    resetTokenExpiresAt: 0,
+  }, ['createdAt']);
+
+  return {
+    code,                                   // shown ONCE inside the billing panel
+    phone,
+    name: snap.data?.name || '',
+    expiresAt,
+    expiresInSeconds: Math.floor(RECOVERY_CODE_TTL_MS / 1000),
+  };
+}
+
+// ── verifyRecoveryCode ────────────────────────────────────────────────────────
+async function handleVerifyRecoveryCode(data, db) {
+  const phone = normalizePhone(data?.phone);
+  const code  = String(data?.code || '').trim();
+  if (!/^\d{6}$/.test(code)) throw new FnError('invalid-argument', 'Enter the 6-digit recovery code.');
+
+  const snap = await db.get('customer_recovery', phone);
+  if (!snap.exists) throw new FnError('not-found', 'No recovery code has been issued. Please contact the billing counter.');
+
+  const rec = snap.data || {};
+  if (rec.used === true)                      throw new FnError('failed-precondition', 'This recovery code has already been used.');
+  if (Number(rec.attempts || 0) >= RECOVERY_MAX_ATTEMPTS)
+                                              throw new FnError('resource-exhausted', 'Too many incorrect attempts. Please ask the billing counter for a new code.');
+  if (Number(rec.expiresAt || 0) < Date.now()) throw new FnError('deadline-exceeded', 'This recovery code has expired. Please ask the billing counter for a new one.');
+
+  const codeHash = await sha256Hex(code + ':' + phone);
+  if (!timingSafeEqualHex(codeHash, String(rec.codeHash || ''))) {
+    const attempts = Number(rec.attempts || 0) + 1;
+    await db.merge('customer_recovery', phone, { attempts });
+    throw new FnError('permission-denied',
+      `Incorrect recovery code. ${Math.max(0, RECOVERY_MAX_ATTEMPTS - attempts)} attempt(s) left.`);
+  }
+
+  const resetToken = randomTokenHex(32);
+  await db.merge('customer_recovery', phone, {
+    attempts: 0,
+    resetTokenHash:      await sha256Hex(resetToken + ':' + phone),
+    resetTokenExpiresAt: Date.now() + RESET_TOKEN_TTL_MS,
+  });
+
+  const cust = await db.get('customers', phone);
+  return { verified: true, phone, name: cust.data?.name || '', resetToken, expiresInSeconds: Math.floor(RESET_TOKEN_TTL_MS / 1000) };
+}
+
+// ── resetCustomerPassword ─────────────────────────────────────────────────────
+async function handleResetCustomerPassword(data, db) {
+  const phone        = normalizePhone(data?.phone);
+  const resetToken   = String(data?.resetToken || '').trim();
+  const passwordHash = String(data?.passwordHash || '').trim().toLowerCase();
+
+  if (!resetToken)                        throw new FnError('invalid-argument', 'Missing reset token.');
+  if (!/^[0-9a-f]{64}$/.test(passwordHash)) throw new FnError('invalid-argument', 'Invalid password hash. Send SHA-256(password + ":" + phone) as hex.');
+
+  const snap = await db.get('customer_recovery', phone);
+  if (!snap.exists) throw new FnError('not-found', 'Recovery session not found. Start again with your recovery code.');
+  const rec = snap.data || {};
+
+  if (rec.used === true)                                    throw new FnError('failed-precondition', 'This recovery code has already been used.');
+  if (!rec.resetTokenHash)                                  throw new FnError('failed-precondition', 'Recovery code not verified yet.');
+  if (Number(rec.resetTokenExpiresAt || 0) < Date.now())    throw new FnError('deadline-exceeded', 'Your reset session expired. Enter the recovery code again.');
+
+  const tokenHash = await sha256Hex(resetToken + ':' + phone);
+  if (!timingSafeEqualHex(tokenHash, String(rec.resetTokenHash))) {
+    throw new FnError('permission-denied', 'Invalid reset session.');
+  }
+
+  const cust = await db.get('customers', phone);
+  if (!cust.exists) throw new FnError('not-found', 'Customer account no longer exists.');
+
+  // Same field + same format the existing login path already reads.
+  await db.merge('customers', phone, { passwordHash }, ['passwordUpdatedAt']);
+
+  // Single use — burn the code and the reset token.
+  await db.merge('customer_recovery', phone, {
+    used: true,
+    codeHash: null,
+    resetTokenHash: null,
+    resetTokenExpiresAt: 0,
+    expiresAt: 0,
+  }, ['usedAt']);
+
+  return { ok: true, phone };
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -1322,6 +1486,23 @@ export default {
         // No auth required — see GET /expireOrders comment for rationale.
         case 'expireOrders':
           result = await handleExpireOrders(db);
+          break;
+
+
+        // AI UPDATE [2026-09-11] — Customer password recovery (staff-assisted).
+        case 'generateRecoveryCode': {
+          let authCtx = null;
+          if (rawToken) { try { authCtx = await verifyIdToken(rawToken, projectId); } catch { authCtx = null; } }
+          result = await handleGenerateRecoveryCode(data, authCtx, db, env);
+          break;
+        }
+
+        case 'verifyRecoveryCode':
+          result = await handleVerifyRecoveryCode(data, db);
+          break;
+
+        case 'resetCustomerPassword':
+          result = await handleResetCustomerPassword(data, db);
           break;
 
         default:

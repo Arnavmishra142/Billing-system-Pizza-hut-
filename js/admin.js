@@ -106,6 +106,11 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
 });
 
 function showDashboard() {
+    // AI UPDATE [2026-09-11]: expose the operator PIN in-memory only, so the
+    // Customer Management panel can authorise recovery-code generation with
+    // the Worker (which verifies it server-side against its ADMIN_PIN secret).
+    // Not persisted anywhere — cleared on reload/logout.
+    window.__OPERATOR_PIN = ADMIN_PIN;
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('adminContent').style.display = 'flex';
     loadSalesData('days', 1);

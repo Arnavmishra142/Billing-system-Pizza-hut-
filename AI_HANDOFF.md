@@ -4306,3 +4306,116 @@ The reference implementation is in this repo's `customer.html` `loadMenuFromProd
 | `firestore.rules` | Added rules for `categories`, `products`, `products/{productId}/variants/{variantId}` |
 | `AI_HANDOFF.md` | This update |
 
+
+---
+
+# Customer Password Recovery — Staff-Assisted (AI UPDATE [2026-09-11])
+
+## Status
+
+- **Billing panel + Worker backend: IMPLEMENTED** (this repo).
+- **Customer panel (`teamdovolve-hue/Order-`): NOT TOUCHED.** Instructions for the next agent are below.
+
+## Architecture recap (audited, unchanged)
+
+- Customer account = Firestore doc `customers/{+91XXXXXXXXXX}` (normalised phone is the ID).
+- Password = `customers/{phone}.passwordHash` = **hex SHA-256 of `password + ":" + phone`**, computed in the browser.
+- Firebase Authentication is anonymous/custom-token only — it stores **no** customer password.
+- Firestore rules cannot distinguish staff from customers (`isOperator()` is true for any anonymous session), so **all recovery logic is owned by the Cloudflare Worker** (`pizza-billing-functions.mishrarnav142.workers.dev`), which holds service-account credentials and bypasses rules.
+
+## New Worker endpoints (already deployed in `cloudflare-worker/src/index.js`)
+
+Callable-style: `POST https://pizza-billing-functions.mishrarnav142.workers.dev/{fn}` with body `{ "data": { ... } }`; success `{ "result": {...} }`, failure `{ "error": { "status": "...", "message": "..." } }` with a matching HTTP status.
+
+| Function | Caller | Request `data` | Success `result` |
+|---|---|---|---|
+| `generateRecoveryCode` | **Billing staff only** | `{ phone, pin }` (or Bearer ID token with `billingOperator` claim) | `{ code, phone, name, expiresAt, expiresInSeconds }` |
+| `verifyRecoveryCode` | Customer panel | `{ phone, code }` | `{ verified: true, phone, name, resetToken, expiresInSeconds }` |
+| `resetCustomerPassword` | Customer panel | `{ phone, resetToken, passwordHash }` | `{ ok: true, phone }` |
+
+Data model — **new collection** `customer_recovery/{phone}` (Worker/Admin only; the existing Firestore catch-all `allow read, write: if false` already blocks every client, so **no rules change was made**):
+
+```
+{ phone, codeHash, expiresAt(ms), attempts, used, resetTokenHash, resetTokenExpiresAt, createdAt, usedAt }
+```
+
+Security properties: 6-digit code from `crypto.getRandomValues` (uniform, rejection-sampled); only SHA-256 hashes stored; 10-minute code TTL; 5 wrong attempts then lockout; verification returns a 5-minute opaque `resetToken`; code + token burned on successful reset (`used: true`); constant-time hash comparison; generation requires the operator PIN verified server-side against the Worker `ADMIN_PIN` secret.
+
+## Billing panel changes made (this repo)
+
+| File | Change |
+|---|---|
+| `cloudflare-worker/src/index.js` | Added `sha256Hex`, `generateSecureCode`, `randomTokenHex`, `timingSafeEqualHex`, `assertBillingStaff`, `handleGenerateRecoveryCode`, `handleVerifyRecoveryCode`, `handleResetCustomerPassword` + 3 router cases. Nothing existing modified. |
+| `js/customers.js` | Customer detail overlay now shows **🔑 Generate Recovery Code**; added `_callRecoveryFn`, `window._custGenerateRecovery`, `window._custCloseRecovery` (code display + 10-min countdown, cleared on close). |
+| `admin/index.html` | Added `#custRecoveryOverlay` modal (`#custRecoveryBody`). |
+| `js/admin.js` | `showDashboard()` sets in-memory `window.__OPERATOR_PIN` (never persisted) so the panel can authorise generation. |
+
+Untouched: billing calculations, sales history, KOT, menu/variants, tables, QR/incoming orders, customer order history, `firestore.rules`, `firebase-config.js`, all existing collections/fields/localStorage keys. The Customers entry remains in the existing bottom navigation (moving it to a left sidebar would be a global layout change and was intentionally not done).
+
+Deploy step required: `cd cloudflare-worker && npx wrangler deploy` (secrets `ADMIN_PIN`, `FIREBASE_PRIVATE_KEY`, `FIREBASE_CLIENT_EMAIL` are already set).
+
+---
+
+# Customer Password Recovery — Customer Panel Changes (for the next agent)
+
+Repository: `https://github.com/teamdovolve-hue/Order-`
+
+### 1. Files to modify
+
+- `index.html` — the login screen and the existing "Forgot Password?" static overlay.
+- `js/auth.js` — login/registration/hashing logic; add the 3-step recovery flow here.
+- `css/style.css` — styles for the new steps (reuse existing modal/input classes; add nothing global).
+
+Do **not** touch ordering, cart, menu, order-history, or session code.
+
+### 2. Existing functions to modify
+
+- The current `Forgot Password?` click handler (today it only opens a static "visit the billing counter" overlay) → replace its body with the new 3-step flow.
+- Reuse the **existing** password-hashing helper in `js/auth.js` (`SHA-256(password + ":" + phone)`); do not write a second hashing implementation.
+- Reuse the existing phone-normalisation helper so the phone sent matches the `customers/{phone}` doc ID (`+91XXXXXXXXXX`).
+
+### 3. Current flow
+
+Login: read `customers/{phone}` from Firestore → compare locally computed hash with `passwordHash` → on match write session to `localStorage["qrmenu_user"]`. "Forgot Password?" shows a dead-end message. No recovery exists.
+
+### 4. New UI flow (3 steps, inside the existing forgot-password overlay)
+
+1. **Info + code entry** — "Please contact the billing counter to get your temporary recovery code." Phone field (prefilled from the login form) + 6-digit code input + **Verify**.
+2. **Create new password** — New Password + Confirm Password + **Set New Password** (min 6 chars, must match; client-side validation only for UX).
+3. **Success** — "Password updated. Please log in." → return to the login screen with the phone prefilled.
+
+### 5. Backend calls
+
+Base URL: `https://pizza-billing-functions.mishrarnav142.workers.dev` (same Worker the panel already uses for `customerAuth`). Plain `fetch`, `POST`, `Content-Type: application/json`, body `{ data: {...} }`. No auth header needed.
+
+- Step 1 → `POST /verifyRecoveryCode`, data `{ phone, code }` → keep `result.resetToken` **in a JS variable only**.
+- Step 2 → `POST /resetCustomerPassword`, data `{ phone, resetToken, passwordHash }` where `passwordHash = SHA-256(newPassword + ":" + phone)` computed locally.
+
+### 6. Never send / never store client-side
+
+- Never send the plaintext new password, and never send or store the old password.
+- Never persist `resetToken` or the recovery code in `localStorage`/`sessionStorage`/URL/cookies — memory only, discarded when the overlay closes.
+- Never write `passwordHash` to Firestore directly from the customer panel; only the Worker may write it.
+- Never log codes, tokens or hashes to the console.
+
+### 7. Error handling (map on `error.status` / HTTP code, show the Worker's `error.message`)
+
+| Case | Status | UI behaviour |
+|---|---|---|
+| Wrong code | `PERMISSION_DENIED` / 403 | Stay on step 1, show remaining attempts |
+| Expired code | `DEADLINE_EXCEEDED` / 504 | Ask the customer to get a new code from the counter |
+| Already used | `FAILED_PRECONDITION` / 400 | Ask for a new code |
+| No code issued / unknown phone | `NOT_FOUND` / 404 | "Please contact the billing counter first." |
+| Too many attempts | `RESOURCE_EXHAUSTED` / 429 | Lock the form, ask for a new code |
+| Expired reset session (step 2) | `DEADLINE_EXCEEDED` | Send back to step 1 |
+| Bad hash / invalid input | `INVALID_ARGUMENT` / 400 | Generic "Something went wrong, try again" |
+| Network/offline | fetch throws | "Check your connection and try again"; keep entered values |
+| Success | 200 | Clear token from memory, go to step 3, then login |
+
+### 8. Firebase / Auth notes
+
+No Firebase Auth changes. Customer sessions still come from `customerAuth`; the anonymous/custom-token model is unchanged. Do **not** add Firebase Email/Password auth, SMS OTP, or `sendPasswordResetEmail`. Do **not** modify `firestore.rules` — the customer panel must not read or write `customer_recovery`.
+
+### 9. Dependencies on the billing side
+
+All three Worker endpoints must be deployed (they are implemented in this repo). Nothing else is required; no new collection, index, or secret is needed on the customer side.
