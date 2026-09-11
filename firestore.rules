@@ -242,6 +242,19 @@ service cloud.firestore {
       allow read:  if isSameCustomer(uid) || isOperator();
     }
 
+    // ── recovery_codes ────────────────────────────────────────────────────────
+    // AI UPDATE [2026-09-11]: Staff-issued customer password-recovery codes.
+    // Written and read EXCLUSIVELY by the Cloudflare Worker via the Admin SDK
+    // (service account bypasses these rules). No direct browser access is ever
+    // allowed: codes are stored hashed, single-use, attempt-capped and expiring.
+    // Locking to `if false` guarantees a customer cannot read a code hash or
+    // self-issue/alter a code — generation is operator-gated in the Worker.
+    // Structure: recovery_codes/{+91XXXXXXXXXX} →
+    //   { customerPhone, codeHash, expiresAt(ms), used, attempts, createdAt, usedAt }
+    match /recovery_codes/{phone} {
+      allow read, write: if false;
+    }
+
     // ── Catch-all ─────────────────────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;

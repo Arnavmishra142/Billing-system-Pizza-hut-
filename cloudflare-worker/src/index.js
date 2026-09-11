@@ -24,6 +24,14 @@
 const REQUIRE_PHONE_VERIFICATION = false;   // flip to true when OTP/DLT approved
 const OPERATOR_UID               = 'billing-operator-main';
 
+// ── Password recovery (staff-issued temporary codes) ──────────────────────────
+// AI UPDATE [2026-09-11]: Customer password recovery via staff-issued codes.
+// Operator generates a short-lived, single-use code from the billing panel; the
+// customer redeems it to set a new password. Only a salted hash of the code is
+// ever stored (recovery_codes/{phone}); the plaintext is shown once to staff.
+const RECOVERY_CODE_TTL_MS  = 10 * 60 * 1000;  // 10 minutes
+const RECOVERY_MAX_ATTEMPTS = 5;               // wrong-code guesses before lockout
+
 // ── Pushover credentials (server-side only — never sent to browser) ───────────
 // AI UPDATE [2026-07-30]: Added for notifyOrder / cancelReceipt functions.
 // Hardcoded here consistent with server.js (values already in repo).
@@ -661,6 +669,23 @@ function customerUidFromPhone(phone) {
   return 'cust_' + phone.replace(/^\+/, '');
 }
 
+// SHA-256 → lowercase hex. Matches the customer client's hashPassword() output so
+// a code-based reset writes a passwordHash byte-identical to a normal registration.
+async function sha256Hex(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Cryptographically-random numeric code (rejection sampling avoids modulo bias).
+function generateNumericCode(digits) {
+  const mod   = 10 ** digits;
+  const limit = Math.floor(0xffffffff / mod) * mod;
+  const buf   = new Uint32Array(1);
+  let n;
+  do { crypto.getRandomValues(buf); n = buf[0]; } while (n >= limit);
+  return String(n % mod).padStart(digits, '0');
+}
+
 // ── operatorSignIn ─────────────────────────────────────────────────────────────
 async function handleOperatorSignIn(data, db, fbAuth, env) {
   const { pin } = data || {};
@@ -917,6 +942,115 @@ async function handleReleaseTableLock(data, authCtx, db, fbAuth, env) {
 
   console.log(`[releaseTableLock] Released "${tableId}", reason: ${releaseReason}`);
   return { released: true, tableId, releaseReason };
+}
+
+// ── generateRecoveryCode ──────────────────────────────────────────────────────
+// AI UPDATE [2026-09-11]: Operator-gated. Billing staff generates a temporary
+// recovery code for a customer who forgot their password. The plaintext code is
+// returned ONCE to the authorized billing panel; only its salted hash is stored.
+// Reuses the billingOperator claim gate (same as releaseTableLock).
+async function handleGenerateRecoveryCode(data, authCtx, db, env) {
+  if (!authCtx?.uid) throw new FnError('unauthenticated', 'Caller must be authenticated.');
+  if (!authCtx.token?.billingOperator) {
+    throw new FnError('permission-denied', 'Caller is not an authorized billing operator.');
+  }
+
+  const phone = normalizePhone(data?.phone);
+  const snap  = await db.get('customers', phone);
+  if (!snap.exists) {
+    throw new FnError('not-found', 'No customer account found for that phone number.');
+  }
+
+  const code      = generateNumericCode(6);
+  const codeHash  = await sha256Hex(code + ':' + phone);
+  const expiresAt = Date.now() + RECOVERY_CODE_TTL_MS;
+
+  // Overwrite any prior code for this phone — only the latest is ever valid.
+  await db.set('recovery_codes', phone, {
+    customerPhone: phone,
+    codeHash,
+    expiresAt,          // integer epoch ms
+    used:     false,
+    attempts: 0,
+  }, ['createdAt']);
+
+  console.log(`[generateRecoveryCode] Issued code for ${phone}, expires ${new Date(expiresAt).toISOString()}`);
+  return {
+    phone,
+    name:             snap.data?.name || '',
+    code,             // plaintext — shown ONLY in the authorized billing panel
+    expiresAt,
+    expiresInSeconds: Math.round(RECOVERY_CODE_TTL_MS / 1000),
+  };
+}
+
+// ── resetPasswordWithCode ─────────────────────────────────────────────────────
+// AI UPDATE [2026-09-11]: Customer-facing. Verifies a staff-issued recovery code
+// (correct customer, not expired, not used, under the attempt cap) and, if valid,
+// sets the customer's new password. The code is invalidated atomically on success.
+// Requires any authenticated Firebase user (the customer's anonymous session).
+async function handleResetPasswordWithCode(data, authCtx, db, env) {
+  if (!authCtx?.uid) throw new FnError('unauthenticated', 'Please reopen the app and try again.');
+
+  const phone       = normalizePhone(data?.phone);
+  const code        = String(data?.code || '').trim();
+  const newPassword = String(data?.newPassword || '');
+
+  if (!/^\d{6}$/.test(code)) {
+    throw new FnError('invalid-argument', 'Enter the 6-digit recovery code from the billing counter.');
+  }
+  if (newPassword.length < 6) {
+    throw new FnError('invalid-argument', 'Password must be at least 6 characters.');
+  }
+
+  const recSnap = await db.get('recovery_codes', phone);
+  if (!recSnap.exists) {
+    throw new FnError('not-found', 'No active recovery code. Please ask staff to generate one.');
+  }
+  const rec = recSnap.data;
+
+  if (rec.used === true) {
+    throw new FnError('failed-precondition', 'This recovery code was already used. Please ask staff for a new one.');
+  }
+  if ((Number(rec.attempts) || 0) >= RECOVERY_MAX_ATTEMPTS) {
+    throw new FnError('resource-exhausted', 'Too many incorrect attempts. Please ask staff for a new code.');
+  }
+  if (!rec.expiresAt || Date.now() > Number(rec.expiresAt)) {
+    throw new FnError('deadline-exceeded', 'This recovery code has expired. Please ask staff for a new one.');
+  }
+
+  const providedHash = await sha256Hex(code + ':' + phone);
+  if (providedHash !== rec.codeHash) {
+    // Count the failed guess (best-effort; separate from the success transaction).
+    await db.update('recovery_codes', phone, { attempts: (Number(rec.attempts) || 0) + 1 })
+      .catch(e => console.warn('[resetPasswordWithCode] attempt increment failed:', e.message));
+    throw new FnError('invalid-argument', 'Incorrect recovery code. Please check and try again.');
+  }
+
+  const custSnap = await db.get('customers', phone);
+  if (!custSnap.exists) {
+    throw new FnError('not-found', 'Customer profile not found.');
+  }
+
+  // passwordHash format MUST match the client login: SHA-256(password + ':' + phone).
+  const passwordHash = await sha256Hex(newPassword + ':' + phone);
+
+  // Atomic single-use: re-verify inside the transaction, then write both docs so a
+  // concurrent redeem cannot use the same code twice.
+  await db.runTransaction(async (tx) => {
+    const docs = await tx.batchGet([`recovery_codes/${phone}`]);
+    const cur  = docs[`recovery_codes/${phone}`];
+    if (!cur?.exists)           throw new FnError('not-found', 'Recovery code no longer exists.');
+    if (cur.data.used === true) throw new FnError('failed-precondition', 'This recovery code was already used.');
+    if (!cur.data.expiresAt || Date.now() > Number(cur.data.expiresAt)) {
+      throw new FnError('deadline-exceeded', 'This recovery code has expired.');
+    }
+    tx.update('customers',      phone, { passwordHash }, ['updatedAt']);
+    tx.update('recovery_codes', phone, { used: true },   ['usedAt']);
+  });
+
+  console.log(`[resetPasswordWithCode] Password reset OK for ${phone}; code invalidated.`);
+  return { ok: true, phone };
 }
 
 // ── notifyOrder ───────────────────────────────────────────────────────────────
@@ -1296,6 +1430,24 @@ export default {
           if (!rawToken) throw new FnError('unauthenticated', 'Caller must be authenticated.');
           const authCtx = await verifyIdToken(rawToken, projectId);
           result = await handleReleaseTableLock(data, authCtx, db, fbAuth, env);
+          break;
+        }
+
+        // AI UPDATE [2026-09-11]: Customer password recovery.
+        // generateRecoveryCode is operator-gated (billingOperator claim, obtained
+        // via operatorSignIn). resetPasswordWithCode is customer-facing (any signed-in
+        // Firebase user — the customer's anonymous session).
+        case 'generateRecoveryCode': {
+          if (!rawToken) throw new FnError('unauthenticated', 'Caller must be authenticated.');
+          const authCtx = await verifyIdToken(rawToken, projectId);
+          result = await handleGenerateRecoveryCode(data, authCtx, db, env);
+          break;
+        }
+
+        case 'resetPasswordWithCode': {
+          if (!rawToken) throw new FnError('unauthenticated', 'Caller must be authenticated.');
+          const authCtx = await verifyIdToken(rawToken, projectId);
+          result = await handleResetPasswordWithCode(data, authCtx, db, env);
           break;
         }
 
