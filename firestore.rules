@@ -242,6 +242,20 @@ service cloud.firestore {
       allow read:  if isSameCustomer(uid) || isOperator();
     }
 
+    // ── coupons ──────────────────────────────────────────────────────────────
+    // AI UPDATE [2026-09-12]: Coupon system (loyalty + personalized).
+    //   Structure: coupons/{code}
+    //     code, phone, name, amount, minOrder, message, type ('loyalty'|'personalized'),
+    //     used (bool), usedAt, usedBillId, usedTable, createdAt
+    //   Written by: js/cart.js (auto loyalty issue), js/customers.js (admin send),
+    //               js/cart.js billing panel (marks used on Bill & Settle / Save & Exit).
+    //   Read by: Billing Panel (verify code) and Customer Panel (offers.js — own coupons).
+    //   Same loose anonymous-auth trust model as the rest of this ruleset (isOperator()
+    //   already accepts any signed-in anonymous session, which both panels use).
+    match /coupons/{code} {
+      allow read, write: if request.auth != null;
+    }
+
     // ── Catch-all ─────────────────────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;
