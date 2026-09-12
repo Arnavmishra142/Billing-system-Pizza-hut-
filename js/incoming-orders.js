@@ -779,26 +779,41 @@ function renderDrawer(orders) {
             try {
                 await updateDoc(doc(db, 'pending_table_orders', id), { status: 'accepted', itemMeta: _newItemMeta });
 
+                // AI UPDATE [2026-09-13]: ROOT CAUSE FIX — these identity keys are now
+                // scoped by TABLE + CUSTOMER SLOT (`${tableName}_${customerSlot}`), not
+                // table alone. A table can hold several independent customers at once
+                // (multiple QR customers, or manual + QR); table-only keys let the most
+                // recently accepted customer's identity silently overwrite/absorb every
+                // other customer's on the same table. See AI_HANDOFF.md for the full
+                // audit. Table number is NEVER used as customer identity by itself —
+                // it is always paired with the customer slot that already isolates each
+                // customer's own cart_<table>_<slot> in localStorage.
+                const _slotSuffix = `${tableName}_${customerSlot}`;
+
                 // UI convenience cache — NOT the source of truth for settlement.
                 // cart.js reads customer_table_sessions from Firestore for lock release.
-                localStorage.setItem(`activeOrderDocId_${tableName}`, id);
-                if (customerUid)       localStorage.setItem(`activeCustomerUid_${tableName}`,  customerUid);
-                if (customerSessionId) localStorage.setItem(`activeSessionId_${tableName}`,    customerSessionId);
-                if (tableLockId)       localStorage.setItem(`activeLockId_${tableName}`,       tableLockId);
+                localStorage.setItem(`activeOrderDocId_${_slotSuffix}`, id);
+                if (customerUid)       localStorage.setItem(`activeCustomerUid_${_slotSuffix}`,  customerUid);
+                if (customerSessionId) localStorage.setItem(`activeSessionId_${_slotSuffix}`,    customerSessionId);
+                if (tableLockId)       localStorage.setItem(`activeLockId_${_slotSuffix}`,       tableLockId);
 
                 // AI UPDATE [2026-07-28] v9 — Issue 2 fix:
                 // Track the specific order IDs imported via "Open in POS" so that
                 // syncCustomerOrderCompletion() marks ONLY those orders as 'completed'
                 // at Bill & Settle / Save & Exit time.
-                // Without this, sync marked ALL pending/active orders for the table as
-                // 'completed', silently consuming any other unreviewed pending card.
+                // AI UPDATE [2026-09-13]: this list is now scoped per (table, slot) —
+                // previously it was per-table only, so accepting two different
+                // customers on the same table accumulated BOTH of their order IDs into
+                // one shared array. That meant billing customer A also silently marked
+                // customer B's still-open order as 'completed' as a side effect. Now
+                // each slot only ever accumulates its own order IDs.
                 // Accumulate into an array so multiple orders can be imported before
-                // the operator bills (the normal multi-order merge flow).
+                // the operator bills (the normal multi-order merge flow, within ONE slot).
                 const _prevAccepted = JSON.parse(
-                    localStorage.getItem(`acceptedOrderIds_${tableName}`) || '[]'
+                    localStorage.getItem(`acceptedOrderIds_${_slotSuffix}`) || '[]'
                 );
                 if (!_prevAccepted.includes(id)) _prevAccepted.push(id);
-                localStorage.setItem(`acceptedOrderIds_${tableName}`, JSON.stringify(_prevAccepted));
+                localStorage.setItem(`acceptedOrderIds_${_slotSuffix}`, JSON.stringify(_prevAccepted));
             } catch(e) { console.warn('Could not update order status:', e); }
 
             closeDrawer();

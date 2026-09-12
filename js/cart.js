@@ -11,6 +11,14 @@ import { initReceiptPrinter, buildBillReceipt } from './receipt-builder.js';
 // AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert()/confirm().
 import { showAlert, showConfirm } from './dialog.js';
 
+// NOTE [2026-09-13]: The two historical session notes immediately below (dated
+// 2026-07-28) describe the ORIGINAL table-only-scoped implementation and are
+// kept for audit history only — they no longer describe current behavior.
+// The keys they mention (activeCustomerUid_<table>, acceptedOrderIds_<table>)
+// are now scoped per (table, customer slot) — see the up-to-date header comment
+// directly above the syncCustomerOrderCompletion() function definition below,
+// and AI_HANDOFF.md, for the current, correct design.
+//
 // ===== AI UPDATE =====
 // Date: 2026-07-28
 // Feature: Customer Order History Sync — Order Completion
@@ -168,77 +176,106 @@ async function _maybeIssueLoyaltyCoupon(phone, name) {
 // ── Customer order completion sync (best-effort, non-blocking) ───────────────
 //
 // Called by both "Bill & Settle" and "Save & Exit" handlers after the sale is
-// saved.  Only has any effect when the table has an active Customer Panel order
-// (i.e. incoming-orders.js stored activeCustomerUid_<table> in localStorage
-// when the operator pressed "Open in POS").
+// saved.  Only has any effect when this specific customer SLOT (not the table)
+// has an active Customer Panel order attached to it.
 //
-// What it does when a Customer Panel order IS present:
-//   1. Queries pending_table_orders for all active docs on this table.
-//   2. Marks ONLY the specific orders imported via "Open in POS" as 'completed'
-//      (tracked in acceptedOrderIds_<table>; falls back to all active docs if
-//      the key is absent so manual billing is unaffected).
+// AI UPDATE [2026-09-13] — ROOT CAUSE FIX for "wrong customer history" +
+// "manual/QR order merging" bugs. See AI_HANDOFF.md for the full audit.
+//
+// Root cause (previous implementation): every identity key
+// (activeCustomerUid_<table>, acceptedOrderIds_<table>, etc.) was scoped by
+// TABLE ONLY. A table can host multiple independent customers at once (two
+// QR customers, or a manual walk-in + a QR customer). Because the keys were
+// shared across every customer on the table:
+//   - activeCustomerUid_<table> held whichever customer was MOST RECENTLY
+//     "Open in POS"'d — not necessarily the customer actually being billed.
+//   - acceptedOrderIds_<table> accumulated EVERY accepted order for the whole
+//     table in one array, so billing customer A also marked customer B's
+//     still-open Firestore order as 'completed' as a side effect, and wrote
+//     customer A's cart into customer B's (or whoever's uid happened to be
+//     cached) customer_order_history.
+//
+// Fix: every identity key is now scoped by TABLE + CUSTOMER SLOT
+// (`${tableName}_${customerSlot}`, e.g. "Table 3_C1" / "Table 3_C2"). The slot
+// is the same C1/C2/C3… tab the operator is actually looking at (getCurrentCustomer()
+// in the caller) — this is real, existing per-customer state (each slot already
+// has its own isolated cart_<table>_<slot> in localStorage); it was only the
+// *identity* bookkeeping that had been left table-wide. Table number alone is
+// never used as customer identity — see notes below.
+//
+// What it does when this slot has a Customer Panel order:
+//   1. Looks up ONLY the Firestore order doc IDs that were imported into THIS
+//      slot via "Open in POS" (acceptedOrderIds_<table>_<slot>) by document ID
+//      directly — never a table-wide query — so another customer's order on
+//      the same table can never be touched or read from.
+//   2. Marks those specific orders as 'completed'.
 //   3. Writes one completed-order record to
 //        customer_order_history/{customerUid}/orders/ORDER_{timestamp}
-//      so the customer's Order History tab can display it.
-//   4. Clears the localStorage convenience-cache keys for this table.
+//      using the uid recovered from THIS slot's own order doc(s) only.
+//   4. Clears the localStorage convenience-cache keys for this slot only —
+//      other customers/slots on the same table are left untouched.
 //
-// What it does for manual/walk-in orders (NO Customer Panel order):
-//   Returns immediately without any Firestore write.  All existing billing
-//   logic is completely unaffected.
+// What it does for manual/walk-in orders (no Customer Panel order in this slot):
+//   Returns immediately without any Firestore write. All existing billing
+//   logic is completely unaffected, and other customers on the same table are
+//   never touched.
 // ─────────────────────────────────────────────────────────────────────────────
 // AI UPDATE [2026-07-29] session 18:
 // Added optional billNumber parameter (passed from Bill & Settle shortOrderId).
 // After writing history, also updates customers/{phone} stats atomically using
 // increment() so the admin CRM can read pre-computed totals without re-scanning history.
-async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, completionReason, billNumber = null) {
-    // ── Step 1: Find all still-active pending_table_orders for this table ──
+async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot, total, completionReason, billNumber = null) {
+    // AI UPDATE [2026-09-13]: slot-scoped key suffix — see header comment above.
+    const _slotSuffix = `${tableName}_${customerSlot}`;
+
+    // ── Step 1: Identify only THIS slot's imported order(s), by doc ID ─────
     // Do this first so we can also recover the customerUid from Firestore
-    // if localStorage doesn't have it (e.g. after a page refresh, or if the
-    // operator opened the table directly without clicking "Open in POS").
-    let customerUid = localStorage.getItem(`activeCustomerUid_${tableName}`);
+    // if localStorage doesn't have it (e.g. after a page refresh).
+    let customerUid = localStorage.getItem(`activeCustomerUid_${_slotSuffix}`);
 
     try {
-        const q = query(
-            collection(db, 'pending_table_orders'),
-            where('tableId', '==', tableName)
-        );
-        const snap = await getDocs(q);
-        const activeDocs = snap.docs.filter(d =>
-            ['pending', 'accepted', 'kot'].includes((d.data().status || '').toLowerCase())
-        );
-
-        // AI UPDATE [2026-07-28] v2 — Issue 2 fix:
-        // Only complete the specific orders imported via "Open in POS".
-        // incoming-orders.js writes the accepted IDs to acceptedOrderIds_<table>.
-        // Fallback: if the key is absent, complete all active docs (original behavior
-        // — safe for manual/walk-in billing where no tracking key is written).
+        // AI UPDATE [2026-09-13]: acceptedOrderIds is now scoped per (table, slot).
+        // incoming-orders.js writes the accepted IDs to
+        // acceptedOrderIds_<table>_<slot> — only ever the orders that were
+        // merged into THIS slot's cart.
         const _acceptedIds = JSON.parse(
-            localStorage.getItem(`acceptedOrderIds_${tableName}`) || '[]'
+            localStorage.getItem(`acceptedOrderIds_${_slotSuffix}`) || '[]'
         );
-        const docsToComplete = _acceptedIds.length > 0
-            ? activeDocs.filter(d => _acceptedIds.includes(d.id))
-            : activeDocs;
 
-        // Recover customerUid from the imported orders first; fall back to any active doc.
+        // AI UPDATE [2026-09-13]: fetch the accepted orders directly by document
+        // ID instead of querying the whole table by tableId. This guarantees we
+        // can never see — let alone complete or read identity from — another
+        // customer's order on the same table, whether that other order is a
+        // second QR customer or a manual/walk-in order. Table number is never
+        // used as identity; only these specific, previously-recorded doc IDs are.
+        let docsToComplete = [];
+        if (_acceptedIds.length > 0) {
+            const _fetched = await Promise.all(
+                _acceptedIds.map(id => getDoc(doc(db, 'pending_table_orders', id)))
+            );
+            docsToComplete = _fetched.filter(d =>
+                d.exists() && ['pending', 'accepted', 'kot'].includes((d.data().status || '').toLowerCase())
+            );
+        }
+
+        // Recover customerUid from this slot's own imported orders only.
+        // (No table-wide fallback — that was the exact cross-customer leak.)
         if (!customerUid && docsToComplete.length > 0) {
             customerUid = docsToComplete[0].data().customer?.uid || '';
             if (customerUid) {
-                console.log(`[OrderSync] Recovered customerUid from Firestore for table "${tableName}"`);
+                console.log(`[OrderSync] Recovered customerUid from Firestore for slot "${_slotSuffix}"`);
             }
-        }
-        if (!customerUid && activeDocs.length > 0) {
-            customerUid = activeDocs[0].data().customer?.uid || '';
         }
 
         if (!customerUid) {
-            // No Customer Panel UID anywhere — manual/walk-in bill, nothing to sync.
+            // No Customer Panel UID for THIS slot — manual/walk-in bill (or a
+            // slot with no online order attached), nothing to sync. Other
+            // customers/slots on this table are completely unaffected.
             return;
         }
 
-        // Grab customer name/phone from the specific imported docs for the history record.
-        const _firstDoc = docsToComplete.length > 0 ? docsToComplete[0]
-                        : activeDocs.length > 0      ? activeDocs[0]
-                        : null;
+        // Grab customer name/phone from this slot's own imported docs only.
+        const _firstDoc = docsToComplete.length > 0 ? docsToComplete[0] : null;
         let customerName  = '';
         let customerPhone = '';
         if (_firstDoc) {
@@ -261,8 +298,8 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
         );
 
         console.log(
-            `[OrderSync] Marked ${docsToComplete.length} order(s) completed for table "${tableName}"`,
-            `(tracked: ${_acceptedIds.length}, active total: ${activeDocs.length})`
+            `[OrderSync] Marked ${docsToComplete.length} order(s) completed for slot "${_slotSuffix}"`,
+            `(tracked: ${_acceptedIds.length})`
         );
 
         // ── Step 2: Write a permanent record to the customer's order history ───
@@ -312,12 +349,16 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
             }
         }
 
-        // ── Step 3: Clear localStorage convenience cache for this table ────────
-        // acceptedOrderIds added to the clear list (v2 / Issue 2 fix).
-        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds', 'cartItemSourceMap']
-            .forEach(key => localStorage.removeItem(`${key}_${tableName}`));
+        // ── Step 3: Clear localStorage convenience cache for THIS SLOT only ────
+        // AI UPDATE [2026-09-13]: identity keys are slot-scoped, so clearing them
+        // no longer touches another customer's still-active session on the same
+        // table. `cartItemSourceMap` remains table-scoped (pre-existing, KOT/
+        // "Mark as Served" feature, out of scope for this fix — see AI_HANDOFF.md
+        // "Known Remaining Limitation") and is intentionally left as-is here.
+        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
+            .forEach(key => localStorage.removeItem(`${key}_${_slotSuffix}`));
 
-        console.log(`[OrderSync] Order completion synced for table "${tableName}" (${completionReason})`);
+        console.log(`[OrderSync] Order completion synced for slot "${_slotSuffix}" (${completionReason})`);
     } catch (err) {
         // Non-fatal — billing is already done, this is just customer-panel sync.
         console.warn('[OrderSync] Customer order history sync failed (non-fatal):', err.message || err);
@@ -376,11 +417,16 @@ function releaseTableLockInBackground(tableName, releaseReason) {
 //   Added — handles the missing edge case where all imported items are removed
 //   from the POS cart before Save/Bill.  Without this, status stayed "accepted"
 //   and the customer saw "Order Confirmed" forever.
-async function cancelImportedOrdersOnEmptyCart(tableName) {
+// AI UPDATE [2026-09-13]: added customerSlot param — acceptedOrderIds is now
+// scoped per (table, slot), same root-cause fix as syncCustomerOrderCompletion
+// above. Prevents emptying one customer's cart from silently dismissing a
+// DIFFERENT customer's still-active order on the same table.
+async function cancelImportedOrdersOnEmptyCart(tableName, customerSlot) {
+    const _slotSuffix = `${tableName}_${customerSlot}`;
     const acceptedIds = JSON.parse(
-        localStorage.getItem(`acceptedOrderIds_${tableName}`) || '[]'
+        localStorage.getItem(`acceptedOrderIds_${_slotSuffix}`) || '[]'
     );
-    if (acceptedIds.length === 0) return; // No imported order — nothing to cancel
+    if (acceptedIds.length === 0) return; // No imported order in this slot — nothing to cancel
 
     try {
         await Promise.all(
@@ -398,11 +444,12 @@ async function cancelImportedOrdersOnEmptyCart(tableName) {
         );
 
         // Clear the same localStorage convenience-cache keys that
-        // syncCustomerOrderCompletion clears on normal completion.
-        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds', 'cartItemSourceMap']
-            .forEach(key => localStorage.removeItem(`${key}_${tableName}`));
+        // syncCustomerOrderCompletion clears on normal completion — scoped to
+        // this slot only, so other customers on the same table are untouched.
+        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
+            .forEach(key => localStorage.removeItem(`${key}_${_slotSuffix}`));
 
-        console.log(`[OrderCancel] Auto-cancelled empty imported order(s) for table "${tableName}"`);
+        console.log(`[OrderCancel] Auto-cancelled empty imported order(s) for slot "${_slotSuffix}"`);
     } catch (err) {
         // Non-fatal — the operator has already navigated back to the table grid.
         console.warn('[OrderCancel] Auto-cancel failed (non-fatal):', err.message || err);
@@ -437,9 +484,14 @@ async function cancelImportedOrdersOnEmptyCart(tableName) {
 // Fire-and-forget: navigation back to the table grid has already happened before
 // this function runs.  A Firestore failure is logged but never blocks the UI.
 // ─────────────────────────────────────────────────────────────────────────────
-async function cancelOrderInPOS(tableName) {
+// AI UPDATE [2026-09-13]: added customerSlot param — same root-cause fix as
+// syncCustomerOrderCompletion / cancelImportedOrdersOnEmptyCart above. Cancelling
+// the order currently open in POS must only ever touch THIS slot's own accepted
+// order(s), never another customer sharing the same table.
+async function cancelOrderInPOS(tableName, customerSlot) {
+    const _slotSuffix = `${tableName}_${customerSlot}`;
     const acceptedIds = JSON.parse(
-        localStorage.getItem(`acceptedOrderIds_${tableName}`) || '[]'
+        localStorage.getItem(`acceptedOrderIds_${_slotSuffix}`) || '[]'
     );
 
     try {
@@ -459,12 +511,12 @@ async function cancelOrderInPOS(tableName) {
             );
         }
 
-        // Clear all localStorage convenience-cache keys — same set as
-        // syncCustomerOrderCompletion and cancelImportedOrdersOnEmptyCart.
-        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds', 'cartItemSourceMap']
-            .forEach(key => localStorage.removeItem(`${key}_${tableName}`));
+        // Clear localStorage convenience-cache keys for THIS SLOT only — same
+        // set as syncCustomerOrderCompletion / cancelImportedOrdersOnEmptyCart.
+        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
+            .forEach(key => localStorage.removeItem(`${key}_${_slotSuffix}`));
 
-        console.log(`[CancelOrder] Order explicitly cancelled for table "${tableName}".`);
+        console.log(`[CancelOrder] Order explicitly cancelled for slot "${_slotSuffix}".`);
     } catch (err) {
         // Non-fatal — UI has already returned to the table grid.
         console.warn('[CancelOrder] Firestore cancel failed (non-fatal):', err.message || err);
@@ -1227,7 +1279,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // auto-cancel it so the customer panel clears "Order Confirmed".
         // Fire-and-forget — navigation proceeds immediately regardless.
         if (currentCart.length === 0) {
-            cancelImportedOrdersOnEmptyCart(getCurrentTable());
+            // AI UPDATE [2026-09-13]: pass customerSlot — see cancelImportedOrdersOnEmptyCart().
+            cancelImportedOrdersOnEmptyCart(getCurrentTable(), getCurrentCustomer());
         }
         backToTablesBtn.click();
     });
@@ -1716,7 +1769,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // Only runs if this table had a Customer Panel order (no-op for
             // manual/walk-in bills — see syncCustomerOrderCompletion above).
             // AI UPDATE [2026-07-29] session 18: pass shortOrderId as billNumber
-            syncCustomerOrderCompletion(tableName, cartSnapshot, total, 'bill_settle', shortOrderId);
+            // AI UPDATE [2026-09-13]: pass customerSlot (customerName here holds the
+            // C1/C2/... slot id) — see syncCustomerOrderCompletion() header comment.
+            syncCustomerOrderCompletion(tableName, customerName, cartSnapshot, total, 'bill_settle', shortOrderId);
 
             // ── Release customer table lock in background (non-blocking) ──────
             releaseTableLockInBackground(tableName, 'bill_settle');
@@ -1783,14 +1838,17 @@ document.addEventListener('DOMContentLoaded', () => {
             // 'completed' and writes customer_order_history entry.
             // No-op for manual/walk-in orders (no activeCustomerUid in localStorage).
             if (cartSnapshot.length > 0) {
-                syncCustomerOrderCompletion(tableName, cartSnapshot, total, 'save_exit');
+                // AI UPDATE [2026-09-13]: pass customerSlot (customerName here holds
+                // the C1/C2/... slot id) — see syncCustomerOrderCompletion().
+                syncCustomerOrderCompletion(tableName, customerName, cartSnapshot, total, 'save_exit');
             } else {
                 // Cart is empty — if an order was imported via "Open in POS" but
                 // the operator removed every item before saving, auto-cancel it.
                 // Reuses "dismissed" status so the customer panel clears
                 // "Order Confirmed" immediately (same as operator pressing Dismiss).
                 // AI UPDATE [2026-07-29] session 23: missing edge-case fix.
-                cancelImportedOrdersOnEmptyCart(tableName);
+                // AI UPDATE [2026-09-13]: pass customerSlot — see cancelImportedOrdersOnEmptyCart().
+                cancelImportedOrdersOnEmptyCart(tableName, customerName);
             }
 
             // ── Release customer table lock in background (non-blocking) ──────
@@ -1826,7 +1884,8 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             if (!_cancelConfirmed) return;
 
-            const tableName = getCurrentTable();
+            const tableName    = getCurrentTable();
+            const customerSlot = getCurrentCustomer();
 
             // Step 1: Wipe cart immediately (UI + localStorage)
             saveLocalCart([]);
@@ -1838,7 +1897,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Step 3: Update Firestore + release lock (fire-and-forget)
             // These run after navigation so the UI is never blocked.
-            cancelOrderInPOS(tableName);
+            // AI UPDATE [2026-09-13]: pass customerSlot — see cancelOrderInPOS().
+            cancelOrderInPOS(tableName, customerSlot);
             releaseTableLockInBackground(tableName, 'cancel_order');
         });
     }
