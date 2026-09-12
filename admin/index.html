@@ -261,6 +261,17 @@
     </div>
 </div>
 
+<!-- ── SEND COUPON (AI UPDATE [2026-09-12]) ── -->
+<div id="custCouponOverlay" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width:420px;">
+        <div class="modal-header">
+            <h2>🎟️ Send Coupon</h2>
+            <button class="modal-close-x" onclick="window._custCloseCouponForm()">✕</button>
+        </div>
+        <div id="custCouponBody"></div>
+    </div>
+</div>
+
 <!-- ── CUSTOMER DELETE CONFIRMATION ── -->
 <div id="custDeleteConfirm" class="modal-overlay hidden">
     <div class="modal-box" style="max-width:420px;">
@@ -339,7 +350,7 @@
 </div>
 
 <script type="module" src="../js/admin.js?v=22"></script>
-<script type="module" src="../js/customers.js?v=2"></script>
+<script type="module" src="../js/customers.js?v=3"></script>
 
 <!-- ── SMART AI MANAGER ── -->
 <button id="aiManagerFab" title="Smart AI Manager" aria-label="Open AI Manager">🤖</button>
