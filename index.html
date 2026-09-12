@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- AI UPDATE [2026-09-13]: Added #customerCouponsModal (the "Customer
+         Coupons" panel opened from the Order Details customer name badge)
+         + its scoped CSS in the <style> block below. Logic in js/cart.js. -->
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
@@ -142,6 +145,83 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+
+        /* AI UPDATE [2026-09-13]: Customer Coupons panel (opened by tapping the
+           online customer name badge above). Reuses the existing .modal /
+           .modal-content chrome — only list-specific styles added here. */
+        .coupon-panel-content {
+            max-width: 380px;
+            max-height: 80vh;
+        }
+        .coupon-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .coupon-panel-header h3 { color: #e3e6eb; font-size: 1.1rem; text-align: left; }
+        .coupon-panel-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+            max-height: 60vh;
+        }
+        .coupon-panel-empty {
+            color: #8b949e;
+            text-align: center;
+            padding: 24px 8px;
+            font-size: 0.9rem;
+        }
+        .coupon-panel-item {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-left: 3px solid #3fb950;
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+        .coupon-panel-item-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .coupon-panel-code {
+            font-family: monospace;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            color: #58a6ff;
+            font-size: 0.95rem;
+        }
+        .coupon-panel-amount { font-weight: 800; color: #3fb950; }
+        .coupon-panel-meta {
+            font-size: 0.78rem;
+            color: #8b949e;
+            margin-top: 4px;
+        }
+        .coupon-panel-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .coupon-panel-copy-btn, .coupon-panel-apply-btn {
+            flex: 1;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid #30363d;
+            font-weight: 700;
+            font-size: 0.82rem;
+            cursor: pointer;
+        }
+        .coupon-panel-copy-btn { background: #21262d; color: #e6edf3; }
+        .coupon-panel-copy-btn:hover { background: #30363d; }
+        .coupon-panel-apply-btn { background: #3fb950; color: #04160a; border-color: #3fb950; }
+        .coupon-panel-apply-btn:hover { background: #34a745; }
+        .coupon-panel-gate-msg {
+            font-size: 0.74rem;
+            color: #f0883e;
+            margin-top: 6px;
         }
     </style>
 </head>
@@ -316,6 +396,22 @@
     </div>
 
     <!-- MODALS -->
+    <!-- AI UPDATE [2026-09-13]: Customer Coupons panel — opened by tapping the
+         online customer name badge in Order Details (js/cart.js). Shows the
+         SAME coupons/{code} Firestore data used by js/customers.js's coupon
+         list and the Customer Panel's "My Offers" (js/offers.js). No new
+         coupon system; Apply reuses the existing #couponCodeInput /
+         #applyCouponBtn validation logic below. -->
+    <div id="customerCouponsModal" class="modal hidden">
+        <div class="modal-content coupon-panel-content">
+            <div class="coupon-panel-header">
+                <h3 style="margin:0;">🎟️ <span id="couponPanelCustomerName">Customer</span>'s Offers</h3>
+                <button id="closeCouponsPanelBtn" class="close-cart-btn">✕</button>
+            </div>
+            <div id="couponPanelList" class="coupon-panel-list"></div>
+        </div>
+    </div>
+
     <div id="checkoutModal" class="modal hidden">
         <div class="modal-content">
             <h3>Enter Customer Details</h3>
