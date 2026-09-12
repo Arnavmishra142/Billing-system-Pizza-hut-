@@ -65,6 +65,101 @@ import { showAlert, showConfirm } from './dialog.js';
 //   acceptedOrderIds_<tableName> is cleared in Step 3 alongside other keys.
 // =====================
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AI UPDATE [2026-09-12]: COUPON SYSTEM
+//
+// 1. Loyalty auto-issue: a customer who reaches LOYALTY_MIN_ORDERS completed
+//    orders AND LOYALTY_MIN_SPEND lifetime spend automatically receives a
+//    one-time coupon (LOYALTY_AMOUNT off, LOYALTY_MIN_REDEEM minimum order to
+//    redeem). Issued exactly once per customer via the milestoneCouponIssued
+//    flag on customers/{phone} — checked by _maybeIssueLoyaltyCoupon(), called
+//    right after syncCustomerOrderCompletion() increments totalOrders/lifetimeSpend.
+//
+// 2. Personalized coupons: sent manually by the operator from the Customer
+//    Management panel (js/customers.js) — same coupons/{code} collection,
+//    type: 'personalized'.
+//
+// 3. Redemption: handled entirely in the Bill & Settle / Save & Exit handlers
+//    below (coupon apply UI + verification + marking used).
+//
+// Firestore collection: coupons/{code}
+//   { code, phone, name, amount, minOrder, message, type, used, usedAt,
+//     usedBillId, usedTable, createdAt }
+//
+// [AI UPDATE 2026-09-12] session 2 — coupon-system audit fix:
+//   a) COUPON SECTION GATING (new): the whole coupon box (input + Apply
+//      button) is now disabled with the message "Available after ₹200
+//      order subtotal" whenever the pre-discount cart subtotal is not
+//      STRICTLY GREATER than ₹200 — enforced in _updateCouponUI() below,
+//      driven off the same rawTotal every renderCart() already passes it.
+//      NOTE — discrepancy on purpose, not silently resolved: every coupon
+//      document's own `minOrder` field (and LOYALTY_MIN_REDEEM) already
+//      used a ₹200-OR-MORE convention (rawTotal >= minOrder) before this
+//      fix, and that per-coupon check is left exactly as-is so previously
+//      issued coupons keep behaving the way their "Minimum order to
+//      redeem: ₹200" messaging already promised. Only the NEW section-level
+//      gate uses the strict "> ₹200" rule as explicitly requested. If this
+//      inconsistency (>200 to open the box, >=200 for a specific coupon to
+//      redeem) is not desired, tell a future agent which convention should
+//      win and both call sites can be unified in one pass.
+//   b) PERSONALIZED-COUPON CUSTOMER BINDING (bug fix): the Apply button
+//      handler previously verified a coupon existed, was unused, and met
+//      minOrder — but NEVER checked `coupons/{code}.phone` against the
+//      customer actually seated at this table/slot. Any operator could
+//      apply Customer A's personalized coupon to Customer B's bill. Fixed
+//      by comparing cp.phone against a new customerPhone_<table>_<slot>
+//      localStorage key (mirrors the existing customerName_ key), written
+//      by this repo's js/incoming-orders.js "Open in POS" import —
+//      see that file for the corresponding change. A coupon with no phone
+//      on it (none currently exist, but kept forward-compatible in case a
+//      future "global" coupon type is added) is treated as usable by anyone.
+// ═══════════════════════════════════════════════════════════════════════════
+const LOYALTY_MIN_ORDERS = 10;
+const LOYALTY_MIN_SPEND  = 1000;
+const LOYALTY_AMOUNT     = 100;
+const LOYALTY_MIN_REDEEM = 200;
+// [AI UPDATE 2026-09-12] session 2: minimum PRE-COUPON subtotal required before the
+// coupon section itself becomes usable at all (strict >, see note above).
+const COUPON_SECTION_MIN_SUBTOTAL = 200;
+
+async function _maybeIssueLoyaltyCoupon(phone, name) {
+    if (!phone) return;
+    try {
+        const snap = await getDoc(doc(db, 'customers', phone));
+        if (!snap.exists()) return;
+        const data = snap.data();
+        if (data.milestoneCouponIssued) return; // already issued — one-time reward
+
+        const totalOrders   = data.totalOrders   || 0;
+        const lifetimeSpend = data.lifetimeSpend || 0;
+        if (totalOrders < LOYALTY_MIN_ORDERS || lifetimeSpend < LOYALTY_MIN_SPEND) return;
+
+        const base = (data.name || name || 'CUST').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 10) || 'CUST';
+        const code = `${base}#${Math.floor(1000 + Math.random() * 9000)}`;
+
+        await setDoc(doc(db, 'coupons', code), {
+            code,
+            phone,
+            name:      data.name || name || '',
+            amount:    LOYALTY_AMOUNT,
+            minOrder:  LOYALTY_MIN_REDEEM,
+            message:   `🎉 Loyalty reward for ${totalOrders}+ orders — enjoy ₹${LOYALTY_AMOUNT} off your next bill!`,
+            type:      'loyalty',
+            used:      false,
+            usedAt:    null,
+            usedBillId: null,
+            usedTable: null,
+            createdAt: serverTimestamp(),
+        });
+
+        // Guard so this never fires again for this customer.
+        await updateDoc(doc(db, 'customers', phone), { milestoneCouponIssued: true });
+        console.log(`[Loyalty] Issued coupon ${code} to ${phone}`);
+    } catch (err) {
+        console.warn('[Loyalty] Coupon issue failed (non-fatal):', err.message || err);
+    }
+}
+
 // ── Customer order completion sync (best-effort, non-blocking) ───────────────
 //
 // Called by both "Bill & Settle" and "Save & Exit" handlers after the sale is
@@ -206,7 +301,9 @@ async function syncCustomerOrderCompletion(tableName, cartSnapshot, total, compl
                     totalOrders:   increment(1),
                     lifetimeSpend: increment(+total.toFixed(2)),
                     lastOrderAt:   serverTimestamp(),
-                }).catch(e => console.warn('[OrderSync] Profile stats update failed (non-fatal):', e.message));
+                })
+                    .then(() => _maybeIssueLoyaltyCoupon(customerPhone, customerName))
+                    .catch(e => console.warn('[OrderSync] Profile stats update failed (non-fatal):', e.message));
             }
         }
 
@@ -432,6 +529,116 @@ document.addEventListener('DOMContentLoaded', () => {
     const getKotTimeKey = () => `kotTime_${getCurrentTable()}_${getCurrentCustomer()}`;
     // Key for the online customer name badge (per-slot, cleared when the cart empties).
     const getCustomerNameKey = () => `customerName_${getCurrentTable()}_${getCurrentCustomer()}`;
+    // [AI UPDATE 2026-09-12] session 2: parallel key holding the online customer's phone
+    // for this table/slot — written by js/incoming-orders.js (this repo) on
+    // "Open in POS" import. Used to verify a personalized coupon belongs to whoever is
+    // actually seated in this slot before it can be applied (see applyCouponBtn handler).
+    const getCustomerPhoneKey = () => `customerPhone_${getCurrentTable()}_${getCurrentCustomer()}`;
+
+    // ── AI UPDATE [2026-09-12]: Coupon redemption state (per table/customer slot) ──
+    const getCouponKey = () => `coupon_${getCurrentTable()}_${getCurrentCustomer()}`;
+    let _appliedCoupon = null; // { code, amount, minOrder } | null
+
+    function _loadCoupon() {
+        try {
+            const raw = localStorage.getItem(getCouponKey());
+            _appliedCoupon = raw ? JSON.parse(raw) : null;
+        } catch (_) { _appliedCoupon = null; }
+    }
+    function _saveCoupon() {
+        const key = getCouponKey();
+        if (_appliedCoupon) localStorage.setItem(key, JSON.stringify(_appliedCoupon));
+        else localStorage.removeItem(key);
+    }
+    function _rawCartTotal() {
+        return currentCart.reduce((sum, item) => {
+            const ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+            return sum + (item.price + ep) * item.qty;
+        }, 0);
+    }
+    // Discount is 0 if no coupon applied, or if the current order no longer
+    // meets that coupon's minimum order requirement (e.g. items were removed).
+    function _couponDiscount(rawTotal) {
+        if (!_appliedCoupon) return 0;
+        if (rawTotal < (_appliedCoupon.minOrder || 0)) return 0;
+        return Math.min(_appliedCoupon.amount, rawTotal);
+    }
+    // [AI UPDATE 2026-09-12] session 2: single authoritative gate used by BOTH Bill & Settle
+    // and Save & Exit right before a coupon is actually redeemed/marked used. Re-checks
+    // everything that was checked at Apply time (section minimum, per-coupon minOrder,
+    // customer-phone binding) rather than trusting the in-memory _appliedCoupon state —
+    // covers the edge case where the table/slot was reassigned to a different customer, or
+    // items were removed, between Apply and Bill & Settle.
+    function _getRedeemableCoupon(rawTotal) {
+        if (!_appliedCoupon) return null;
+        if (rawTotal <= COUPON_SECTION_MIN_SUBTOTAL) return null;
+        if (rawTotal < (_appliedCoupon.minOrder || 0)) return null;
+        const _slotPhone = localStorage.getItem(getCustomerPhoneKey()) || '';
+        if (_appliedCoupon.phone && _appliedCoupon.phone !== _slotPhone) return null;
+        return _appliedCoupon;
+    }
+    // Exposed so checkout/save-exit handlers can read the final payable amount.
+    function getFinalTotal() {
+        const rawTotal = _rawCartTotal();
+        return +(rawTotal - _couponDiscount(rawTotal)).toFixed(2);
+    }
+
+    function _updateCouponUI(rawTotal) {
+        const msgEl     = document.getElementById('couponMsg');
+        const rowEl     = document.getElementById('couponDiscountRow');
+        const amtEl     = document.getElementById('couponDiscountAmount');
+        const inputEl   = document.getElementById('couponCodeInput');
+        const applyBtn  = document.getElementById('applyCouponBtn');
+        const grandRow  = document.getElementById('grandTotalRow');
+        const grandEl   = document.getElementById('grandTotalAmount');
+        const gateMsgEl = document.getElementById('couponGateMsg');
+
+        // [AI UPDATE 2026-09-12] session 2: whole-section gate. Below/at ₹200 the coupon
+        // box is disabled outright — this is the UX layer; the authoritative business-rule
+        // enforcement is the identical rawTotal check inside the applyCouponBtn handler and
+        // the checkoutBtn/saveExitBtn redemption logic below, so a disabled attribute being
+        // bypassed (e.g. dev tools) still cannot result in a coupon being redeemed.
+        const sectionOpen = rawTotal > COUPON_SECTION_MIN_SUBTOTAL;
+        if (inputEl)  inputEl.disabled  = !sectionOpen;
+        if (applyBtn) applyBtn.disabled = !sectionOpen;
+        if (gateMsgEl) {
+            gateMsgEl.textContent = sectionOpen
+                ? ''
+                : `Available after ₹${COUPON_SECTION_MIN_SUBTOTAL} order subtotal`;
+        }
+
+        if (_appliedCoupon) {
+            const valid = rawTotal >= (_appliedCoupon.minOrder || 0);
+            if (inputEl) inputEl.value = _appliedCoupon.code;
+            if (applyBtn) applyBtn.style.display = 'none';
+
+            if (!valid) {
+                if (msgEl) msgEl.innerHTML =
+                    `<span style="color:#f85149;">⚠️ Coupon needs min order ₹${_appliedCoupon.minOrder} (add ₹${Math.ceil(_appliedCoupon.minOrder - rawTotal)} more)</span>`;
+                if (rowEl) rowEl.style.display = 'none';
+            } else {
+                if (msgEl) msgEl.innerHTML =
+                    `<span style="color:#3fb950;">✅ ${_appliedCoupon.code} applied</span> <a href="#" id="removeCouponLink" style="color:#f85149;margin-left:8px;">Remove</a>`;
+                if (rowEl) rowEl.style.display = 'flex';
+                if (amtEl) amtEl.textContent = `-₹${_couponDiscount(rawTotal).toFixed(0)}`;
+                const rmLink = document.getElementById('removeCouponLink');
+                if (rmLink) rmLink.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    _appliedCoupon = null;
+                    _saveCoupon();
+                    renderCart();
+                });
+            }
+        } else {
+            if (rowEl) rowEl.style.display = 'none';
+            if (msgEl) msgEl.innerHTML = '';
+            if (applyBtn) applyBtn.style.display = '';
+        }
+
+        const discount = _couponDiscount(rawTotal);
+        if (grandRow) grandRow.style.display = discount > 0 ? 'flex' : 'none';
+        if (grandEl)  grandEl.textContent = `₹${(rawTotal - discount).toFixed(2)}`;
+    }
 
     const getLocalCart = () => {
         const data = localStorage.getItem(getCartKey());
@@ -446,6 +653,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Clear the customer name badge when the cart is emptied so it
             // does not re-appear if the same slot is reopened for a walk-in order.
             localStorage.removeItem(getCustomerNameKey());
+            // [AI UPDATE 2026-09-12] session 2: clear the customer phone badge alongside the name.
+            localStorage.removeItem(getCustomerPhoneKey());
+            // AI UPDATE [2026-09-12]: Clear any applied coupon for this slot too.
+            localStorage.removeItem(getCouponKey());
         } else {
             localStorage.setItem(key, JSON.stringify(cartData));
         }
@@ -453,6 +664,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.addEventListener('pos-opened', (e) => {
+        _loadCoupon(); // AI UPDATE [2026-09-12]: restore any applied coupon for this table/slot
         const name = e.detail.name;
         const holdBtn = document.getElementById('holdBtn');
         const kotBtn = document.getElementById('kotBtn');
@@ -571,6 +783,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('load-table-cart', () => {
         currentCart = getLocalCart();
         _servedItems.clear(); // clear served state when switching to a different table
+        _loadCoupon();        // AI UPDATE [2026-09-12]: restore coupon state for this table/slot
         renderCart();
     });
 
@@ -641,6 +854,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>  
             `;
             cartTotalElement.innerText = '₹0.00';
+            _updateCouponUI(0); // AI UPDATE [2026-09-12]
             return;
         }
 
@@ -722,6 +936,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         cartTotalElement.innerText = `₹${totalAmount.toFixed(2)}`;
+        _updateCouponUI(totalAmount); // AI UPDATE [2026-09-12]: refresh coupon discount / payable rows
 
         document.querySelectorAll('.qty-minus').forEach(btn => {
             btn.addEventListener('click', (e) => updateQuantity(e.target.dataset.id, -1));
@@ -1168,6 +1383,80 @@ document.addEventListener('DOMContentLoaded', () => {
         kotBtn.addEventListener('click', () => printKOT(false));
     }
 
+    // ── Apply Coupon ───────────────────────────────────────────────────────────
+    // AI UPDATE [2026-09-12]: Verifies the code against coupons/{code} in
+    // Firestore, checks it hasn't been used, and checks the current cart total
+    // meets that coupon's minimum order requirement (default ₹200). Does NOT
+    // mark the coupon used yet — that only happens on actual Bill & Settle /
+    // Save & Exit, below, so an abandoned/cancelled order never burns it.
+    const applyCouponBtn = document.getElementById('applyCouponBtn');
+    if (applyCouponBtn) {
+        applyCouponBtn.addEventListener('click', async () => {
+            const inputEl = document.getElementById('couponCodeInput');
+            const msgEl   = document.getElementById('couponMsg');
+            const code = (inputEl?.value || '').trim().toUpperCase();
+            if (!code) return;
+
+            applyCouponBtn.disabled = true;
+            const _origLabel = applyCouponBtn.textContent;
+            applyCouponBtn.textContent = '…';
+
+            try {
+                const rawTotal = _rawCartTotal();
+
+                // [AI UPDATE 2026-09-12] session 2: authoritative section gate — this is the
+                // real enforcement point (the disabled input/button is only the UX layer, see
+                // _updateCouponUI). Checked before any Firestore read so a bypassed disabled
+                // attribute still cannot redeem a coupon below the minimum subtotal.
+                if (rawTotal <= COUPON_SECTION_MIN_SUBTOTAL) {
+                    if (msgEl) msgEl.innerHTML =
+                        `<span style="color:#f85149;">❌ Order subtotal must be above ₹${COUPON_SECTION_MIN_SUBTOTAL} to use a coupon</span>`;
+                    applyCouponBtn.disabled = false;
+                    applyCouponBtn.textContent = _origLabel;
+                    return;
+                }
+
+                const snap = await getDoc(doc(db, 'coupons', code));
+
+                if (!snap.exists()) {
+                    if (msgEl) msgEl.innerHTML = `<span style="color:#f85149;">❌ Invalid coupon code</span>`;
+                } else {
+                    const cp = snap.data();
+                    const minOrder = cp.minOrder || 200;
+
+                    // [AI UPDATE 2026-09-12] session 2: personalized-coupon customer binding.
+                    // cp.phone is set on every coupon currently issued (loyalty + personalized —
+                    // see header comment). If it doesn't match whoever is actually seated in this
+                    // table/slot, refuse — this is what stops Customer A's coupon being applied to
+                    // Customer B's bill. A coupon with no phone (none exist today) is treated as
+                    // usable by anyone, so this stays forward-compatible if a true "global" coupon
+                    // type is added later without inventing that feature now.
+                    const _slotPhone = localStorage.getItem(getCustomerPhoneKey()) || '';
+                    if (cp.phone && cp.phone !== _slotPhone) {
+                        if (msgEl) msgEl.innerHTML = `<span style="color:#f85149;">❌ This coupon isn't valid for this customer</span>`;
+                    } else if (cp.used) {
+                        if (msgEl) msgEl.innerHTML = `<span style="color:#f85149;">❌ Coupon already used</span>`;
+                    } else if (rawTotal < minOrder) {
+                        if (msgEl) msgEl.innerHTML = `<span style="color:#f85149;">❌ Minimum order ₹${minOrder} required (current ₹${rawTotal.toFixed(0)})</span>`;
+                    } else {
+                        // [AI UPDATE 2026-09-12] session 2: phone stored alongside the applied
+                        // coupon so the redemption handlers (Bill & Settle / Save & Exit) can
+                        // re-verify customer binding right before marking it used, not just here.
+                        _appliedCoupon = { code, amount: Number(cp.amount) || 0, minOrder, phone: cp.phone || '' };
+                        _saveCoupon();
+                    }
+                }
+            } catch (err) {
+                console.error('[Coupon] verify failed:', err);
+                if (msgEl) msgEl.innerHTML = `<span style="color:#f85149;">⚠️ Could not verify coupon — check connection</span>`;
+            } finally {
+                applyCouponBtn.disabled = false;
+                applyCouponBtn.textContent = _origLabel;
+                renderCart();
+            }
+        });
+    }
+
     // ── Bill & Settle ──────────────────────────────────────────────────────────
     if (checkoutBtn) {
         checkoutBtn.addEventListener('click', () => {
@@ -1175,10 +1464,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const tableName    = getCurrentTable();
             const customerName = getCurrentCustomer();
-            const total        = currentCart.reduce((sum, item) => {
+            // AI UPDATE [2026-09-12]: rawTotal = pre-discount cart total (unchanged
+            // calculation). discount comes from any validly-applied coupon. total is
+            // now the final payable amount used for the bill, sales_history, and
+            // customer lifetime-spend sync.
+            const rawTotal  = currentCart.reduce((sum, item) => {
                 const ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
                 return sum + (item.price + ep) * item.qty;
             }, 0);
+            const _couponToRedeem = _getRedeemableCoupon(rawTotal); // [AI UPDATE 2026-09-12] session 2: authoritative re-check
+            const discount  = _couponToRedeem ? Math.min(_couponToRedeem.amount, rawTotal) : 0;
+            const total     = +(rawTotal - discount).toFixed(2);
 
             // ── Snapshot cart before clearing ─────────────────────────────────
             const cartSnapshot = currentCart.slice();
@@ -1193,7 +1489,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentCart,
                 getDisplayTitle(),
                 shortOrderId,
-                getFormattedDate()
+                getFormattedDate(),
+                discount > 0 ? { code: _couponToRedeem.code, amount: discount } : null
             );
 
             if (escposBuffer) {
@@ -1229,8 +1526,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 billText += "\n";
                 billText += `Total Items: ${currentCart.length}\n`;
                 billText += `Total Quantity: ${legacyTotalQty}\n`;
-                billText += `Sub Total`.padEnd(25, ' ') + String(_legacyTotal).padStart(7, ' ') + "\n\n";
-                billText += centerText(`TOTAL: Rs ${_legacyTotal}`) + "\n\n";
+                billText += `Sub Total`.padEnd(25, ' ') + String(_legacyTotal).padStart(7, ' ') + "\n";
+                // AI UPDATE [2026-09-12]: coupon discount line in the legacy text bill.
+                if (discount > 0) {
+                    billText += `Coupon (${_couponToRedeem.code})`.padEnd(25, ' ') + ('-' + discount).padStart(7, ' ') + "\n";
+                }
+                billText += "\n";
+                billText += centerText(`TOTAL: Rs ${(_legacyTotal - discount).toFixed(0)}`) + "\n\n";
                 billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
                 triggerRawBTPrint(billText);
             }
@@ -1248,12 +1550,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 customer: customerName,
                 items: cartSnapshot,
                 total: total,
+                // AI UPDATE [2026-09-12]: coupon audit trail on the sale record.
+                couponCode:     discount > 0 ? _couponToRedeem.code : null,
+                couponDiscount: discount,
                 timestamp: new Date().toISOString()
             }).catch(err => console.error("Bill save failed:", err));
 
             if (window.saveToGhostHistory) {
                 let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
                 window.saveToGhostHistory(orderId, total, cartSnapshot);
+            }
+
+            // AI UPDATE [2026-09-12]: Mark the redeemed coupon as used (fire & forget).
+            if (discount > 0) {
+                updateDoc(doc(db, 'coupons', _couponToRedeem.code), {
+                    used:       true,
+                    usedAt:     serverTimestamp(),
+                    usedBillId: shortOrderId,
+                    usedTable:  tableName,
+                }).catch(e => console.warn('[Coupon] mark-used failed:', e.message));
+                _appliedCoupon = null;
+                _saveCoupon();
             }
 
             // ── Sync completed order to Customer Panel (non-blocking) ────────
@@ -1275,10 +1592,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const tableName    = getCurrentTable();
             const customerName = getCurrentCustomer();
             const cartSnapshot = currentCart.slice();
-            const total        = cartSnapshot.reduce((sum, item) => {
+            // AI UPDATE [2026-09-12]: same coupon handling as Bill & Settle —
+            // rawTotal is the pre-discount amount, total is what's actually saved
+            // as revenue/lifetime-spend after any valid applied coupon.
+            const rawTotal = cartSnapshot.reduce((sum, item) => {
                 const ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
                 return sum + (item.price + ep) * item.qty;
             }, 0);
+            const _couponToRedeem = _getRedeemableCoupon(rawTotal); // [AI UPDATE 2026-09-12] session 2: authoritative re-check
+            const discount = _couponToRedeem ? Math.min(_couponToRedeem.amount, rawTotal) : 0;
+            const total    = +(rawTotal - discount).toFixed(2);
+            const shortOrderId = String(Date.now()).slice(-5);
 
             // ── Clear cart and navigate back immediately ───────────────────────
             saveLocalCart([]);
@@ -1293,12 +1617,27 @@ document.addEventListener('DOMContentLoaded', () => {
                     customer: customerName,
                     items: cartSnapshot,
                     total: total,
+                    // AI UPDATE [2026-09-12]: coupon audit trail on the sale record.
+                    couponCode:     discount > 0 ? _couponToRedeem.code : null,
+                    couponDiscount: discount,
                     timestamp: new Date().toISOString()
                 }).catch(err => console.error("Save & Exit Firestore failed:", err));
 
                 if (window.saveToGhostHistory) {
                     let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
                     window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot);
+                }
+
+                // AI UPDATE [2026-09-12]: Mark the redeemed coupon as used (fire & forget).
+                if (discount > 0) {
+                    updateDoc(doc(db, 'coupons', _couponToRedeem.code), {
+                        used:       true,
+                        usedAt:     serverTimestamp(),
+                        usedBillId: shortOrderId,
+                        usedTable:  tableName,
+                    }).catch(e => console.warn('[Coupon] mark-used failed:', e.message));
+                    _appliedCoupon = null;
+                    _saveCoupon();
                 }
             }
 

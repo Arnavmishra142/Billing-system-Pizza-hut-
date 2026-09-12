@@ -88,9 +88,13 @@ export async function initReceiptPrinter() {
  * @param {string} title    Bill-to label (table name, "Takeaway", etc.)
  * @param {string} billNo   Short bill identifier (last 5 digits of Date.now())
  * @param {string} dateStr  Formatted date/time string from getFormattedDate()
+ * @param {{code:string, amount:number}|null} [coupon]  AI UPDATE [2026-09-12]:
+ *        Optional applied coupon. When present, prints a Discount line and a
+ *        final Payable line below the subtotal. null/undefined = no coupon,
+ *        receipt prints exactly as before (fully backward compatible).
  * @returns {Uint8Array|null}  ESC/POS buffer, or null on any failure
  */
-export function buildBillReceipt(cart, title, billNo, dateStr) {
+export function buildBillReceipt(cart, title, billNo, dateStr, coupon = null) {
     const EscPosEncoder = window.EscPosEncoder;
     if (!EscPosEncoder) {
         console.warn('[receipt] window.EscPosEncoder is not loaded — falling back to legacy text receipt.');
@@ -164,15 +168,25 @@ export function buildBillReceipt(cart, title, billNo, dateStr) {
         }, 0);
         const totalQty = cart.reduce((sum, i) => sum + i.qty, 0);
 
+        // AI UPDATE [2026-09-12]: Coupon discount + payable total.
+        const _hasCoupon = coupon && coupon.amount > 0;
+        const _payable    = _hasCoupon ? Math.max(0, total - coupon.amount) : total;
+
         enc = enc
             .line(DIVIDER)
             .line(`Total Items   : ${cart.length}`)
             .line(`Total Qty     : ${totalQty}`)
-            .line(`Subtotal      : Rs ${total}`)
+            .line(`Subtotal      : Rs ${total}`);
+
+        if (_hasCoupon) {
+            enc = enc.line(`Coupon (${coupon.code}) : -Rs ${coupon.amount}`);
+        }
+
+        enc = enc
             .newline()
             .align('center')
             .bold(true)
-            .line(`** TOTAL: Rs ${total} **`)
+            .line(`** TOTAL: Rs ${_payable} **`)
             .bold(false)
             .newline()
             .line('Thank You! Visit Again!')

@@ -4465,3 +4465,214 @@ name, partial name and amount · search while typing · search combined with eac
 clearing search restores the filter's full list and total · empty result shows a neutral
 "No expenses match your search." state, not an error · Add Expense and Delete Expense still work ·
 Sales / Menu / Customers / admin login untouched.
+
+---
+
+## [AI UPDATE 2026-09-12] Coupon System — Fixed / Current Architecture (session 2)
+
+### Scope of this session
+This session picked up an existing, undocumented coupon system (built in an earlier,
+un-logged session the same day — see `// AI UPDATE [2026-09-12]` comments already in
+`js/cart.js`, `js/customers.js`, `firestore.rules` with no matching `AI_HANDOFF.md` entry)
+and fixed the three problems reported: (1) Customer Panel "My Offers" not loading — **fixed
+in the Customer Panel repo, see that repo's own `AI_HANDOFF.md`**, nothing to fix here;
+(2) Admin → personalized coupon assignment — **already working, no change needed**; (3) POS
+coupon checks — two real bugs fixed (below).
+
+### 1. What was broken
+
+**a) No global minimum-order gate on the POS coupon section.** The coupon input + Apply
+button were always interactive, even on a ₹0 cart. Only a per-coupon `minOrder` check ran,
+and only *after* the operator typed a code and pressed Apply — so a ₹50 order could accept
+a code, just fail the minOrder check with a text message. There was no disabling of the
+section itself, and no "Available after ₹200 order subtotal" messaging as required.
+
+**b) No personalized-coupon customer binding check in the POS.** `coupons/{code}.phone`
+(the field that ties a coupon to one customer) was never compared against who was actually
+seated at the table/slot being billed. Any operator could type Customer A's personalized
+code while billing Customer B's table and it would be accepted, since the Apply handler
+only checked `exists`, `used`, and `minOrder` — never `phone`.
+
+### 2. Root cause of each issue
+
+- (a): `_updateCouponUI()` computed and displayed the discount/payable rows but never
+  touched `disabled` on the input/button, and the Apply-button click handler had no
+  subtotal check of its own before the per-coupon `minOrder` check.
+- (b): The Apply-button click handler (`js/cart.js`) never had access to the online
+  customer's phone number for the active table/slot — only their **name** was ever stored
+  (`customerName_<table>_<slot>` in localStorage, written by `js/incoming-orders.js`
+  "Open in POS"). There was no equivalent phone key to check against.
+
+### 3. Files changed
+
+- `js/cart.js` — coupon section gating, authoritative re-validation, phone binding
+- `js/incoming-orders.js` — writes the new `customerPhone_<table>_<slot>` key
+- `index.html` — coupon box markup: added `id="couponBox"` and a `#couponGateMsg` label
+- `firestore.rules` — `coupons/{code}` write access narrowed to `isOperator()` (see §7)
+
+### 4. Functions changed
+
+- `_updateCouponUI(rawTotal)` — now also enables/disables `#couponCodeInput` /
+  `#applyCouponBtn` and sets `#couponGateMsg` text based on
+  `rawTotal > COUPON_SECTION_MIN_SUBTOTAL` (strict, `= 200`).
+- `applyCouponBtn` click handler — now checks the same strict `>200` rule *before* reading
+  Firestore (authoritative, not just UI), and checks `cp.phone` against a new
+  `getCustomerPhoneKey()` lookup before accepting the coupon.
+- New `_getRedeemableCoupon(rawTotal)` — single shared authoritative check (section
+  minimum + per-coupon `minOrder` + phone binding) used by **both** `checkoutBtn` (Bill &
+  Settle) and `saveExitBtn` (Save & Exit) right before a coupon is actually redeemed/marked
+  used, replacing the old inline `rawTotal >= minOrder` one-liner duplicated in both
+  handlers. This re-checks everything fresh at redemption time, not just at Apply time —
+  covers the case where the table/slot changes hands between Apply and Bill & Settle.
+- `js/incoming-orders.js` "Open in POS" handler — now also writes
+  `customerPhone_<table>_<slot>` (mirrors the existing `customerName_` write) so the phone
+  is available for the binding check above.
+
+### 5. Customer Panel coupon loading flow
+
+Not implemented in this repo — see the Customer Panel repo's own `AI_HANDOFF.md` for its
+new `js/offers.js`. Summary: it queries `coupons` where `phone == the logged-in customer's
+own phone`, read-only, no changes needed on this side beyond the `firestore.rules` read
+permission that already existed.
+
+### 6. Admin/Billing personalized coupon assignment flow (unchanged, already working)
+
+`js/customers.js` → `window._custOpenCouponForm(phone)` → `window._custSendCoupon(phone)` →
+`setDoc(doc(db, 'coupons', code), { code, phone, name, amount, minOrder: 200, message,
+type: 'personalized', used: false, ... })`. Guards against overwriting an existing code.
+
+### 7. POS coupon validation flow (now complete)
+
+```
+Operator types code, taps Apply
+  → rawTotal computed from currentCart (pre-discount)
+  → rawTotal <= 200 ?  → reject: "Order subtotal must be above ₹200 to use a coupon"
+  → getDoc(coupons/{code})
+      → not exists      → reject: "Invalid coupon code"
+      → cp.phone set AND cp.phone !== customerPhone_<table>_<slot>
+                         → reject: "This coupon isn't valid for this customer"
+      → cp.used          → reject: "Coupon already used"
+      → rawTotal < cp.minOrder → reject: "Minimum order ₹X required"
+      → else              → _appliedCoupon = { code, amount, minOrder, phone }; saved to
+                             localStorage (coupon_<table>_<slot>)
+
+On Bill & Settle / Save & Exit:
+  → _getRedeemableCoupon(rawTotal) re-checks: section min, per-coupon minOrder, phone
+    binding — all against CURRENT state, not just what was true at Apply time
+  → discount = min(coupon.amount, rawTotal); total = rawTotal - discount
+  → bill printed and sales_history written with the discounted total + couponCode/couponDiscount
+  → coupons/{code} marked { used: true, usedAt, usedBillId, usedTable } (fire-and-forget)
+```
+
+### 8. Coupon data model/fields used (unchanged)
+
+`coupons/{code}`: `code, phone, name, amount, minOrder, message, type ('loyalty'|
+'personalized'), used, usedAt, usedBillId, usedTable, createdAt`. No fields renamed, added,
+or removed.
+
+### 9. Customer identity field used for personalized coupons
+
+`phone` (normalised `+91XXXXXXXXXX`), matching `customers/{phone}`'s document ID — the
+existing identity key throughout this app. No new identity system was created. In the POS,
+the *active table/slot's* phone is tracked via the new `customerPhone_<table>_<slot>`
+localStorage key (parallel to the pre-existing `customerName_` key), populated only for
+online (Customer Panel) orders via "Open in POS" — walk-in/manual bills have no phone, so
+any coupon with a non-empty `phone` field will correctly be rejected for them.
+
+### 10. Minimum order rule: subtotal > ₹200
+
+Implemented as a strict `>` comparison (`COUPON_SECTION_MIN_SUBTOTAL = 200` in `js/cart.js`)
+for the whole-section gate, per your explicit instruction. **Discrepancy flagged, not
+silently resolved:** the pre-existing per-coupon `minOrder` field (and `LOYALTY_MIN_REDEEM`)
+already used a `>=200` convention (`rawTotal < minOrder` → invalid, so `rawTotal == 200`
+passes) before this session, and that was left untouched so already-issued coupons keep
+behaving the way their "Minimum order to redeem: ₹200" UI copy already promised. Net effect:
+at exactly ₹200 the coupon *section* stays disabled (per your spec), but a coupon *already
+applied* while subtotal was >200 and then dropped to exactly 200 would still show as valid
+per its own minOrder check. If you want these unified to one convention, say which one wins
+and both call sites (`_updateCouponUI`, the Apply handler, `_getRedeemableCoupon`) can be
+changed together in one pass.
+
+### 11. Where the rule is enforced
+
+Both UI (disabled attributes, `_updateCouponUI`) **and** authoritatively in application
+logic (the Apply handler's own `rawTotal <= 200` check runs before any Firestore read; the
+redemption handlers re-check via `_getRedeemableCoupon` right before marking a coupon used).
+There is no server-side Cloud Function enforcing this (this app doesn't use Cloud Functions
+for billing — see the BRIDGE BUILD note in the Customer Panel's `ARCHITECTURE_LOCK.md`), so
+"authoritative" here means the actual billing/redemption code path, not just a disabled
+HTML attribute — a tampered `disabled=false` on the input still can't get past the Apply
+handler's own check or the final `_getRedeemableCoupon` check at settle time.
+
+### 12. Backend/security validation
+
+- **Personalized-coupon binding** is now checked in application code at Apply time and
+  again at redemption time (see §7) — not just left to client-side display filtering.
+- **`firestore.rules`**: `coupons/{code}` write access narrowed from `if request.auth !=
+  null` to `if isOperator()`. This is a strict tightening (customers never needed write
+  access to this collection; only the Billing Panel writes coupons).
+  **Known limitation, intentionally not fixed here:** `isOperator()` currently accepts
+  *any* anonymous Firebase Auth session, and customers also use anonymous auth with no
+  distinguishing claim (see the identity-model comment at the top of `firestore.rules`).
+  So this narrowing is a real improvement but not a complete fix — a determined customer
+  with dev tools could still technically satisfy `isOperator()` today. Closing that
+  requires giving customers and operators genuinely distinct auth (custom-token/claim
+  based), which is a pre-existing, app-wide limitation that predates coupons entirely and
+  is out of scope for "smallest safe change" — flagging it here rather than either
+  silently leaving it undocumented or attempting a new identity system.
+  `read` was left unchanged (`if request.auth != null`) for the same reason — full
+  per-document read scoping isn't achievable at the rules layer without that same identity
+  work. The Customer Panel's `offers.js` mitigates the *practical* exposure by only ever
+  querying `where('phone', '==', ownPhone)`, so a customer would have to already know
+  another customer's exact coupon code to read it directly — same class of limitation as
+  the rest of this app today, not a new one introduced by coupons.
+- **No client-supplied discount amounts are trusted differently than before** — the
+  discount was always computed server-side-equivalent (from the Firestore `coupons`
+  document's own `amount` field, never from anything the UI lets the operator type).
+
+### 13. Error handling
+
+- Invalid code / already used / below minimum / wrong customer → all surfaced as distinct,
+  specific inline messages under the coupon input (`#couponMsg`), not a generic failure.
+- Network/Firestore failure on Apply → `⚠️ Could not verify coupon — check connection`
+  (unchanged, pre-existing).
+- Below the ₹200 section threshold → `#couponGateMsg` shows "Available after ₹200 order
+  subtotal"; typing/Apply are disabled rather than silently failing after submission.
+
+### 14. Testing performed
+
+Manual code-path simulation (no live Firebase in this environment) of every subtotal edge
+case from the task spec — ₹100/150/199/200/201 gating, and personalized-coupon
+binding (matching phone allowed, mismatched phone blocked, subtotal dropping below
+threshold blocked, exact-₹200 strict gate blocked) — all produced the expected result (see
+session transcript). **Not tested against a live Firestore instance** — no network access
+in this environment; the person applying this patch should smoke-test Apply/Bill & Settle/
+Save & Exit once deployed, particularly: coupon applied then item removed (discount must
+disappear), page refresh with a coupon still applied (`coupon_<table>_<slot>` persists in
+localStorage — confirmed this key is untouched by this session's changes), and the existing
+regression checklist items (billing, KOT, sales history, customer CRM) were reviewed by
+diff only, not re-run end-to-end.
+
+### 15. Patch file name/location
+
+`coupon-system-fix-billing-panel.patch` — unified git diff, applies cleanly to the original
+state (verified with `git apply --check`). Covers exactly: `index.html`, `js/cart.js`,
+`js/incoming-orders.js`, `firestore.rules`. No unrelated files included.
+
+### 16. Important information for a future AI agent
+
+- The Customer Panel's `js/offers.js` and this repo's coupon code are two halves of one
+  feature living in two repos — see `ARCHITECTURE_LOCK.md` §4 "Cross-Repository Contract"
+  in the Customer Panel repo before changing either side.
+- `isOperator()` treating all anonymous sessions as operators is a **pre-existing,
+  app-wide** limitation, not something introduced by or specific to coupons — do not
+  attempt to fix it as a side effect of a coupon-only task; it needs a deliberate,
+  explicitly-scoped identity-system change across the whole app.
+- The `>200` (section gate) vs `>=200` (per-coupon `minOrder`) discrepancy in §10 was a
+  deliberate choice to follow your explicit instruction without silently changing
+  pre-existing coupon behavior — resolve only on explicit instruction.
+- There is no Firestore transaction around "check used → mark used" — a genuine (very
+  small, single-cashier-app) race window exists if the exact same code were applied on two
+  POS sessions at once. Not fixed here (would mean introducing `runTransaction`, a larger
+  change than "smallest safe fix" for a scenario the existing single-till architecture
+  doesn't really encounter) — flagging as a known limitation only.

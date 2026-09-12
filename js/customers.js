@@ -39,7 +39,7 @@
 import { showAlert } from './dialog.js';
 import { db, auth } from './firebase-config.js';
 import {
-    collection, getDocs, doc, writeBatch, updateDoc
+    collection, getDocs, doc, writeBatch, updateDoc, setDoc, serverTimestamp, query, where
 } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js';
 import { signInAnonymously, onAuthStateChanged }
     from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js';
@@ -244,6 +244,129 @@ function _avatarLetter(name) {
     return (name || '?').trim()[0].toUpperCase();
 }
 
+// ── Coupons ────────────────────────────────────────────────────────────────
+// AI UPDATE [2026-09-12]: Personalized coupon sending from the Customer
+// Management panel. Same coupons/{code} collection used by the loyalty
+// auto-issuer in the Billing Panel (js/cart.js) and the "Offers" drawer in
+// the Customer Order Panel. type: 'personalized' distinguishes operator-sent
+// coupons from auto-issued loyalty rewards.
+function _couponCodeFromName(name) {
+    const base = (name || 'CUST').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 10) || 'CUST';
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    return `${base}#${rand}`;
+}
+
+async function _fetchCustomerCoupons(phone) {
+    try {
+        const snap = await getDocs(query(collection(db, 'coupons'), where('phone', '==', phone)));
+        const list = [];
+        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+        list.sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+        return list;
+    } catch (err) {
+        console.warn('[customers] Coupon fetch failed:', err);
+        return [];
+    }
+}
+
+function _buildCouponsHtml(coupons) {
+    if (!coupons || coupons.length === 0) {
+        return `<div class="empty-state" style="padding:14px 0;">No coupons yet.</div>`;
+    }
+    return `<div class="bills-list">` + coupons.map(cp => `
+<div class="bill-card" style="flex-direction:column;align-items:stretch;gap:6px;border-left:3px solid ${cp.used ? '#8b949e' : '#3fb950'};">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-family:monospace;font-weight:800;color:#58a6ff;font-size:0.95rem;">${_esc(cp.code)}</span>
+        <span style="font-weight:800;color:#3fb950;">${_fmtRupee(cp.amount)}</span>
+    </div>
+    ${cp.message ? `<div style="font-size:0.8rem;color:#c9d1d9;">${_esc(cp.message)}</div>` : ''}
+    <div style="font-size:0.72rem;font-weight:700;color:${cp.used ? '#8b949e' : '#3fb950'};text-transform:uppercase;letter-spacing:0.3px;">
+        ${cp.used ? '✅ Used' : '🟢 Active'} ${cp.minOrder ? `· Min order ₹${cp.minOrder}` : ''} ${cp.type === 'loyalty' ? '· 🎖️ Loyalty' : ''}
+    </div>
+</div>`).join('') + `</div>`;
+}
+
+// Opens the "Send Coupon" form for a customer (amount, code, message).
+window._custOpenCouponForm = function(phone) {
+    const c = _customers.find(x => x.id === phone);
+    const overlay = document.getElementById('custCouponOverlay');
+    const body    = document.getElementById('custCouponBody');
+    if (!overlay || !body) return;
+
+    body.innerHTML = `
+<div class="form-group">
+    <label>Amount (₹)</label>
+    <input type="number" id="couponAmountInput" placeholder="100" inputmode="numeric">
+</div>
+<div class="form-group">
+    <label>Coupon Code</label>
+    <input type="text" id="couponCodeInput" value="${_esc(_couponCodeFromName(c?.name))}" style="text-transform:uppercase;">
+</div>
+<div class="form-group">
+    <label>Message <span style="font-weight:400;text-transform:none;font-size:0.78rem;opacity:0.55;">(optional)</span></label>
+    <textarea id="couponMessageInput" rows="2" placeholder="e.g. Thanks for being a loyal customer!"></textarea>
+</div>
+<div style="font-size:0.75rem;color:#8b949e;margin:2px 0 16px;">Minimum order to redeem: ₹200</div>
+<div id="couponSendMsg" style="font-size:0.82rem;margin-bottom:10px;min-height:16px;"></div>
+<button class="btn btn-primary full-width" id="couponSendBtn" style="padding:14px;font-size:1rem;justify-content:center;" onclick="window._custSendCoupon('${_esc(phone)}')">
+    🎟️ Send Coupon
+</button>`;
+    overlay.classList.remove('hidden');
+};
+
+window._custCloseCouponForm = function() {
+    document.getElementById('custCouponOverlay')?.classList.add('hidden');
+};
+
+window._custSendCoupon = async function(phone) {
+    const c = _customers.find(x => x.id === phone);
+    const amount  = Number(document.getElementById('couponAmountInput')?.value || 0);
+    const code    = (document.getElementById('couponCodeInput')?.value || '').trim().toUpperCase();
+    const message = (document.getElementById('couponMessageInput')?.value || '').trim();
+    const msgEl   = document.getElementById('couponSendMsg');
+    const btn     = document.getElementById('couponSendBtn');
+
+    if (!code)              { if (msgEl) msgEl.innerHTML = '<span style="color:#f85149;">Please enter a coupon code.</span>'; return; }
+    if (!amount || amount <= 0) { if (msgEl) msgEl.innerHTML = '<span style="color:#f85149;">Please enter a valid amount.</span>'; return; }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    if (msgEl) msgEl.innerHTML = '';
+
+    try {
+        await _waitForAuth();
+        // Guard: don't silently overwrite an existing coupon with the same code.
+        const existing = await getDocs(query(collection(db, 'coupons'), where('code', '==', code)));
+        if (!existing.empty) {
+            if (msgEl) msgEl.innerHTML = '<span style="color:#f85149;">That code is already in use — try another.</span>';
+            if (btn) { btn.disabled = false; btn.textContent = '🎟️ Send Coupon'; }
+            return;
+        }
+
+        await setDoc(doc(db, 'coupons', code), {
+            code,
+            phone,
+            name:       c?.name || '',
+            amount,
+            minOrder:   200,
+            message,
+            type:       'personalized',
+            used:       false,
+            usedAt:     null,
+            usedBillId: null,
+            usedTable:  null,
+            createdAt:  serverTimestamp(),
+        });
+
+        window._custCloseCouponForm();
+        await showAlert(`Coupon ${code} (₹${amount}) sent to ${c?.name || phone}!`, 'success', 'Coupon Sent');
+    } catch (err) {
+        console.error('[customers] Send coupon failed:', err);
+        if (msgEl) msgEl.innerHTML = `<span style="color:#f85149;">Failed: ${_esc(err.message)}</span>`;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🎟️ Send Coupon'; }
+    }
+};
+
 // ── List rendering — uses existing bill-card / bill-card-* classes ────────
 function _renderList() {
     const listEl  = document.getElementById('customerCardList');
@@ -385,6 +508,17 @@ window._custOpenDetail = async function(phone) {
     </div>
 </div>`;
 
+    // AI UPDATE [2026-09-12]: Send Coupon button + coupons list.
+    const couponBtnHtml = `
+<div style="padding:16px 0 0;">
+    <button class="btn full-width" style="padding:14px;font-size:1rem;justify-content:center;background:#d29922;color:#0d1117;border:none;font-weight:800;"
+        onclick="window._custOpenCouponForm('${_esc(c.id)}')">
+        🎟️ Send Personalized Coupon
+    </button>
+</div>
+<div class="list-title" style="margin-top:16px;margin-bottom:12px;">Coupons</div>
+<div id="custCouponsContainer"><div class="loading-state">Loading coupons… ☁️</div></div>`;
+
     const deleteHtml = `
 <!-- Delete button -->
 <div style="padding:20px 0 4px;">
@@ -402,7 +536,7 @@ window._custOpenDetail = async function(phone) {
     c._historyLoaded
         ? _buildOrdersHtml(c.orders)
         : '<div class="loading-state">Loading orders… ☁️</div>'
-}</div>` + recoveryHtml + deleteHtml;
+}</div>` + couponBtnHtml + recoveryHtml + deleteHtml;
     overlay.classList.remove('hidden');
 
     // Phase 2 — fetch history if not yet loaded, then update the container
@@ -411,6 +545,12 @@ window._custOpenDetail = async function(phone) {
         const container = document.getElementById('custHistoryContainer');
         if (container) container.innerHTML = _buildOrdersHtml(c.orders);
     }
+
+    // Phase 3 — fetch this customer's coupons (loyalty + personalized)
+    _fetchCustomerCoupons(c.id).then(coupons => {
+        const el = document.getElementById('custCouponsContainer');
+        if (el) el.innerHTML = _buildCouponsHtml(coupons);
+    });
 };
 
 window._custCloseDetail = function() {

@@ -766,6 +766,12 @@ function renderDrawer(orders) {
             // cart.js reads this in renderCart() and shows the amber name badge.
             // Cleared automatically when the cart empties (saveLocalCart([])).
             localStorage.setItem(`customerName_${tableName}_${customerSlot}`, customerName);
+            // [AI UPDATE 2026-09-12] session 2: store the online customer's phone alongside
+            // their name. js/cart.js reads customerPhone_<table>_<slot> to verify a
+            // personalized coupon's `phone` field matches whoever is actually seated in this
+            // slot before allowing it to be applied — see js/cart.js applyCouponBtn handler
+            // and _getRedeemableCoupon(). Cleared automatically when the cart empties.
+            if (_orderPhone) localStorage.setItem(`customerPhone_${tableName}_${customerSlot}`, _orderPhone);
 
             window.dispatchEvent(new Event('cart-updated'));
 

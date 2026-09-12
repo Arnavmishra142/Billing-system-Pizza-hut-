@@ -264,9 +264,37 @@
                 
                 <div class="billing-section">
                     <div class="total-row">
-                        <span>Total:</span>
+                        <span>Subtotal:</span>
                         <span id="cartTotal" class="total-amount">₹0.00</span>
                     </div>
+
+                    <!-- 🎟️ Coupon — AI UPDATE [2026-09-12] -->
+                    <!-- [AI UPDATE 2026-09-12] Section now has an id + a gate-status label so
+                         js/cart.js can disable the whole coupon box (input + Apply button) and
+                         show "Available after ₹200 order subtotal" until the pre-discount cart
+                         subtotal exceeds ₹200 — see _updateCouponUI() in js/cart.js. -->
+                    <div class="coupon-box" id="couponBox" style="margin:10px 0;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                            <span style="font-size:0.82rem;font-weight:700;color:#8b949e;">🎟️ Coupons</span>
+                            <span id="couponGateMsg" style="font-size:0.72rem;color:#8b949e;font-weight:600;"></span>
+                        </div>
+                        <div style="display:flex;gap:8px;">
+                            <input type="text" id="couponCodeInput" placeholder="🎟️ Coupon code" autocomplete="off"
+                                style="flex:1;min-width:0;text-transform:uppercase;padding:10px 12px;border-radius:8px;border:1px solid #30363d;background:#0d1117;color:#e6edf3;font-weight:700;letter-spacing:0.5px;">
+                            <button id="applyCouponBtn" class="btn btn-details" style="flex-shrink:0;padding:0 16px;">Apply</button>
+                        </div>
+                        <div id="couponMsg" style="font-size:0.8rem;margin-top:6px;min-height:16px;"></div>
+                    </div>
+
+                    <div class="total-row" id="couponDiscountRow" style="display:none;">
+                        <span>Discount:</span>
+                        <span id="couponDiscountAmount" style="color:#3fb950;font-weight:800;">-₹0</span>
+                    </div>
+                    <div class="total-row" id="grandTotalRow" style="display:none;font-weight:900;font-size:1.1rem;border-top:1px dashed #30363d;padding-top:6px;margin-bottom:6px;">
+                        <span>Payable:</span>
+                        <span id="grandTotalAmount">₹0.00</span>
+                    </div>
+
                     <div class="action-grid">
                         <button class="btn btn-save-exit" id="saveExitBtn">SAVE & EXIT</button>
                         <button class="btn btn-checkout" id="checkoutBtn">Bill & Settle</button>
