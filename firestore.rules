@@ -250,10 +250,29 @@ service cloud.firestore {
     //   Written by: js/cart.js (auto loyalty issue), js/customers.js (admin send),
     //               js/cart.js billing panel (marks used on Bill & Settle / Save & Exit).
     //   Read by: Billing Panel (verify code) and Customer Panel (offers.js — own coupons).
-    //   Same loose anonymous-auth trust model as the rest of this ruleset (isOperator()
-    //   already accepts any signed-in anonymous session, which both panels use).
+    //
+    // [AI UPDATE 2026-09-12] session 2 — coupon-system audit fix:
+    //   `write` narrowed to isOperator() only. The Customer Panel never writes to this
+    //   collection (offers.js only reads coupons where phone == its own logged-in
+    //   customer's phone) — customers writing/deleting/tampering with coupon documents
+    //   (e.g. resetting `used` back to false, or editing `amount`) was never a required
+    //   capability, so removing it is a strict tightening, not a new restriction on
+    //   anything that worked before.
+    //   KNOWN LIMITATION (not fixed here — do not "fix" without explicit instruction,
+    //   see isOperator() comment above): isOperator() currently accepts ANY anonymous
+    //   Firebase Auth session, and customers ALSO use anonymous auth with no
+    //   distinguishing claim. So this narrowing is only a partial mitigation until
+    //   customers and operators are given genuinely distinct auth (custom-token /
+    //   claim-based), which is a pre-existing, app-wide limitation unrelated to
+    //   coupons — not something to solve as part of this fix (would require a new
+    //   identity system, which is explicitly out of scope). `read` is deliberately
+    //   left as `request.auth != null` (unchanged) — the actual exposure this creates
+    //   (a signed-in session reading another customer's coupon by guessing/knowing its
+    //   code) is the same pre-existing class of limitation and is documented in
+    //   AI_HANDOFF.md as a known issue for a future identity-system pass.
     match /coupons/{code} {
-      allow read, write: if request.auth != null;
+      allow read:  if request.auth != null;
+      allow write: if isOperator();
     }
 
     // ── Catch-all ─────────────────────────────────────────────────────────────
