@@ -373,7 +373,14 @@ class Firestore {
 
   async get(collection, docId) {
     const tok = await this._token();
-    const res = await fetch(`${this.base}/${collection}/${docId}`, {
+    // AI UPDATE [2026-09-12c] — Doc IDs with a literal "+" (phone-number keys
+    // like "+916393349498") were going straight into the URL path unencoded.
+    // Writes never hit this (the doc name travels inside the :commit JSON
+    // body), but this GET request embeds it in the URL itself — an unencoded
+    // "+" there can get silently mishandled before it reaches Firestore,
+    // producing a false 404 for a document that genuinely exists. Percent-
+    // encode the ID so every character round-trips exactly as stored.
+    const res = await fetch(`${this.base}/${collection}/${encodeURIComponent(docId)}`, {
       headers: { Authorization: `Bearer ${tok}` },
     });
     if (res.status === 404) return { exists: false, data: null };
