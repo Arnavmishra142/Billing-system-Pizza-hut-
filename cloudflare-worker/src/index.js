@@ -1289,6 +1289,20 @@ async function resolveCustomerDoc(db, phone, raw) {
     const snap = await db.get('customers', docId);
     if (snap.exists) return { docId, snap };
   }
+
+  // AI UPDATE [2026-09-12b] — Field-based fallback.
+  // The ID-guessing above only helps when the doc ID itself is some variant
+  // of the phone number. Every write path (customer.html, order-panel-updates
+  // /js/auth.js) also stores the phone in a `phone` field on the document, so
+  // if none of the guessed IDs hit, query on that field before giving up —
+  // this catches any doc whose ID doesn't match a phone shape we anticipated.
+  const digits = String(phone).replace(/^\+/, '');
+  const local  = digits.length > 10 ? digits.slice(-10) : digits;
+  for (const candidate of [...new Set([phone, '+91' + local, local])]) {
+    const rows = await db.query('customers', [{ field: 'phone', op: '==', value: candidate }]);
+    if (rows.length) return { docId: rows[0].id, snap: rows[0] };
+  }
+
   return { docId: phone, snap: { exists: false, data: null } };
 }
 
