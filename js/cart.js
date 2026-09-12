@@ -1,3 +1,8 @@
+// AI UPDATE [2026-09-13]: Added the "Customer Coupons" panel — tapping the
+// online customer name badge in Order Details shows that customer's
+// available/unused coupons (Copy / Apply). Reuses the existing coupons/{code}
+// collection, phone-based query pattern, and #couponCodeInput/#applyCouponBtn
+// validation logic unchanged. See the block near getCustomerPhoneKey() below.
 import { db, functions } from './firebase-config.js';
 import { doc, setDoc, updateDoc, serverTimestamp, getDocs, getDoc, query, where, collection, increment } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-functions.js";
@@ -534,6 +539,138 @@ document.addEventListener('DOMContentLoaded', () => {
     // "Open in POS" import. Used to verify a personalized coupon belongs to whoever is
     // actually seated in this slot before it can be applied (see applyCouponBtn handler).
     const getCustomerPhoneKey = () => `customerPhone_${getCurrentTable()}_${getCurrentCustomer()}`;
+
+    // ── AI UPDATE [2026-09-13]: Customer Coupons panel ──────────────────────────
+    // Tapping the online customer name badge above (e.g. "Test2") opens a small
+    // panel listing that customer's available/unused coupons. This reuses the
+    // SAME coupons/{code} Firestore collection and phone-based query pattern
+    // already used by js/customers.js (_fetchCustomerCoupons, Customer
+    // Management panel) and the Customer Panel's js/offers.js ("My Offers"
+    // drawer) — no second coupon system is introduced.
+    //
+    // Identity used for lookup: customerPhone_<table>_<slot> — the customer's
+    // real phone number, written by js/incoming-orders.js on "Open in POS"
+    // import. This is the same key _getRedeemableCoupon()/applyCouponBtn
+    // already trust for personalized-coupon binding below — NOT the display
+    // name — so Customer A can never see Customer B's personalized coupons
+    // through this panel.
+    //
+    // Apply reuses the EXISTING #couponCodeInput / #applyCouponBtn validation
+    // logic verbatim (fills the input, clicks the real button) — it does not
+    // duplicate or re-implement coupon validation/application.
+    function _closeCustomerCouponsPanel() {
+        document.getElementById('customerCouponsModal')?.classList.add('hidden');
+    }
+
+    async function _openCustomerCouponsPanel(phone, name) {
+        const modal  = document.getElementById('customerCouponsModal');
+        const nameEl = document.getElementById('couponPanelCustomerName');
+        const listEl = document.getElementById('couponPanelList');
+        if (!modal || !listEl) return;
+
+        if (nameEl) nameEl.textContent = name || 'Customer';
+        listEl.innerHTML = `<div class="coupon-panel-empty">Loading offers…</div>`;
+        modal.classList.remove('hidden');
+
+        let coupons;
+        try {
+            const snap = await getDocs(query(collection(db, 'coupons'), where('phone', '==', phone)));
+            const all = [];
+            snap.forEach(d => all.push({ id: d.id, ...d.data() }));
+            // Only unused coupons are "available" — used coupons are excluded,
+            // never presented here as usable (mirrors the "active" filter in
+            // js/customers.js and js/offers.js, same coupons/{code} collection).
+            coupons = all
+                .filter(cp => !cp.used)
+                .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+        } catch (err) {
+            console.warn('[pos-coupons] Failed to load coupons:', err);
+            listEl.innerHTML = `<div class="coupon-panel-empty">⚠️ Could not load offers. Please try again.</div>`;
+            return;
+        }
+
+        if (coupons.length === 0) {
+            listEl.innerHTML = `<div class="coupon-panel-empty">No available coupons for this customer.</div>`;
+            return;
+        }
+
+        listEl.innerHTML = coupons.map(cp => `
+            <div class="coupon-panel-item">
+                <div class="coupon-panel-item-top">
+                    <span class="coupon-panel-code">${_escHtml(cp.code)}</span>
+                    <span class="coupon-panel-amount">₹${Number(cp.amount) || 0} off</span>
+                </div>
+                <div class="coupon-panel-meta">
+                    ${cp.message ? _escHtml(cp.message) + ' · ' : ''}Min order ₹${cp.minOrder || 200}${cp.type === 'loyalty' ? ' · 🎖️ Loyalty' : ''}
+                </div>
+                <div class="coupon-panel-actions">
+                    <button type="button" class="coupon-panel-copy-btn" data-copy-code="${_escHtml(cp.code)}">📋 Copy</button>
+                    <button type="button" class="coupon-panel-apply-btn" data-apply-code="${_escHtml(cp.code)}">Apply</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    // Badge click — wired once; the badge DOM node persists across renderCart()
+    // calls (only its innerHTML/visibility is updated), so a single listener
+    // here is safe and does not need to be re-attached per render.
+    const onlineCustomerBadgeEl = document.getElementById('onlineCustomerBadge');
+    if (onlineCustomerBadgeEl) {
+        onlineCustomerBadgeEl.style.cursor = 'pointer';
+        onlineCustomerBadgeEl.title = "View this customer's available coupons";
+        onlineCustomerBadgeEl.addEventListener('click', () => {
+            const phone = localStorage.getItem(getCustomerPhoneKey());
+            if (!phone) return; // no online customer bound to this slot — nothing to look up
+            const name = localStorage.getItem(getCustomerNameKey()) || 'Customer';
+            _openCustomerCouponsPanel(phone, name);
+        });
+    }
+
+    document.getElementById('closeCouponsPanelBtn')?.addEventListener('click', _closeCustomerCouponsPanel);
+    document.getElementById('customerCouponsModal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'customerCouponsModal') _closeCustomerCouponsPanel(); // backdrop click
+    });
+
+    document.getElementById('couponPanelList')?.addEventListener('click', (e) => {
+        const copyBtn = e.target.closest('[data-copy-code]');
+        if (copyBtn) {
+            const code = copyBtn.dataset.copyCode;
+            navigator.clipboard?.writeText(code).then(() => {
+                const orig = copyBtn.textContent;
+                copyBtn.textContent = '✅ Copied';
+                copyBtn.disabled = true;
+                setTimeout(() => { copyBtn.textContent = orig; copyBtn.disabled = false; }, 1500);
+            }).catch(() => {
+                copyBtn.textContent = '❌ Failed';
+                setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 1500);
+            });
+            return;
+        }
+
+        const applyBtn = e.target.closest('[data-apply-code]');
+        if (applyBtn) {
+            const code = applyBtn.dataset.applyCode;
+            const inputEl          = document.getElementById('couponCodeInput');
+            const applyCouponBtnEl = document.getElementById('applyCouponBtn');
+
+            // The real Apply button is disabled by _updateCouponUI() when the
+            // pre-discount cart subtotal doesn't exceed COUPON_SECTION_MIN_SUBTOTAL
+            // (₹200) — a disabled button's click handler does not fire, which is
+            // exactly right: this panel must not bypass that existing gate.
+            if (!applyCouponBtnEl || applyCouponBtnEl.disabled) {
+                applyBtn.closest('.coupon-panel-item')?.insertAdjacentHTML(
+                    'beforeend',
+                    `<div class="coupon-panel-gate-msg">Available after ₹${COUPON_SECTION_MIN_SUBTOTAL} order subtotal</div>`
+                );
+                return;
+            }
+
+            if (inputEl) inputEl.value = code;
+            _closeCustomerCouponsPanel();
+            applyCouponBtnEl.click(); // fires the EXISTING applyCouponBtn handler unchanged
+        }
+    });
+    // ── end Customer Coupons panel ──────────────────────────────────────────────
 
     // ── AI UPDATE [2026-09-12]: Coupon redemption state (per table/customer slot) ──
     const getCouponKey = () => `coupon_${getCurrentTable()}_${getCurrentCustomer()}`;
