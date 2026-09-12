@@ -228,6 +228,15 @@ body {
 }
 .date-pill:focus { border-color: #58a6ff; }
 
+/* AI UPDATE [2026-09-12] session 21: label for the Expenses custom date range */
+.exp-range-label {
+    flex-shrink: 0;
+    color: #8b949e;
+    font-weight: 700;
+    font-size: 0.82rem;
+    letter-spacing: 0.02em;
+}
+
 /* =========================================
    STATS CARDS
    ========================================= */
