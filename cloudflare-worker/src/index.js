@@ -1268,12 +1268,36 @@ function assertBillingStaff(data, authCtx, env) {
   throw new FnError('permission-denied', 'Only authorised billing staff can generate a recovery code.');
 }
 
+// AI UPDATE [2026-09-12] — Recovery lookups must tolerate legacy customer doc IDs.
+// Older customer profiles were written with the raw phone the operator typed
+// ("9876543210", "919876543210", "09876543210"), while normalizePhone() always
+// produces "+919876543210". Looking up only the normalized ID made
+// generateRecoveryCode fail with "No customer account exists" for every one of
+// those accounts. Try the normalized ID first, then the known legacy shapes, and
+// return whichever document actually exists (plus its real ID, so writes land on
+// the same document the login path reads).
+function customerDocIdCandidates(phone, raw) {
+  const digits = String(phone).replace(/^\+/, '');          // 919876543210
+  const local  = digits.length > 10 ? digits.slice(-10) : digits; // 9876543210
+  const ids = [phone, digits, local, '0' + local, '+' + local];
+  if (typeof raw === 'string' && raw.trim()) ids.push(raw.trim());
+  return [...new Set(ids)];
+}
+
+async function resolveCustomerDoc(db, phone, raw) {
+  for (const docId of customerDocIdCandidates(phone, raw)) {
+    const snap = await db.get('customers', docId);
+    if (snap.exists) return { docId, snap };
+  }
+  return { docId: phone, snap: { exists: false, data: null } };
+}
+
 // ── generateRecoveryCode ──────────────────────────────────────────────────────
 async function handleGenerateRecoveryCode(data, authCtx, db, env) {
   assertBillingStaff(data, authCtx, env);
 
   const phone = normalizePhone(data?.phone);
-  const snap  = await db.get('customers', phone);
+  const { snap } = await resolveCustomerDoc(db, phone, data?.phone);
   if (!snap.exists) throw new FnError('not-found', 'No customer account exists for this phone number.');
 
   const code      = generateSecureCode();
@@ -1330,7 +1354,7 @@ async function handleVerifyRecoveryCode(data, db) {
     resetTokenExpiresAt: Date.now() + RESET_TOKEN_TTL_MS,
   });
 
-  const cust = await db.get('customers', phone);
+  const { snap: cust } = await resolveCustomerDoc(db, phone, data?.phone);
   return { verified: true, phone, name: cust.data?.name || '', resetToken, expiresInSeconds: Math.floor(RESET_TOKEN_TTL_MS / 1000) };
 }
 
@@ -1356,11 +1380,11 @@ async function handleResetCustomerPassword(data, db) {
     throw new FnError('permission-denied', 'Invalid reset session.');
   }
 
-  const cust = await db.get('customers', phone);
+  const { docId: custDocId, snap: cust } = await resolveCustomerDoc(db, phone, data?.phone);
   if (!cust.exists) throw new FnError('not-found', 'Customer account no longer exists.');
 
   // Same field + same format the existing login path already reads.
-  await db.merge('customers', phone, { passwordHash }, ['passwordUpdatedAt']);
+  await db.merge('customers', custDocId, { passwordHash }, ['passwordUpdatedAt']);
 
   // Single use — burn the code and the reset token.
   await db.merge('customer_recovery', phone, {
