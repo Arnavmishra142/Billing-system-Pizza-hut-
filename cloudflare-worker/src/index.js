@@ -1318,22 +1318,29 @@ async function handleGenerateRecoveryCode(data, authCtx, db, env) {
   assertBillingStaff(data, authCtx, env);
 
   const phone = normalizePhone(data?.phone);
-  const { snap } = await resolveCustomerDoc(db, phone, data?.phone);
+  const { docId, snap } = await resolveCustomerDoc(db, phone, data?.phone);
   if (!snap.exists) throw new FnError('not-found', 'No customer account exists for this phone number.');
 
   const code      = generateSecureCode();
   const codeHash  = await sha256Hex(code + ':' + phone);
   const expiresAt = Date.now() + RECOVERY_CODE_TTL_MS;
 
-  // set() overwrites → any previous outstanding code for this customer dies here.
+  // AI UPDATE [2026-09-13] — Read-reduction. Every step of this flow used to
+  // call resolveCustomerDoc() independently (verify → 1 read, reset → 1 read,
+  // on top of this one), each re-running the ID-guessing/query fallback from
+  // scratch. Since we've already resolved the real customer doc ID + name
+  // right here, stash both on the customer_recovery record so verify/reset
+  // can read them for free instead of re-resolving.
   await db.set('customer_recovery', phone, {
     phone,
     codeHash,
     expiresAt,
-    attempts:  0,
-    used:      false,
+    attempts:   0,
+    used:       false,
     resetTokenHash: null,
     resetTokenExpiresAt: 0,
+    custDocId:  docId,
+    custName:   snap.data?.name || '',
   }, ['createdAt']);
 
   return {
@@ -1375,8 +1382,10 @@ async function handleVerifyRecoveryCode(data, db) {
     resetTokenExpiresAt: Date.now() + RESET_TOKEN_TTL_MS,
   });
 
-  const { snap: cust } = await resolveCustomerDoc(db, phone, data?.phone);
-  return { verified: true, phone, name: cust.data?.name || '', resetToken, expiresInSeconds: Math.floor(RESET_TOKEN_TTL_MS / 1000) };
+  // AI UPDATE [2026-09-13] — name was resolved once at generateRecoveryCode
+  // time and stashed on this same record; reuse it instead of a fresh
+  // resolveCustomerDoc() (which cost 1+ extra 'customers' reads every verify).
+  return { verified: true, phone, name: rec.custName || '', resetToken, expiresInSeconds: Math.floor(RESET_TOKEN_TTL_MS / 1000) };
 }
 
 // ── resetCustomerPassword ─────────────────────────────────────────────────────
@@ -1401,7 +1410,13 @@ async function handleResetCustomerPassword(data, db) {
     throw new FnError('permission-denied', 'Invalid reset session.');
   }
 
-  const { docId: custDocId, snap: cust } = await resolveCustomerDoc(db, phone, data?.phone);
+  // AI UPDATE [2026-09-13] — custDocId was resolved once at generateRecoveryCode
+  // time and stashed on this record; a single direct get() replaces the full
+  // ID-guessing resolveCustomerDoc() re-run (was costing several extra
+  // 'customers' reads per password reset).
+  const custDocId = rec.custDocId;
+  if (!custDocId) throw new FnError('not-found', 'Recovery session not found. Start again with your recovery code.');
+  const cust = await db.get('customers', custDocId);
   if (!cust.exists) throw new FnError('not-found', 'Customer account no longer exists.');
 
   // Same field + same format the existing login path already reads.
