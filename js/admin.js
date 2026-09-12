@@ -907,8 +907,53 @@ document.getElementById('saveItemBtn').addEventListener('click', async () => {
 // switch filters instantly without touching the live listener.
 let _expenseUnsub    = null;
 let _expenseAllDocs  = [];       // cached raw docs from last onSnapshot
-let _expFilterType   = 'days';
-let _expFilterValue  = 1;
+let _expFilterType   = 'days';   // 'days' | 'date' | 'range' | 'all'
+let _expFilterValue  = 1;        // days count, 'YYYY-MM-DD', or {from,to} for 'range'
+
+// ===== AI UPDATE =====
+// Date: 2026-09-12 (session 21)
+// Added, without touching the data model, the Firestore collection or the
+// existing listener/caching design:
+//   1. 'all'   filter type  -> every recorded expense, no record cap.
+//   2. 'range' filter type  -> inclusive custom From -> To range, evaluated on
+//      local-day boundaries (00:00:00.000 -> 23:59:59.999) so it matches the way
+//      the existing 'date'/'days' filters compare local dates.
+//   3. Live search (_expSearchTerm) applied AFTER the date filter, so search
+//      always operates on the currently selected date filter. Purely client-side
+//      over the already cached _expenseAllDocs — no extra Firestore reads per
+//      keystroke.
+//   4. The Total Expenses box is computed from the same final filtered array
+//      that is rendered, so the total can never include hidden expenses.
+// =====================
+let _expSearchTerm = '';         // live search text (lower-cased, trimmed)
+
+// Start of the local day for a Date/date-string.
+function _expStartOfDay(d) {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+}
+// End of the local day for a Date/date-string.
+function _expEndOfDay(d) {
+    const x = new Date(d);
+    x.setHours(23, 59, 59, 999);
+    return x;
+}
+
+// Does one expense match the current live search term?
+// Matches the description/note (case-insensitive substring) OR the amount
+// (substring of the stored numeric amount, so "150" matches 150 and 15000,
+// "20" matches 20000, and decimals such as 65.5 are searchable too).
+function _expMatchesSearch(exp) {
+    if (!_expSearchTerm) return true;
+    const note = String(exp.note ?? '').toLowerCase();
+    if (note.includes(_expSearchTerm)) return true;
+    const amtRaw = String(exp.amount ?? '');
+    if (amtRaw.toLowerCase().includes(_expSearchTerm)) return true;
+    const amtNum = Number(exp.amount);
+    if (Number.isFinite(amtNum) && String(amtNum).includes(_expSearchTerm)) return true;
+    return false;
+}
 
 // Render the expense list from the cached _expenseAllDocs using the current filter.
 // Called both from the onSnapshot callback and from loadAdminExpenses() when the
@@ -918,16 +963,37 @@ function _renderExpensesFromDocs() {
     if (!listEl) return;
 
     const now = new Date();
+
+    // Pre-compute inclusive local-day boundaries for the custom range filter.
+    let rangeStart = null, rangeEnd = null;
+    if (_expFilterType === 'range' && _expFilterValue && _expFilterValue.from && _expFilterValue.to) {
+        let from = new Date(_expFilterValue.from);
+        let to   = new Date(_expFilterValue.to);
+        // Tolerate a start date after the end date by swapping them.
+        if (from > to) { const t = from; from = to; to = t; }
+        rangeStart = _expStartOfDay(from);
+        rangeEnd   = _expEndOfDay(to);
+    }
+
     let filtered = [];
     _expenseAllDocs.forEach(exp => {
         const expDate = new Date(exp.timestamp);
         const diff    = Math.ceil(Math.abs(now - expDate) / 864e5);
+        let inDateFilter = false;
         if (_expFilterType === 'days') {
-            if (_expFilterValue === 1 && expDate.toDateString() === now.toDateString()) filtered.push(exp);
-            else if (_expFilterValue !== 1 && diff <= _expFilterValue) filtered.push(exp);
+            if (_expFilterValue === 1 && expDate.toDateString() === now.toDateString()) inDateFilter = true;
+            else if (_expFilterValue !== 1 && diff <= _expFilterValue) inDateFilter = true;
         } else if (_expFilterType === 'date') {
-            if (expDate.toDateString() === new Date(_expFilterValue).toDateString()) filtered.push(exp);
+            if (expDate.toDateString() === new Date(_expFilterValue).toDateString()) inDateFilter = true;
+        } else if (_expFilterType === 'range') {
+            // Invalid/incomplete range -> show nothing rather than throwing.
+            if (rangeStart && rangeEnd && !isNaN(expDate) &&
+                expDate >= rangeStart && expDate <= rangeEnd) inDateFilter = true;
+        } else if (_expFilterType === 'all') {
+            inDateFilter = true;      // earliest recorded expense -> now, uncapped
         }
+        // Search always runs on top of the selected date filter.
+        if (inDateFilter && _expMatchesSearch(exp)) filtered.push(exp);
     });
     filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
@@ -935,7 +1001,10 @@ function _renderExpensesFromDocs() {
     document.getElementById('totalExpenseBox').textContent = `₹${total.toFixed(0)}`;
 
     if (!filtered.length) {
-        listEl.innerHTML = '<div class="empty-state">No expenses found. 🎉</div>';
+        // Normal "no results" state — never an error.
+        listEl.innerHTML = _expSearchTerm
+            ? '<div class="empty-state">No expenses match your search.</div>'
+            : '<div class="empty-state">No expenses found. 🎉</div>';
         return;
     }
     listEl.innerHTML = filtered.map(exp => {
@@ -1006,8 +1075,46 @@ window.loadAdminExpenses = function(filterType, filterValue, btnContext, forceRe
 document.getElementById('expenseDateSearch').addEventListener('change', (e) => {
     if (e.target.value) {
         document.querySelectorAll('#expenseSection .filter-pill').forEach(b => b.classList.remove('active'));
+        // AI UPDATE [2026-09-12]: a single-date pick supersedes the custom range.
+        const rf = document.getElementById('expenseRangeFrom');
+        const rt = document.getElementById('expenseRangeTo');
+        if (rf) rf.value = '';
+        if (rt) rt.value = '';
         loadAdminExpenses('date', e.target.value, null);
     }
+});
+
+// ===== AI UPDATE [2026-09-12] session 21: custom date range + live search =====
+// Custom range: applied as soon as BOTH From and To are set. Inclusive, and a
+// single day works by setting From = To.
+function _expApplyRange() {
+    const from = document.getElementById('expenseRangeFrom')?.value;
+    const to   = document.getElementById('expenseRangeTo')?.value;
+    if (!from || !to) return;                      // wait for a complete range
+    document.querySelectorAll('#expenseSection .filter-pill').forEach(b => b.classList.remove('active'));
+    const single = document.getElementById('expenseDateSearch');
+    if (single) single.value = '';                 // range supersedes single date
+    loadAdminExpenses('range', { from, to }, null);
+}
+document.getElementById('expenseRangeFrom')?.addEventListener('change', _expApplyRange);
+document.getElementById('expenseRangeTo')?.addEventListener('change', _expApplyRange);
+
+// Clear the range and fall back to the default Today filter.
+document.getElementById('expenseRangeClearBtn')?.addEventListener('click', () => {
+    const rf = document.getElementById('expenseRangeFrom');
+    const rt = document.getElementById('expenseRangeTo');
+    if (rf) rf.value = '';
+    if (rt) rt.value = '';
+    const todayBtn = document.querySelector('#expenseSection .filter-pill[data-val="1"]');
+    loadAdminExpenses('days', 1, todayBtn);
+});
+
+// Live search — re-renders from the cached docs on every keystroke.
+// No Firestore read, no Enter key needed. Clearing it restores the full list
+// (and the correct total) for the currently selected date filter.
+document.getElementById('expenseSearchInput')?.addEventListener('input', (e) => {
+    _expSearchTerm = String(e.target.value || '').trim().toLowerCase();
+    if (_expenseUnsub) _renderExpensesFromDocs();
 });
 
 document.getElementById('refreshExpenseBtn').addEventListener('click', (e) => {
@@ -1016,7 +1123,12 @@ document.getElementById('refreshExpenseBtn').addEventListener('click', (e) => {
     const dateVal = document.getElementById('expenseDateSearch').value;
     // forceRefresh=true: tear down the listener and reconnect for a guaranteed
     // server sync (same visible behaviour as before, now explicit).
-    if (dateVal) loadAdminExpenses('date', dateVal, null, true);
+    // AI UPDATE [2026-09-12]: preserve a custom range / ALL selection on refresh.
+    const rFrom = document.getElementById('expenseRangeFrom')?.value;
+    const rTo   = document.getElementById('expenseRangeTo')?.value;
+    if (rFrom && rTo)                             loadAdminExpenses('range', { from: rFrom, to: rTo }, null, true);
+    else if (dateVal)                             loadAdminExpenses('date', dateVal, null, true);
+    else if (active?.dataset.val === 'all')       loadAdminExpenses('all', null, active, true);
     else loadAdminExpenses('days', parseInt(active?.dataset.val || '1'), active, true);
     setTimeout(() => { e.target.textContent = '↻'; e.target.disabled = false; }, 1500);
 });

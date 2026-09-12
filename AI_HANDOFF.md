@@ -4419,3 +4419,49 @@ No Firebase Auth changes. Customer sessions still come from `customerAuth`; the 
 ### 9. Dependencies on the billing side
 
 All three Worker endpoints must be deployed (they are implemented in this repo). Nothing else is required; no new collection, index, or secret is needed on the customer side.
+
+---
+
+## SESSION 21 — 2026-09-12 · Admin → Expenses: custom date range, ALL filter, live search
+
+**Scope:** Admin Panel → Expenses screen only. No data-model, collection, field, Firestore-rule or unrelated-UI change.
+
+### Files modified
+
+| File | Change |
+|---|---|
+| `admin/index.html` | Expenses section: added `ALL` filter pill, a `From`/`To` custom range row (`#expenseRangeFrom`, `#expenseRangeTo`, `#expenseRangeClearBtn`) and a live search input (`#expenseSearchInput`) reusing the existing `cust-search-wrap` / `cust-search-input` styles. |
+| `css/admin.css` | One new tiny rule: `.exp-range-label` (From/To captions). Nothing else touched. |
+| `js/admin.js` | Expenses section only — see below. |
+
+### `js/admin.js` details
+
+- `_expFilterType` now accepts `'days' | 'date' | 'range' | 'all'` (was `'days' | 'date'`).
+  For `'range'`, `_expFilterValue` is `{ from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }`.
+- New helpers: `_expStartOfDay()`, `_expEndOfDay()`, `_expMatchesSearch()`; new module state `_expSearchTerm`.
+- `_renderExpensesFromDocs()` — unchanged architecture (still renders from the cached
+  `_expenseAllDocs`, still the only renderer). It now:
+  - resolves the inclusive local-day boundaries `00:00:00.000 → 23:59:59.999` for `'range'`
+    (swapping From/To when From > To, rendering an empty state for an incomplete range),
+  - treats `'all'` as "every cached doc", with no record cap,
+  - applies the search **after** the date filter, so search always operates on the currently
+    selected date filter,
+  - computes `Total Expenses` from the same final filtered array it renders — the total can
+    never come from hidden/unfiltered expenses.
+- Search matching: case-insensitive substring on `note`, plus substring match on the stored
+  `amount` (so `150` matches ₹150 and ₹15000, `20` matches ₹20000; decimals are searchable).
+- New listeners: `change` on both range inputs (applied once both are set), `click` on the
+  range clear button (falls back to `Today`), and `input` on the search box — live, no Enter,
+  and re-render only, so **zero extra Firestore reads per keystroke**.
+- Picking a single date clears the range, and setting a range clears the single date.
+- The Refresh button now preserves a custom range or `ALL` selection.
+- `_startExpenseListener()`, the `onSnapshot` caching design, `deleteExpense()`, Add Expense
+  (`js/expense.js`) and every other tab were **not** modified.
+
+### Verified
+
+7 Days · 30 Days · ALL · custom range (incl. same-day and reversed range) · search by full
+name, partial name and amount · search while typing · search combined with each date filter ·
+clearing search restores the filter's full list and total · empty result shows a neutral
+"No expenses match your search." state, not an error · Add Expense and Delete Expense still work ·
+Sales / Menu / Customers / admin login untouched.

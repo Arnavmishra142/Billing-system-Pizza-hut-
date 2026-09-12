@@ -170,8 +170,33 @@
                 <button class="filter-pill active" data-val="1" onclick="loadAdminExpenses('days',1,this)">Today</button>
                 <button class="filter-pill" data-val="7" onclick="loadAdminExpenses('days',7,this)">7 Days</button>
                 <button class="filter-pill" data-val="30" onclick="loadAdminExpenses('days',30,this)">30 Days</button>
+                <!-- AI UPDATE [2026-09-12] session 21: ALL filter (whole expense history) -->
+                <button class="filter-pill" data-val="all" onclick="loadAdminExpenses('all',null,this)">ALL</button>
                 <input type="date" id="expenseDateSearch" class="date-pill">
                 <button class="icon-btn" id="refreshExpenseBtn" title="Refresh">↻</button>
+            </div>
+
+            <!-- AI UPDATE [2026-09-12] session 21: custom (From → To) date range -->
+            <div class="filter-scroll-row" style="align-items:center; gap:8px;">
+                <span class="exp-range-label">From</span>
+                <input type="date" id="expenseRangeFrom" class="date-pill">
+                <span class="exp-range-label">To</span>
+                <input type="date" id="expenseRangeTo" class="date-pill">
+                <button class="filter-pill" id="expenseRangeClearBtn" title="Clear date range">✕</button>
+            </div>
+
+            <!-- AI UPDATE [2026-09-12] session 21: live search (name or amount), client-side only -->
+            <div class="filter-scroll-row" style="align-items:center; gap:8px;">
+                <div class="cust-search-wrap">
+                    <span class="cust-search-icon">🔍</span>
+                    <input
+                        id="expenseSearchInput"
+                        class="cust-search-input"
+                        type="search"
+                        placeholder="Search name or amount…"
+                        autocomplete="off"
+                    >
+                </div>
             </div>
 
             <div class="stats-row">
