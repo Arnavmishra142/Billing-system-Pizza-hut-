@@ -1244,12 +1244,16 @@ async function sha256Hex(str) {
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Cryptographically unpredictable 6-digit code (rejection sampling — uniform).
-function generateSecureCode() {
-  const buf = new Uint32Array(1);
-  let n;
-  do { crypto.getRandomValues(buf); n = buf[0]; } while (n >= 4294000000);
-  return String(n % 1000000).padStart(6, '0');
+// AI UPDATE [recovery-code simplification] — replaces the random 6-digit code.
+// This restaurant only serves ~150-200 customers/day, so the recovery "code"
+// is now simply the last 4 digits of the customer's own registered phone
+// number (e.g. 9876543210 → 3210). Deterministic and not a secret staff have
+// to relay accurately — it's already known to the customer. Everything else
+// (codeHash storage, TTL, attempts, single-use, resetToken) is unchanged;
+// only how `code` is produced is different.
+function lastFourDigits(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  return digits.slice(-4).padStart(4, '0');
 }
 
 function randomTokenHex(bytes = 32) {
@@ -1321,7 +1325,7 @@ async function handleGenerateRecoveryCode(data, authCtx, db, env) {
   const { docId, snap } = await resolveCustomerDoc(db, phone, data?.phone);
   if (!snap.exists) throw new FnError('not-found', 'No customer account exists for this phone number.');
 
-  const code      = generateSecureCode();
+  const code      = lastFourDigits(snap.data?.phone || phone); // AI UPDATE [recovery-code simplification]: authoritative registered phone (customer doc's own `phone` field) — not the operator-typed value used only for lookup
   const codeHash  = await sha256Hex(code + ':' + phone);
   const expiresAt = Date.now() + RECOVERY_CODE_TTL_MS;
 
@@ -1356,7 +1360,7 @@ async function handleGenerateRecoveryCode(data, authCtx, db, env) {
 async function handleVerifyRecoveryCode(data, db) {
   const phone = normalizePhone(data?.phone);
   const code  = String(data?.code || '').trim();
-  if (!/^\d{6}$/.test(code)) throw new FnError('invalid-argument', 'Enter the 6-digit recovery code.');
+  if (!/^\d{4}$/.test(code)) throw new FnError('invalid-argument', 'Enter the 4-digit recovery code.');
 
   const snap = await db.get('customer_recovery', phone);
   if (!snap.exists) throw new FnError('not-found', 'No recovery code has been issued. Please contact the billing counter.');
