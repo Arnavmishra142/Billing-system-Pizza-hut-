@@ -666,9 +666,10 @@ window._custRefresh = async function() {
 // STAFF-ASSISTED PASSWORD RECOVERY  (AI UPDATE [2026-09-11])
 //
 // Staff press "Generate Recovery Code" on a customer. The Cloudflare Worker
-// (server-side, Firebase Admin credentials) creates a cryptographically random
-// 6-digit code, stores ONLY its hash in customer_recovery/{phone}, and returns
-// the plain code once for display here. Staff read it out verbally.
+// (server-side, Firebase Admin credentials) computes the code — the last 4
+// digits of that customer's own registered phone number — stores ONLY its
+// hash in customer_recovery/{phone}, and returns the plain code once for
+// display here. Staff read it out verbally.
 //
 // Staff never see nor set the customer's new password — the customer enters
 // the code on their own device and chooses the password themselves.
