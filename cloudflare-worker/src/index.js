@@ -1381,60 +1381,64 @@ async function resolveCustomerDoc(db, phone, raw) {
 }
 
 // ── generateRecoveryCode ──────────────────────────────────────────────────────
-// Read-only. No Firestore write. Staff-only (PIN or billingOperator claim).
-async function handleGenerateRecoveryCode(data, authCtx, db, env) {
+// AI UPDATE [2026-09-13d] — ZERO Firestore access. The code is nothing but the
+// last 4 digits of the phone the operator already has on screen (from the
+// customer list, which came from an existing listener elsewhere — not a new
+// read). There is nothing to look up: computing 4 digits from a phone number
+// a staff member already typed is arithmetic, not a database question. Staff-
+// only (PIN or billingOperator claim) via assertBillingStaff.
+async function handleGenerateRecoveryCode(data, authCtx, env) {
   assertBillingStaff(data, authCtx, env);
 
   const phone = normalizePhone(data?.phone);
-  const { snap } = await resolveCustomerDoc(db, phone, data?.phone);
-  if (!snap.exists) throw new FnError('not-found', 'No customer account exists for this phone number.');
+  if (!phone) throw new FnError('invalid-argument', 'A valid phone number is required.');
 
-  // Authoritative registered phone (customer doc's own `phone` field) — not
-  // the operator-typed value used only for lookup.
-  const code = lastFourDigits(snap.data?.phone || phone);
+  const code = lastFourDigits(phone);
 
   return {
     code,                                   // shown ONCE inside the billing panel
     phone,
-    name: snap.data?.name || '',
     expiresAt: Date.now() + RECOVERY_CODE_TTL_MS,     // cosmetic countdown only — see header note
     expiresInSeconds: Math.floor(RECOVERY_CODE_TTL_MS / 1000),
   };
 }
 
 // ── verifyRecoveryCode ────────────────────────────────────────────────────────
-// Read-only. No Firestore write. Recomputes the code from the same authoritative
-// source generateRecoveryCode used, so Admin, POS and the Customer Panel are
-// always checking against the exact same value — nothing to fall out of sync.
-async function handleVerifyRecoveryCode(data, db, env) {
+// AI UPDATE [2026-09-13d] — ZERO Firestore access. The customer typed their own
+// phone number and a 4-digit code; checking whether the code equals that same
+// phone's last 4 digits is pure comparison, no lookup needed. Whether an actual
+// customer account exists behind that phone is verified exactly once, at the
+// one point it actually matters: resetCustomerPassword (below), where the new
+// password has to be written to a real document.
+async function handleVerifyRecoveryCode(data, env) {
   const phone = normalizePhone(data?.phone);
   const code  = String(data?.code || '').trim();
+  if (!phone) throw new FnError('invalid-argument', 'A valid phone number is required.');
   if (!/^\d{4}$/.test(code)) throw new FnError('invalid-argument', 'Enter the 4-digit recovery code.');
 
-  const { docId, snap } = await resolveCustomerDoc(db, phone, data?.phone);
-  if (!snap.exists) throw new FnError('not-found', 'No customer account exists for this phone number.');
-
-  const authoritative = lastFourDigits(snap.data?.phone || phone);
+  const authoritative = lastFourDigits(phone);
   if (!timingSafeEqualHex(code, authoritative)) {
     throw new FnError('permission-denied', 'That code is not correct. Please check and try again.');
   }
 
   const expiresAt  = Date.now() + RESET_TOKEN_TTL_MS;
-  const resetToken = await signResetToken(env, { d: docId, p: phone, e: expiresAt });
+  const resetToken = await signResetToken(env, { p: phone, e: expiresAt });
 
   return {
     verified: true,
     phone,
-    name: snap.data?.name || '',
     resetToken,
     expiresInSeconds: Math.floor(RESET_TOKEN_TTL_MS / 1000),
   };
 }
 
 // ── resetCustomerPassword ─────────────────────────────────────────────────────
-// The ONLY Firestore write in this entire flow: customers/{id}.passwordHash.
-// The resetToken is verified in memory (signature + expiry) — no lookup needed
-// to validate the token itself, only to fetch the doc being updated.
+// AI UPDATE [2026-09-13d] — The ONLY Firestore access anywhere in this flow:
+// one read to find the account, one write to save the new password. This runs
+// once, only when a customer actually finishes a recovery — not on every
+// generate or every verify attempt. The resetToken's signature + expiry are
+// checked entirely in memory first, so a bad/expired token never even reaches
+// Firestore.
 async function handleResetCustomerPassword(data, db, env) {
   const phone        = normalizePhone(data?.phone);
   const resetToken   = String(data?.resetToken || '').trim();
@@ -1451,13 +1455,11 @@ async function handleResetCustomerPassword(data, db, env) {
     throw new FnError('deadline-exceeded', 'Your reset session expired. Enter the recovery code again.');
   }
 
-  const custDocId = claims.d;
-  if (!custDocId) throw new FnError('not-found', 'Recovery session not found. Start again with your recovery code.');
-  const cust = await db.get('customers', custDocId);
-  if (!cust.exists) throw new FnError('not-found', 'Customer account no longer exists.');
+  const { docId, snap } = await resolveCustomerDoc(db, phone, data?.phone);
+  if (!snap.exists) throw new FnError('not-found', 'Customer account no longer exists.');
 
   // Same field + same format the existing login path already reads.
-  await db.merge('customers', custDocId, { passwordHash }, ['passwordUpdatedAt']);
+  await db.merge('customers', docId, { passwordHash }, ['passwordUpdatedAt']);
 
   return { ok: true, phone };
 }
@@ -1581,12 +1583,12 @@ export default {
         case 'generateRecoveryCode': {
           let authCtx = null;
           if (rawToken) { try { authCtx = await verifyIdToken(rawToken, projectId); } catch { authCtx = null; } }
-          result = await handleGenerateRecoveryCode(data, authCtx, db, env);
+          result = await handleGenerateRecoveryCode(data, authCtx, env);
           break;
         }
 
         case 'verifyRecoveryCode':
-          result = await handleVerifyRecoveryCode(data, db, env);
+          result = await handleVerifyRecoveryCode(data, env);
           break;
 
         case 'resetCustomerPassword':
