@@ -14,7 +14,9 @@
 // flow fix (username cleanup + correct Firestore batch delete rules).
 // AI UPDATE [2026-08-02]: v7→v8 — bust cached js/admin.js after auth guard fix
 // (saveItemBtn / toggleStock / deleteMenuItem now wait for auth.currentUser).
-const CACHE = 'admin-pos-v9'; // AI UPDATE [2026-08-05]: bust cache — admin-menu.js updated
+// AI UPDATE [2026-09-13]: v9→v10 — bust cached admin/index.html, css/admin.css
+// and js/customers.js after adding the Customer Filter + Sort panel.
+const CACHE = 'admin-pos-v10';
 const PRECACHE = [
     '/admin/index.html',
     '/css/admin.css',
