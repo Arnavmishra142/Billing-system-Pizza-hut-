@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-08-05 (Single-price products + optional variant names; unnamed variant grouping fix)
+> Last updated: 2026-09-13 (Admin Panel — Customer Filter + Sort panel)
 
 ---
 
@@ -4422,224 +4422,6 @@ the 4-vs-6 digit format check.
 
 ---
 
-# Customer Password Recovery — Stateless Fix, No `customer_recovery` Collection (AI UPDATE [2026-09-13c])
-
-## Audit performed first
-
-Traced the live recovery flow across all three surfaces before changing anything:
-
-| Surface | File | Found |
-|---|---|---|
-| Admin Panel | `js/customers.js` → `window._custGenerateRecovery` | Already calls Worker `generateRecoveryCode` (last-4-digits code). Not "old logic". |
-| POS / Incoming Orders | `js/incoming-orders-customers.js` → `window._ioGenerateRecovery` | Already calls the **same** `callRecoveryFn` re-exported from `js/customers.js` → same Worker endpoint. Not "old logic" either. |
-| Customer Panel | `Order-` repo `js/auth.js` → `_onRecoveryVerify` / `_onRecoverySetPassword` | Already calls `verifyRecoveryCode` / `resetCustomerPassword` with a 4-digit code. |
-
-So Admin, POS, and the Customer Panel were **already calling one consistent
-set of Worker endpoints** with one consistent code rule (last 4 digits of the
-registered phone). The inconsistency was not in the three front-ends — it was
-inside the Worker itself (`cloudflare-worker/src/index.js`):
-
-- `handleGenerateRecoveryCode` did `db.set('customer_recovery', phone, {...})`
-  — a **Firestore write** on every single "Generate Recovery Code" tap, purely
-  to store a hash of a code that is deterministically derivable from data
-  already sitting in `customers/{id}`. This is what was producing the
-  Firestore quota errors on Admin/POS.
-- `handleVerifyRecoveryCode` did `db.get('customer_recovery', phone)` and
-  **required that document to already exist**. If it didn't (quota-exhausted
-  write silently failed, code expired, or timing edge case), the Worker threw
-  `not-found` — or, when the write itself was failing under quota pressure,
-  an unhandled `internal` error — which the Customer Panel's
-  `_recoveryMessage()` maps to the generic **"Something went wrong. Please
-  try again."** This matches the exact reported symptom.
-
-## Fix — remove the coupling, not the UI
-
-Per the constraint ("keep the existing Forgot Password UI/flow, only replace
-the code-generation/verification logic"), **only
-`cloudflare-worker/src/index.js` was changed.** Zero changes to Admin, POS, or
-Customer Panel front-end code — all three already called the right endpoints
-with the right request/response shapes, so nothing there needed to move.
-
-`generateRecoveryCode`, `verifyRecoveryCode`, and `resetCustomerPassword` are
-now fully stateless with respect to the recovery code itself:
-
-| Step | Before | Now |
-|---|---|---|
-| `generateRecoveryCode` | Read customer doc, **write** `customer_recovery/{phone}` (codeHash, expiry, attempts, custDocId, custName) | Read customer doc only. Computes `lastFourDigits(customer.phone)` and returns it. **No write.** |
-| `verifyRecoveryCode` | **Read** `customer_recovery/{phone}`, compare `sha256(code+phone)` to stored hash, **write** attempts / resetTokenHash | **Read** the `customers` doc directly (same `resolveCustomerDoc` used by generate), recompute `lastFourDigits` fresh, compare directly. On match, returns a **self-verifying signed `resetToken`** (HMAC-SHA256 over `{custDocId, phone, expiresAt}`, keyed with the existing `FIREBASE_PRIVATE_KEY` secret — no new secret to provision). **No write.** |
-| `resetCustomerPassword` | **Read** `customer_recovery/{phone}`, check token hash + expiry, **write** `customers/{id}.passwordHash`, **write** `customer_recovery` used-flag | Verifies the signed token's signature + embedded expiry **in memory** (no read needed to validate the token). Reads `customers/{id}` to confirm it still exists, then does the one write this flow actually needs: `customers/{id}.passwordHash`. |
-
-Net result: **zero Firestore writes** anywhere in the recovery flow except the
-final, unavoidable password write — this is what eliminates the quota errors
-and the "Something went wrong" failure (verify no longer depends on anything
-generate may or may not have successfully written).
-
-The `customer_recovery` Firestore collection is no longer written to or read
-from anywhere. It is not deleted (no destructive migration needed) — it is
-simply dead going forward. `firestore.rules`' catch-all still blocks client
-access to it; no rules change needed or made.
-
-## Request/response shapes — unchanged
-
-All three functions keep **identical** request and response field names, so no
-caller (`js/customers.js`, `js/incoming-orders-customers.js`, Customer Panel
-`js/auth.js`) needed any change:
-
-- `generateRecoveryCode({ phone, pin })` → `{ code, phone, name, expiresAt, expiresInSeconds }`
-- `verifyRecoveryCode({ phone, code })` → `{ verified, phone, name, resetToken, expiresInSeconds }`
-- `resetCustomerPassword({ phone, resetToken, passwordHash })` → `{ ok, phone }`
-
-## Accepted trade-off (documented, not a defect)
-
-Because nothing is persisted, there is no cross-request attempt counter or
-single-use burn on the 4-digit code itself anymore. This is an accepted
-consequence of the "no storage" requirement: the code is derived from the
-customer's own phone number, so it never carried more secrecy than the phone
-number already does. The `resetToken` issued after a correct code is still
-short-lived (5 minutes) and cryptographically signed, so a stale or replayed
-token cannot be used to reset a password outside that window.
-
-`expiresAt` returned by `generateRecoveryCode` is now a **cosmetic countdown**
-for the staff-facing UI only (the code doesn't rotate or expire server-side
-any more, since it's a fixed function of the phone number) — the real,
-enforced expiry in this flow is the 5-minute `resetToken` window.
-
-## Files changed
-
-| File | Change |
-|---|---|
-| `cloudflare-worker/src/index.js` | Recovery section (`generateRecoveryCode` / `verifyRecoveryCode` / `resetCustomerPassword` handlers and their helpers) rewritten to be stateless. Removed: `customer_recovery` reads/writes, `sha256Hex`, `randomTokenHex`, `RECOVERY_MAX_ATTEMPTS`. Added: `base64UrlEncode/Decode`, `hmacSha256Hex`, `recoveryTokenSecret`, `signResetToken`, `verifyResetToken`. Kept unchanged: `lastFourDigits`, `timingSafeEqualHex`, `assertBillingStaff`, `customerDocIdCandidates`, `resolveCustomerDoc`. Router: `verifyRecoveryCode` / `resetCustomerPassword` cases now also pass `env` through (needed for the HMAC secret). |
-
-**Nothing else was touched** — no changes to Admin Panel, POS panel, Customer
-Panel, `firestore.rules`, or any other Worker function.
-
-## Testing performed
-
-Static: `node --check` on the modified Worker file passes. Extracted the pure
-helper logic (`lastFourDigits`, `timingSafeEqualHex`, `base64Url*`,
-`hmacSha256Hex`, `signResetToken`, `verifyResetToken`) into a standalone Node
-script (Web Crypto / `btoa`/`atob` are both available in that environment) and
-verified:
-- `6393349498 → 9498`, `9876543210 → 3210`, `7000012345 → 2345` (exact cases from the task).
-- A signed token round-trips correctly through sign → verify.
-- A tampered token (flipped trailing hex chars) fails verification.
-- An expired token's embedded expiry is correctly detected as past.
-- Wrong code (`9499`) correctly fails comparison against `9498`; correct code passes.
-
-**Still to be tested against the live Worker deployment** (no Firebase/Cloudflare
-credentials in this environment): Admin "Generate Recovery Code" shows the
-customer's own last-4 digits with no quota error; POS shows the identical
-value for the same customer; Customer Panel "Verify Code" with the correct 4
-digits now succeeds end-to-end into the new-password screen; wrong code is
-rejected; a second customer's code only works for that customer's account;
-existing login and existing (non-recovery) password behaviour are unaffected.
-
----
-
-# Customer Password Recovery — Removed ALL Non-Essential Firestore Reads (AI UPDATE [2026-09-13d])
-
-## Why this round of changes happened
-
-After the [2026-09-13c] stateless fix above was deployed, the reported symptom
-persisted — but the screenshot evidence showed it was no longer the same bug:
-
-```
-Firestore GET failed: 429 { "code": 429, "message": "Quota exceeded.",
-"status": "RESOURCE_EXHAUSTED" }
-```
-
-This is a **real 429 from Google's Firestore REST API on a plain read**, not
-an app-level error this codebase produces. The project (`billing-system-f8531`)
-is confirmed to be on the free **Spark plan**, which has a hard **daily** cap
-(50k reads / 20k writes / 20k deletes, shared across the *entire* project —
-menu listeners, order tracking, everything, not just recovery). Once that
-daily cap is hit, every Firestore call in the whole app fails the same way
-until the next day's reset. No amount of code editing can un-exhaust an
-already-spent daily quota — that part is a Firebase plan/billing question, not
-a bug, and was communicated as such.
-
-That said, there was a legitimate follow-up code question: **why did the
-[2026-09-13c] version touch Firestore in `generateRecoveryCode` and
-`verifyRecoveryCode` at all?** The code is nothing but the last 4 digits of a
-phone number the caller already provided — computing and comparing that is
-pure arithmetic, not something that requires looking anything up. The [c]
-version still read the `customers` collection in both of those steps (to
-fetch an "authoritative" phone and a display name), which was unnecessary and,
-worse, actually read *more* than the original design once the per-call
-`customer_recovery` cache was removed (up to ~8 reads for legacy phone shapes,
-independently, in *both* generate and verify).
-
-## What changed in this pass
-
-`cloudflare-worker/src/index.js` only, same three functions:
-
-| Function | Firestore access now |
-|---|---|
-| `generateRecoveryCode` | **None.** Computes `lastFourDigits(normalizePhone(phone))` and returns it. No existence check — the "Generate Recovery Code" button only ever appears next to a customer already listed in the Admin/POS UI (populated by an existing listener elsewhere, not a new read), so re-verifying existence here was redundant anyway. |
-| `verifyRecoveryCode` | **None.** Recomputes `lastFourDigits(phone)` from the phone the customer typed and compares it (constant-time) to the code they typed. On match, issues the same signed, stateless `resetToken` as before (HMAC over `{ phone, expiresAt }` — dropped the `custDocId` claim since nothing is resolved at this step anymore). |
-| `resetCustomerPassword` | **The only touch point left: one `resolveCustomerDoc` read, one `merge` write.** This runs once, only when a customer actually completes a recovery — not on every generate or every verify click. This is also where a non-existent account now gets caught (`not-found`), since it's the one place account existence actually matters (there has to be a real document to write the new password to). |
-
-Net effect: a full recovery attempt (generate → verify → reset) now touches
-Firestore **exactly once for a read and once for a write, total** — down from
-up to ~24 reads across the three steps in the [c] version, and down from a
-write on every single generate click in the original [2026-09-11] version.
-
-## Response shape changes (checked against every caller first)
-
-`name` was dropped from both `generateRecoveryCode` and `verifyRecoveryCode`
-responses (nothing is looked up to produce it anymore). Verified this is safe
-before making the change:
-- `js/customers.js` and `js/incoming-orders-customers.js` already render
-  `${r.name || c?.name || 'Customer'}` — both already fall back to the
-  customer's name from their own local list, so the display is unaffected.
-- The Customer Panel's `js/auth.js` `_onRecoveryVerify` never reads
-  `result.name` at all.
-
-`custDocId` was dropped from the `resetToken`'s signed payload (verify no
-longer resolves a doc, so there is nothing to embed). `resetCustomerPassword`
-resolves the doc itself, at the point it's actually needed. No caller ever
-inspected the token's contents — it's opaque to every front-end — so this is
-invisible to all three panels.
-
-All three request/response **field names** the front-ends read
-(`code`, `phone`, `expiresAt`, `expiresInSeconds`, `verified`, `resetToken`,
-`ok`) are unchanged. No Admin, POS, or Customer Panel file needed edits.
-
-## What did NOT change
-
-- `firestore.rules` — `customer_recovery` remains unreferenced and blocked to clients (still dead, not deleted).
-- `lastFourDigits`, `timingSafeEqualHex`, `assertBillingStaff`, `customerDocIdCandidates`, `resolveCustomerDoc` — logic untouched, only where they're called from changed.
-- The staff-authorisation gate (PIN or `billingOperator` claim) on `generateRecoveryCode`.
-- Every other Worker function (`operatorSignIn`, `customerAuth`, `createCustomerOrder`, etc.).
-- Any Admin, POS, or Customer Panel file.
-
-## Testing performed
-
-`node --check` passes. Re-ran the standalone token-logic test script (see
-[2026-09-13c] above) with the `custDocId` claim removed from the payload —
-sign → verify round trip, tampered-token rejection, and expired-token
-detection all still pass; digit-derivation cases (`6393349498→9498`,
-`9876543210→3210`, `7000012345→2345`) unchanged.
-
-**Still to be verified live, once the Spark quota resets or the project is on
-Blaze:** Admin/POS "Generate Recovery Code" returns instantly with no
-Firestore call in the Cloudflare log; Customer Panel "Verify Code" likewise;
-only "Set New Password" shows a `customers` read + write in the log; a
-customer whose account doesn't exist is only rejected at the final step, with
-a clear "Customer account no longer exists" message.
-
-## Open item for the repository owner (not a code fix — an infrastructure decision)
-
-The daily Spark quota is a project-wide ceiling shared with menu real-time
-listeners, active-order tracking, and everything else in both panels — it is
-not specific to recovery and cannot be worked around from inside this flow
-alone. Recommended next step: check Firebase Console → Usage/Firestore Usage
-to see which quota is maxed, and consider upgrading to Blaze (pay-as-you-go)
-for production use, since Spark's hard daily cutoff isn't really viable for a
-live app serving real customers.
-
----
-
 # Customer Password Recovery — Customer Panel Changes (for the next agent)
 
 Repository: `https://github.com/teamdovolve-hue/Order-`
@@ -5084,3 +4866,180 @@ original to confirm no behavioral change.
    `switchDrawerTab()` rewrite).
 6. Admin Panel's existing Customer Management "🔑 Generate Recovery Code" button still works
    unchanged.
+
+---
+
+# Admin Panel — Customer Filter + Sort Panel (AI UPDATE [2026-09-13])
+
+## Objective
+
+Add a detailed Filter + Sort panel to the existing Admin Panel **Customers** screen
+(`admin/index.html` → `customersSection`), alongside the existing Name/Phone search:
+Joined Date, Last Order, Total Orders, Lifetime Spend, Customer Status, Coupons, and
+Sort By — all combining with each other (AND) and with the existing search.
+
+## Audit performed before coding
+
+1. Read `ARCHITECTURE_LOCK.md` and this file (`AI_HANDOFF.md`) per the mandatory reading
+   order. Customer Management (`js/customers.js`, `admin/index.html` customers section) is
+   **not** in the frozen-systems table (§2 of `ARCHITECTURE_LOCK.md`) — additive UI/logic is
+   allowed there. The `customers/{phone}` schema (§5) and the `coupons/{code}` shape
+   (documented in the 2026-09-12 coupon-system entry above, §8) were both read before writing
+   any filter logic.
+2. Traced where every value the task asked to filter/sort by actually comes from:
+   - **Joined date** → `customers/{phone}.createdAt` (`c.createdAt.toMillis()`).
+   - **Total orders / lifetime spend / last order date** → the pre-computed fast-path fields
+     `totalOrders`, `lifetimeSpend`, `lastOrderAt` already written by `cart.js`'s
+     `FieldValue.increment()` on every completed order, already read into
+     `c.orderCount` / `c.totalSpending` / `c.lastOrderTs` by `_fetchCustomers()`. **No new
+     reads** were needed for these four filters — they reuse data already sitting in memory
+     for every card on the list.
+   - **Coupons** → the same `coupons/{code}` collection already used by
+     `_fetchCustomerCoupons()` (queried per-customer, lazily, only in the detail overlay) and
+     by `js/cart.js`'s POS coupon logic. That per-customer query pattern doesn't scale to
+     filtering the whole list, so a **new, but read-only, one-time bulk fetch** of the same
+     collection was added (see "New Firestore reads" below) — no new coupon fields, no new
+     coupon collection, no change to how coupons are sent/applied/redeemed.
+   - **Customer Status** → **no such concept existed anywhere in the codebase** before this
+     session (confirmed by search — no "New Customer"/"Returning"/"Inactive" logic in
+     `js/customers.js`, `js/cart.js`, `customer.html`, or either `AI_HANDOFF.md`/
+     `ARCHITECTURE_LOCK.md`). Defined it purely from the existing `orderCount`/`lastOrderTs`
+     fields — see "Customer Status definitions" below. Documenting this explicitly per
+     Rule 13 ("if uncertain, preserve the existing implementation... and ask/document")
+     since the task required a definition but none existed to reuse.
+   - **Coupon Expired** → **no expiry field exists anywhere** in the `coupons/{code}` schema
+     (checked `js/cart.js`, `js/customers.js`, `js/incoming-orders-customers.js`, and the
+     schema notes in the 2026-09-12 coupon entry above — fields are `code, phone, name,
+     amount, minOrder, message, type, used, usedAt, usedBillId, usedTable, createdAt`, no
+     `expiresAt`/`validUntil`/similar). Per the task's explicit instruction ("Use the existing
+     coupon data/logic. Do not create duplicate coupon logic"), this option was **not**
+     backed by an invented expiry rule. See "Coupon Expired — known gap" below.
+
+## Customer Status definitions (new, additive — documented since none existed)
+
+Computed client-side from `c.orderCount` and `c.lastOrderTs` (same fields as above, no new
+Firestore fields):
+
+| Status | Rule |
+|---|---|
+| Never Ordered | `orderCount === 0` |
+| New Customers | `orderCount === 1` (their only order) |
+| Returning Customers | `orderCount >= 2` **and** last order within 30 days |
+| Inactive Customers | `orderCount >= 1` **and** last order more than 30 days ago |
+
+These are independent, single-select buckets (a customer falls into exactly one), not a
+new stored field — nothing is written back to Firestore for this categorization.
+
+## Coupon Expired — known gap (flagged, not silently resolved)
+
+The "Coupon Expired" dropdown option is present (per the task's required option list) but
+currently **matches 0 customers**, because there is no expiry timestamp anywhere in the
+`coupons/{code}` schema to check against. An inline note appears under the Coupons dropdown
+in the panel (`#filterCouponExpiredNote`) whenever "Coupon Expired" is selected, so operators
+aren't left wondering why it always returns nothing. **If real coupon expiry is wanted**,
+that requires a new field (e.g. `expiresAt`) written wherever coupons are created
+(`js/customers.js`'s `_custSendCoupon`, and the loyalty auto-issuer in `js/cart.js`) — a
+schema change, out of scope for "smallest safe implementation" and left for explicit
+instruction rather than invented here.
+
+## New Firestore reads introduced (and how they're kept minimal)
+
+- **None** for Joined Date, Last Order, Total Orders, Lifetime Spend, or Customer Status —
+  all computed from data already in memory (`_customers`, populated by the existing
+  `_fetchCustomers()` fast path).
+- **One new read pattern** for the Coupons filter: `_ensureCouponsLoaded()` does a single
+  `getDocs(collection(db, 'coupons'))` (whole collection, not per-customer) and indexes the
+  results by phone in a module-level `Map` (`_couponsByPhone`). This:
+  - only runs the **first time** the Coupons filter is actually applied (not on panel open,
+    not on every keystroke/select change, not on unrelated filters);
+  - is **cached** for the rest of the session — re-applying the Coupons filter, or combining
+    it with other filters/sort, does not re-read Firestore;
+  - is **invalidated** (`_couponsByPhone = null`) on `refreshCustomerManagement()` (the
+    existing manual ↻ Refresh button), so a stale coupon state can't persist indefinitely
+    after a coupon is sent or redeemed elsewhere.
+  This mirrors the existing "fast path vs. lazy/migration path" pattern already used for
+  customer stats (session 18, `_fetchCustomers()`) rather than inventing a new caching
+  convention.
+
+## Files Modified
+
+| File | Repo | Change |
+|---|---|---|
+| `admin/index.html` | Billing Panel | Added a `Filter` button (`#custFilterBtn`) next to the existing `#custSearchInput`/`#custRefreshBtn` row inside `#customersSection`. Added new `#custFilterOverlay` modal (Joined Date / Last Order / Total Orders / Lifetime Spend / Customer Status / Coupons / Sort By selects, conditional custom-range rows, RESET/APPLY) — reuses the existing `.modal-overlay`/`.modal-box`/`.form-group` markup pattern already used by the Send Coupon and Delete Confirmation modals just below it in the same file. Nothing else in the file was touched. |
+| `css/admin.css` | Billing Panel | Added `.cust-filter-btn` (+ `.active` badge state), `.cust-filter-range`, `.cust-filter-note`, and one narrow-screen (`max-width:380px`) tweak that hides the button's text label and keeps just the icon. All additive — no existing rule was modified. |
+| `js/customers.js` | Billing Panel | Added filter/sort state (`_filters`, `DEFAULT_FILTERS`), `_customerStatus()`, `_sortCustomers()`, `_ensureCouponsLoaded()`, `_getFilteredCustomers()` (search + all 6 filters ANDed together + sort), and the panel's window hooks (`_custOpenFilters`, `_custCloseFilters`, `_custFilterFieldChange`, `_custResetFilters`, `_custApplyFilters`). `_renderList()` now calls `_getFilteredCustomers()` instead of filtering `_customers` by search alone; its empty-state text now also covers "no results because of filters". `refreshCustomerManagement()` now also resets the coupon cache (`_couponsByPhone = null`). Existing search behavior, card rendering, detail overlay, coupon-send flow, delete flow, and password-recovery flow are all unchanged — verified by diff. |
+| `admin/sw.js` | Billing Panel | Cache version bumped `admin-pos-v9` → `admin-pos-v10` (per `ARCHITECTURE_LOCK.md`'s service-worker rule: any JS/CSS/HTML change must bust the cache or the browser serves stale code). `PRECACHE` list itself unchanged. |
+
+## What Was NOT Changed
+
+- Existing Name/Phone search (`window._custSearch`, `#custSearchInput`) — still works exactly
+  as before; it's simply the first stage the new filters/sort run on top of.
+- Customer cards, avatar, detail overlay, order history rendering, coupon send form, delete
+  flow, staff-assisted password recovery — byte-for-byte untouched apart from the one
+  `_couponsByPhone = null` line added to the existing `refreshCustomerManagement()`.
+- `customers/{phone}` and `coupons/{code}` Firestore schemas — no fields added, renamed, or
+  removed. No new collections.
+- `firestore.rules`, customer authentication, billing, KOT, sales history, tables, expenses,
+  the Incoming Orders drawer, and Menu Management — not touched.
+- No Customer Panel (`teamdovolve-hue/Order-`) changes required — this is a pure Admin Panel
+  (read-only, client-side) filtering feature over data that panel doesn't consume.
+
+## Testing performed
+
+Static/logic verification in this environment (no live Firebase credentials available):
+- `node --check js/customers.js` — parses cleanly as an ES module.
+- `admin/index.html` — `<div>` open/close tag counts balanced after the edit (105/105); every
+  new `getElementById`/`onclick` target has a matching element ID in the new markup.
+- `css/admin.css` — brace count balanced after the edit (211/211).
+- Extracted the pure filtering/sorting/status functions into standalone Node scripts and ran
+  them against synthetic customer data covering every filter option and every sort option,
+  including:
+  - **Every filter individually** — Joined Date (today/7d/30d/custom), Last Order
+    (today/7d/30d/custom/never), Total Orders (0/1-5/6-10/10+/custom), Lifetime Spend
+    (₹0/₹1-500/₹500-1000/₹1000-5000/₹5000+/custom), Customer Status (all 4 buckets), Coupons
+    (available/none/used/expired).
+  - **Multiple filters together** — reproduced the task's own example ("Last 30 Days +
+    ₹5,000+ Lifetime Spend + Most Orders") against 5 synthetic customers; confirmed it
+    returns only the customer matching **all three** conditions, not a union.
+  - **Name search + filter** and **phone search + filter** combined.
+  - **Custom date range** and **custom amount range** (min/max, open-ended when one side is
+    blank).
+  - **Reset** — restores `DEFAULT_FILTERS` (all "All", sort back to the pre-existing default
+    ordering) and re-syncs the form.
+  - **Sorting** — all 8 options, including "Longest Since Last Order" correctly ordering
+    never-ordered customers (`lastOrderTs = 0`) first.
+  - **No-result state** — a search+filter combination with zero matches renders the existing
+    `.empty-state` block with updated copy ("No customers match your search/filters.").
+  - **Coupon filter states** — available / none / used / expired (expired correctly returns
+    zero, per the documented gap above), verified against a synthetic `coupons` map.
+
+**Still to be tested against a live backend** (no network/Firebase access in this
+environment):
+1. Opening the Customers tab and the new Filter panel in a real browser — visual check on a
+   narrow mobile viewport (button icon-only collapse at ≤380px, modal slide-up, dropdown
+   readability in dark mode).
+2. `_ensureCouponsLoaded()` against real `coupons` data — confirm the bulk read returns the
+   same `used`/`phone` values the per-customer detail view already shows, and that the
+   Coupons filter's result matches what the detail overlay would show for the same customers.
+3. Existing customer search, card list, detail overlay, coupon send, delete, and recovery-code
+   flows — regression check that none of the four modified files broke anything (expected to
+   pass; all changes were additive per the diffs above, but this repo has no automated tests).
+4. Cache-busting: confirm `admin-pos-v10` actually replaces `v9` in the browser's Cache
+   Storage after deploy (per the existing network-first + versioned-cache pattern already in
+   `admin/sw.js`).
+
+## Important information for a future AI agent
+
+- The Customer Status buckets (New/Returning/Inactive/Never Ordered) and the Coupon Expired
+  gap are both **documented decisions made in this session**, not pre-existing product
+  requirements — if the operator wants different thresholds (e.g. a different "inactive"
+  cutoff than 30 days) or real coupon expiry, that's a product decision to get explicit
+  instruction on, not something to silently change on assumption.
+- `_couponsByPhone` is an in-memory cache scoped to one page session — it is intentionally
+  **not** persisted, and is cleared on manual refresh. Do not promote it to `localStorage`/
+  `sessionStorage` without checking whether stale coupon-used state would then survive across
+  page loads.
+- All new filtering/sorting is pure and synchronous over data already in memory except the
+  one bulk coupon read — if a future task adds a filter that needs data not already on the
+  `_customers` array, follow the same "lazy, cached, invalidated-on-refresh" pattern used for
+  coupons here rather than fetching per-customer per-render.
