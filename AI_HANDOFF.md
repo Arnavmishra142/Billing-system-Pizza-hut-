@@ -4356,6 +4356,72 @@ Deploy step required: `cd cloudflare-worker && npx wrangler deploy` (secrets `AD
 
 ---
 
+# Customer Password Recovery — Code Simplification (AI UPDATE [2026-09-13b])
+
+## Rule
+
+The recovery "code" is no longer a randomly generated OTP. It is now simply the
+**last 4 digits of the customer's own registered phone number**.
+
+```
+Customer phone: 9876543210  →  Recovery code: 3210
+Customer phone: 9123456789  →  Recovery code: 6789
+Customer phone: 7000012345  →  Recovery code: 2345
+```
+
+Rationale: this restaurant handles ~150–200 customers/day; a random OTP the
+customer has to be read out verbally and re-typed correctly is unnecessary
+friction. The last 4 digits of their own phone are something they already
+know and can enter without staff dictating anything.
+
+## What changed (smallest possible change — everything else is untouched)
+
+| File | Change |
+|---|---|
+| `cloudflare-worker/src/index.js` | `generateSecureCode()` (random, `crypto.getRandomValues`) replaced with `lastFourDigits(phone)` (deterministic, digits-only, `slice(-4)`). `handleGenerateRecoveryCode` now calls `lastFourDigits(snap.data?.phone \|\| phone)` — see "Authoritative phone" below. `handleVerifyRecoveryCode`'s format check changed from `/^\d{6}$/` to `/^\d{4}$/` (with matching error copy). Nothing else in the Worker touched. |
+| Customer panel `js/auth.js` | Client-side pre-check changed from `code.length !== 6` to `code.length !== 4`, matching error copy updated. |
+| Customer panel `index.html` | `#otpRecCodeInput` `maxlength` 6→4, placeholder "6-digit code"→"4-digit code", step-1 instruction text 6-digit→4-digit. |
+| `js/customers.js` (Admin Panel) | Comment above `_custGenerateRecovery` updated to describe the new code source. No functional change — the display code (`${r.code}`) was already generic and renders whatever `code` the Worker returns, 4 digits or 6. |
+
+**Unchanged, exactly as before:**
+- The entire 3-step Forgot Password UI/flow (steps, screens, IDs, CSS).
+- `generateRecoveryCode` / `verifyRecoveryCode` / `resetCustomerPassword` request/response shapes.
+- `customer_recovery/{phone}` collection shape, 10-minute code TTL, 5-attempt lockout, 5-minute reset-token TTL, single-use (`used: true`) burn, constant-time hash comparison, PIN/claim staff authorisation.
+- Admin Panel's **🔑 Generate Recovery Code** button, POS/Incoming-Orders' Customers tab **🔑 Generate Recovery Code** button (`js/incoming-orders-customers.js` — calls the same re-exported `callRecoveryFn`, untouched).
+- `firestore.rules` (still untouched; `customer_recovery` still blocked to every client via the catch-all).
+- Password hashing/reset (`passwordHash = SHA-256(password + ":" + phone)`), customer identification, and existing authentication.
+
+## Authoritative phone number
+
+`handleGenerateRecoveryCode` derives the code from **`snap.data?.phone`** — the
+`phone` field stored on the customer's own resolved `customers/{docId}` document
+(the same field written at registration in the customer panel's `js/auth.js`) —
+falling back to the normalised lookup phone only if that field is somehow
+missing. This is deliberate: `resolveCustomerDoc()` tolerates legacy doc-ID
+shapes and a field-based fallback query, so the phone an operator *typed* to
+look the customer up is not always byte-identical to the customer's actual
+registered phone; the code must always be derived from the real stored value,
+not the search input.
+
+## Testing performed
+
+Static review only (no Firebase/Worker credentials in this environment):
+`cloudflare-worker/src/index.js`, `js/auth.js` (customer panel), `js/customers.js`,
+and `index.html` (customer panel) all parse/lint cleanly. Traced both call sites
+of `lastFourDigits()` and confirmed `codeHash` computation, storage, and
+`verifyRecoveryCode`'s comparison logic are byte-for-byte unchanged apart from
+the 4-vs-6 digit format check.
+
+**Still to be tested against live backends:**
+- Admin Panel "Generate Recovery Code" shows the customer's own last 4 phone digits.
+- POS/Incoming-Orders Customers tab shows the same value for the same customer.
+- Customer enters their correct last 4 digits → verified → can set a new password.
+- Customer enters wrong 4 digits → rejected, attempt counter increments, lockout after 5.
+- Two different customers with different phone numbers each get their own distinct code.
+- Code still expires after 10 minutes and is single-use (burned after a successful reset), exactly as before.
+
+---
+
 # Customer Password Recovery — Customer Panel Changes (for the next agent)
 
 Repository: `https://github.com/teamdovolve-hue/Order-`
