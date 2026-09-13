@@ -174,7 +174,6 @@ import {
     collection,
     onSnapshot,
     query,
-    orderBy,
     where,
     getDocs,
     getDoc,
@@ -891,10 +890,35 @@ function startListening() {
     // done client-side after the full, unfiltered read was already billed.
     // Scoping the query itself makes each read proportional to the small
     // number of orders that are actually still pending.
+    //
+    // AI UPDATE [2026-09-13] — ROOT CAUSE FIX for "live QR orders never appear
+    // in POS Incoming Orders":
+    //   The line above originally also had `orderBy('createdAt', 'desc')`
+    //   chained onto this `where('status', '==', 'pending')` filter. Firestore
+    //   requires a composite index for any query that combines an equality
+    //   filter with an orderBy on a *different* field, and no such index
+    //   exists in firestore.indexes.json (only `customer_table_sessions` has
+    //   one) or — per the missing AI_HANDOFF.md entry for this change — was
+    //   ever created in the live Firebase console either. Every onSnapshot()
+    //   call therefore failed immediately with `FAILED_PRECONDITION: The
+    //   query requires an index`, which lands in the error callback below,
+    //   NOT the success callback — so `renderDrawer()` was simply never
+    //   called and the drawer/badge silently stayed empty forever, even
+    //   though the customer's order was written to Firestore correctly.
+    //   This is the exact same failure signature already diagnosed and fixed
+    //   in the Customer Panel's `order-status.js` (see AI_HANDOFF.md, session
+    //   3, "Order Status + History — Two Bug Fixes", Bug 1): equality +
+    //   orderBy on a different field with no composite index → onSnapshot
+    //   errors out and nothing ever renders.
+    //   Fix: drop `orderBy` from the Firestore query (leaving a single
+    //   equality filter, which never needs a composite index) and sort the
+    //   `pending` array client-side by `createdAt` after it's built, right
+    //   before `setBadge`/`renderDrawer` are called. Newest-first ordering is
+    //   preserved; no UI/behavior change other than orders now actually
+    //   arriving in real time.
     const q = query(
         collection(db, 'pending_table_orders'),
-        where('status', '==', 'pending'),
-        orderBy('createdAt', 'desc')
+        where('status', '==', 'pending')
     );
 
     _unsubscribe = onSnapshot(q, (snapshot) => {
@@ -965,6 +989,18 @@ function startListening() {
                 acknowledgeOrder(orderId);  // fire-and-forget; guards against duplicate calls
             }
         }
+
+        // AI UPDATE [2026-09-13] — sort client-side now that `orderBy` was
+        // removed from the query (see comment above `startListening`'s query
+        // definition for why). Newest order first, matching the previous
+        // `orderBy('createdAt', 'desc')` behavior. A doc whose serverTimestamp
+        // hasn't resolved yet (pending local write) has `createdAt: null` —
+        // treated as "now" so a brand-new order doesn't sort to the bottom.
+        pending.sort((a, b) => {
+            const aMs = a.createdAt?.toMillis?.() ?? Date.now();
+            const bMs = b.createdAt?.toMillis?.() ?? Date.now();
+            return bMs - aMs;
+        });
 
         _pendingOrders = pending;
         setBadge(pending.length);
