@@ -138,6 +138,9 @@
 
         <!-- ══ CUSTOMERS SECTION ══ -->
         <!-- AI UPDATE [2026-07-29] session 15: New Customer Management Panel -->
+        <!-- AI UPDATE [2026-09-13]: Added FILTER button next to search bar — opens
+             #custFilterOverlay (Filter + Sort panel, see js/customers.js). Existing
+             search input/refresh button are untouched. -->
         <div id="customersSection" class="section">
 
             <div class="filter-scroll-row" style="align-items:center; gap:8px;">
@@ -152,6 +155,9 @@
                         oninput="window._custSearch(this.value)"
                     >
                 </div>
+                <button class="cust-filter-btn" id="custFilterBtn" title="Filter & Sort" onclick="window._custOpenFilters()">
+                    <span>▤</span> Filter
+                </button>
                 <button class="icon-btn" id="custRefreshBtn" title="Refresh" onclick="window._custRefresh()">↻</button>
             </div>
 
@@ -269,6 +275,154 @@
             <button class="modal-close-x" onclick="window._custCloseCouponForm()">✕</button>
         </div>
         <div id="custCouponBody"></div>
+    </div>
+</div>
+
+<!-- ── CUSTOMER FILTER + SORT (AI UPDATE [2026-09-13]) ──
+     Reuses modal-overlay/modal-box + form-group/select (same pattern as the
+     Send Coupon form above). All filtering/sorting logic lives in
+     js/customers.js — this is markup only. No new Firestore reads happen
+     just from opening this panel; the only extra read (coupons collection,
+     once, cached) happens lazily in _custApplyFilters() and only when the
+     Coupons filter is set to something other than "All". -->
+<div id="custFilterOverlay" class="modal-overlay hidden">
+    <div class="modal-box" style="max-height:92dvh;overflow-y:auto;">
+        <div class="modal-header">
+            <h2>Filter Customers</h2>
+            <button class="modal-close-x" onclick="window._custCloseFilters()">✕</button>
+        </div>
+
+        <div class="form-group">
+            <label>Joined Date</label>
+            <select id="filterJoined" onchange="window._custFilterFieldChange()">
+                <option value="all">All</option>
+                <option value="today">Today</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+                <option value="custom">Custom Date Range</option>
+            </select>
+        </div>
+        <div class="form-row cust-filter-range hidden" id="filterJoinedRangeRow">
+            <div class="form-group">
+                <label>From</label>
+                <input type="date" id="filterJoinedFrom">
+            </div>
+            <div class="form-group">
+                <label>To</label>
+                <input type="date" id="filterJoinedTo">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Last Order</label>
+            <select id="filterLastOrder" onchange="window._custFilterFieldChange()">
+                <option value="all">All</option>
+                <option value="today">Today</option>
+                <option value="7d">Last 7 Days</option>
+                <option value="30d">Last 30 Days</option>
+                <option value="custom">Custom Date Range</option>
+                <option value="never">Never Ordered</option>
+            </select>
+        </div>
+        <div class="form-row cust-filter-range hidden" id="filterLastOrderRangeRow">
+            <div class="form-group">
+                <label>From</label>
+                <input type="date" id="filterLastOrderFrom">
+            </div>
+            <div class="form-group">
+                <label>To</label>
+                <input type="date" id="filterLastOrderTo">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Total Orders</label>
+            <select id="filterOrders" onchange="window._custFilterFieldChange()">
+                <option value="all">All</option>
+                <option value="0">0 Orders</option>
+                <option value="1-5">1–5</option>
+                <option value="6-10">6–10</option>
+                <option value="10+">10+</option>
+                <option value="custom">Custom Range</option>
+            </select>
+        </div>
+        <div class="form-row cust-filter-range hidden" id="filterOrdersRangeRow">
+            <div class="form-group">
+                <label>Min</label>
+                <input type="number" id="filterOrdersMin" inputmode="numeric" min="0" placeholder="0">
+            </div>
+            <div class="form-group">
+                <label>Max</label>
+                <input type="number" id="filterOrdersMax" inputmode="numeric" min="0" placeholder="Any">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Lifetime Spend</label>
+            <select id="filterSpend" onchange="window._custFilterFieldChange()">
+                <option value="all">All</option>
+                <option value="0">₹0</option>
+                <option value="1-500">₹1–₹500</option>
+                <option value="500-1000">₹500–₹1,000</option>
+                <option value="1000-5000">₹1,000–₹5,000</option>
+                <option value="5000+">₹5,000+</option>
+                <option value="custom">Custom Amount Range</option>
+            </select>
+        </div>
+        <div class="form-row cust-filter-range hidden" id="filterSpendRangeRow">
+            <div class="form-group">
+                <label>Min ₹</label>
+                <input type="number" id="filterSpendMin" inputmode="numeric" min="0" placeholder="0">
+            </div>
+            <div class="form-group">
+                <label>Max ₹</label>
+                <input type="number" id="filterSpendMax" inputmode="numeric" min="0" placeholder="Any">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Customer Status</label>
+            <select id="filterStatus">
+                <option value="all">All</option>
+                <option value="new">New Customers</option>
+                <option value="returning">Returning Customers</option>
+                <option value="inactive">Inactive Customers</option>
+                <option value="never">Never Ordered</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Coupons</label>
+            <select id="filterCoupon">
+                <option value="all">All</option>
+                <option value="available">Has Available Coupon</option>
+                <option value="none">No Available Coupon</option>
+                <option value="used">Coupon Used</option>
+                <option value="expired">Coupon Expired</option>
+            </select>
+            <div id="filterCouponExpiredNote" class="cust-filter-note hidden">
+                No expiry date is stored on coupons today — this will match 0 customers until an expiry field exists.
+            </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:4px;">
+            <label>Sort By</label>
+            <select id="filterSort">
+                <option value="newest">Newest Customers</option>
+                <option value="oldest">Oldest Customers</option>
+                <option value="spend-high">Highest Lifetime Spend</option>
+                <option value="spend-low">Lowest Lifetime Spend</option>
+                <option value="orders-most">Most Orders</option>
+                <option value="orders-least">Least Orders</option>
+                <option value="recent-order">Recently Ordered</option>
+                <option value="longest-since">Longest Since Last Order</option>
+            </select>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn btn-cancel full-width" onclick="window._custResetFilters()">RESET</button>
+            <button class="btn btn-primary full-width" id="custFilterApplyBtn" onclick="window._custApplyFilters()">APPLY</button>
+        </div>
     </div>
 </div>
 
