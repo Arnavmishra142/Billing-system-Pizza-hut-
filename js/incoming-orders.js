@@ -857,6 +857,7 @@ function renderDrawer(orders) {
 
 // ── Firestore listener ────────────────────────────────────────────────────────
 let _unsubscribe = null;
+let _retryCount = 0; // consecutive listener-error count, used for capped exponential backoff
 
 function startListening() {
     // Cancel any existing listener before creating a new one.
@@ -882,18 +883,26 @@ function startListening() {
     // It accumulates all seen order IDs for the page lifetime, providing
     // dedup protection across every listener restart.
 
+    // AI UPDATE [read-quota fix]: filter status == 'pending' SERVER-SIDE.
+    // Previously this query had no `where` clause at all, so onSnapshot read
+    // EVERY document ever written to pending_table_orders (including every
+    // completed/dismissed order, since they're only ever status-updated, never
+    // deleted) on every single listener start/restart. The status check was
+    // done client-side after the full, unfiltered read was already billed.
+    // Scoping the query itself makes each read proportional to the small
+    // number of orders that are actually still pending.
     const q = query(
         collection(db, 'pending_table_orders'),
+        where('status', '==', 'pending'),
         orderBy('createdAt', 'desc')
     );
 
     _unsubscribe = onSnapshot(q, (snapshot) => {
+        _retryCount = 0; // a successful snapshot means the connection recovered
         const pending = [];
 
         snapshot.forEach(docSnap => {
             const data = docSnap.data();
-            // Only show pending orders (not yet accepted/dismissed)
-            if (data.status !== 'pending') return;
 
             const order = { id: docSnap.id, ...data };
             pending.push(order);
@@ -961,9 +970,19 @@ function startListening() {
         setBadge(pending.length);
         renderDrawer(pending);
     }, (err) => {
-        console.error('[incoming-orders] Firestore listener error — retrying in 5s:', err.code, err.message);
+        // AI UPDATE [read-quota fix]: exponential backoff, capped, instead of a
+        // fixed 5s retry. A flat 5s retry with no cap meant that ANY persistent
+        // error (e.g. quota exhaustion) turned this into a hot loop re-reading
+        // the collection every 5 seconds indefinitely, which compounds the very
+        // quota problem that likely caused the error in the first place.
+        _retryCount = (_retryCount || 0) + 1;
+        const delayMs = Math.min(5000 * Math.pow(2, _retryCount - 1), 5 * 60 * 1000); // 5s → 10s → 20s ... capped at 5min
+        console.error(
+            `[incoming-orders] Firestore listener error — retrying in ${Math.round(delayMs / 1000)}s (attempt ${_retryCount}):`,
+            err.code, err.message
+        );
         _unsubscribe = null;
-        setTimeout(startListening, 5000);
+        setTimeout(startListening, delayMs);
     });
 }
 
