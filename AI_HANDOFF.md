@@ -4676,3 +4676,127 @@ state (verified with `git apply --check`). Covers exactly: `index.html`, `js/car
   POS sessions at once. Not fixed here (would mean introducing `runTransaction`, a larger
   change than "smallest safe fix" for a scenario the existing single-till architecture
   doesn't really encounter) — flagging as a known limitation only.
+
+---
+
+# Incoming Orders — "Customers" Tab + Reused Recovery Code Button (AI UPDATE [2026-09-13])
+
+## Objective
+
+Add a third tab — **Orders | Menu | Customers** — to the existing "Incoming Orders"
+drawer in the POS Billing Panel (`index.html`). The Customers tab shows the existing
+customers (name + phone) with a live name/phone search and a per-customer
+**🔑 Generate Recovery Code** button, using the *exact same* backend recovery
+mechanism the Admin Panel's Customer Management already uses. No new recovery system,
+no new collection, and the Admin Panel's own recovery feature is untouched.
+
+## Audit performed before coding
+
+1. Read `ARCHITECTURE_LOCK.md` — confirmed `js/incoming-orders.js`'s drawer, `js/admin.js`'s
+   PIN gate, and the `customers/{+91XXXXXXXXXX}` schema. Customer Management (`js/customers.js`)
+   is **not** in the frozen-systems table (§2), so additive exports are allowed; the Admin
+   Authentication / PIN gate **is** frozen and was left untouched.
+2. Read `AI_HANDOFF.md`'s "Customer Password Recovery — Staff-Assisted" section
+   (2026-09-11) — confirmed the full flow: Billing staff → Cloudflare Worker
+   `generateRecoveryCode` (`{phone, pin}` → `{code, phone, name, expiresAt, expiresInSeconds}`),
+   data stored only in `customer_recovery/{phone}` (Worker/Admin-only; blocked to every client
+   by the existing Firestore catch-all rule — no rules change needed then or now).
+3. Found the existing Admin Panel implementation: `js/customers.js` → `_callRecoveryFn()` →
+   `window._custGenerateRecovery(phone)`, wired into the Customer Management detail overlay
+   (`admin/index.html`), authorized via `window.__OPERATOR_PIN` (set once by `js/admin.js`
+   after the PIN-1414 screen on `admin/index.html`).
+4. Identified the customer list source: `getDocs(collection(db, 'customers'))` — the same
+   read `js/customers.js` and `customer.html` already perform.
+5. Identified the customer identifier: the `customers/{phone}` **document ID**, which is the
+   normalised phone (`+91XXXXXXXXXX`) — the same identifier the existing recovery button
+   already sends as `phone`.
+6. **Key finding:** the POS panel (`index.html`, where the Incoming Orders drawer lives) has
+   **no PIN session at all** — `window.__OPERATOR_PIN` is only ever set on `admin/index.html`
+   after PIN-1414 entry in `js/admin.js`. `admin.js`/`admin/index.html` are never loaded by
+   `index.html`. This meant the new tab needed its own inline PIN prompt to authorize the
+   (unchanged) Worker call; see "Design decisions" below.
+
+## What was reused vs. added
+
+| Piece | Status |
+|---|---|
+| `generateRecoveryCode` Worker endpoint, code generation, 10-min expiry, single-use, `customer_recovery` collection | **Unchanged.** Called exactly as before. |
+| `customers/{phone}` collection, fields, document ID scheme | **Unchanged.** Read-only. |
+| Admin Panel's own "🔑 Generate Recovery Code" button / detail overlay (`window._custGenerateRecovery`, `#custRecoveryOverlay`) | **Unchanged.** Still the only thing that button does. |
+| The Worker call itself | **Reused, not duplicated** — `js/customers.js`'s private `_callRecoveryFn` is now also exported as `callRecoveryFn` and called directly by the new tab. One function, two callers. |
+| Customer list UI in the new tab | **New, additive** — a small self-contained renderer scoped to `#ioCustList` in `index.html`; does not touch `js/customers.js`'s own list/detail rendering used by the Admin Panel. |
+| Operator PIN entry in the new tab | **New, additive** — a `showPrompt()` dialog collecting the PIN inline (see below), because this page has no PIN session of its own. The Worker's server-side PIN check (`assertBillingStaff`) is completely unchanged. |
+
+## Design decisions
+
+- **Why a new small module instead of importing `js/customers.js`'s existing UI?**
+  `js/customers.js`'s list/detail rendering targets `admin/index.html`-specific element IDs
+  (`#customerCardList`, `#custDetailOverlay`, `#custRecoveryOverlay`, …) and its recovery
+  button only appears inside the full customer *detail* overlay (name → tap → detail →
+  button), not directly on the list row. The task asked for name + phone + button directly
+  on each row in a lighter list, so a new small renderer (`js/incoming-orders-customers.js`)
+  was added instead of reshaping the Admin Panel's existing card/detail UI to serve a second,
+  differently-laid-out consumer.
+- **Operator PIN in the new tab:** since `index.html` never loads `js/admin.js`/PIN screen,
+  the first "Generate Recovery Code" tap in a POS session shows a small PIN prompt
+  (`js/dialog.js`'s existing `showPrompt`). The entered PIN is sent as `{phone, pin}` to the
+  *same* Worker call — the Worker's own `assertBillingStaff` check (against its `ADMIN_PIN`
+  secret) is what actually authorizes it, exactly as it does for the Admin Panel. The PIN is
+  cached in `window.__OPERATOR_PIN` (the same global `js/admin.js` uses) only after a
+  successful call, for the rest of that page session — never written to
+  localStorage/sessionStorage/cookies. On a "billing staff" authorization error the cached
+  PIN is cleared so the next attempt re-prompts.
+- **Recovery code display:** a small modal (`#ioRecoveryModal`, reusing this file's existing
+  `.modal`/`.modal-content` chrome — same pattern as `#customerCouponsModal`) shows the code
+  in large monospace text with a live 10-minute countdown (display only; the Worker enforces
+  the real expiry). Closing the modal clears the code from the DOM — it is never left on
+  screen or persisted anywhere, matching the Admin Panel's own recovery modal behavior.
+
+## Files Modified
+
+| File | Change |
+|---|---|
+| `js/customers.js` | **One line added**, nothing else touched: `export { _callRecoveryFn as callRecoveryFn };` right after the existing (unmodified) `_callRecoveryFn` definition, so other modules can call the exact same Worker function. |
+| `index.html` | Added the `👤 Customers` tab button (`#tabBtnCustomers`) to the Incoming Orders drawer's tab bar; added `#customersTabContent` (search input `#ioCustSearch` + list container `#ioCustList`); added `#ioRecoveryModal`/`#ioRecoveryBody` (reuses existing `.modal`/`.modal-content` CSS, `z-index:6000` so it sits above the drawer's `z-index:5000`). Rewrote `switchDrawerTab()` from a 2-way if/else into a 3-way if/else-if/else that lazy-imports the new module on first "Customers" tap — same lazy-load pattern already used for the Menu tab / `menu-management.js`. The Orders and Menu tab branches are functionally unchanged. |
+| `js/incoming-orders-customers.js` | **NEW FILE.** `initCustomersTab()` (fetches `customers/{phone}` docs, renders into `#ioCustList`), `window._ioCustSearch(val)` (live, case-insensitive name + substring phone filter, called from the search input's `oninput`), `window._ioGenerateRecovery(phone)` (PIN prompt if needed → `callRecoveryFn('generateRecoveryCode', {phone, pin})` → code + countdown display), `window._ioCloseRecovery()`. Follows the mandatory `signInAnonymously` + `onAuthStateChanged` auth-bootstrap pattern (ARCHITECTURE_LOCK.md §7 rule 15) and injects its own scoped `<style id="io-cust-style">` block, same convention as `js/incoming-orders.js` and `js/menu-management.js`. |
+
+## What Was NOT Changed
+
+- `cloudflare-worker/src/index.js` — no Worker changes; `generateRecoveryCode`,
+  `verifyRecoveryCode`, `resetCustomerPassword` are byte-for-byte unchanged.
+- `customer_recovery/{phone}` collection shape, TTLs, attempt limits, single-use behavior.
+- `js/customers.js`'s existing rendering, `window._custGenerateRecovery`,
+  `#custRecoveryOverlay`/`#custDetailOverlay`, delete flow, coupon-sending flow — all
+  untouched apart from the one additive export line.
+- `js/admin.js`, `admin/index.html`, the PIN-1414 gate, `window.__OPERATOR_PIN`'s existing
+  admin-panel usage.
+- The Orders tab (`js/incoming-orders.js`, `#ordersTabContent`) and the Menu tab
+  (`js/menu-management.js`, `#menuTabContent`) — behavior unchanged; only the tab-highlight
+  logic in `switchDrawerTab()` was generalized from 2 branches to 3.
+- `firestore.rules`, customer authentication/login/registration, password-reset logic on the
+  Customer Panel side.
+- Billing, KOT, sales history, tables, expenses — not touched.
+
+## Testing performed
+
+Static verification only in this environment (no live Firebase/Worker credentials):
+`js/incoming-orders-customers.js` and the modified `js/customers.js` parse cleanly as ES
+modules (`node --check`); `index.html`'s `<div>` open/close tags remain balanced after the
+edit; every new `getElementById`/`onclick` target has a matching element ID in the new
+markup; `switchDrawerTab()`'s Orders/Menu branches were diffed line-by-line against the
+original to confirm no behavioral change.
+
+**Still to be tested against a live backend:**
+1. Customers tab opens and shows all customers with correct name/phone.
+2. Live search filters by partial name (case-insensitive) and by partial phone digits, with
+   no Enter key needed, and clearing the box restores the full list.
+3. Generate Recovery Code: first tap in a fresh POS session prompts for the PIN; a correct
+   PIN (1414) generates and displays a code with a live countdown; a wrong PIN surfaces the
+   Worker's "Only authorised billing staff…" error and re-prompts on the next attempt.
+4. The generated code, expiry, and single-use behavior are identical to a code generated from
+   the Admin Panel for the same customer (same Worker function, so this should hold by
+   construction — confirm empirically once deployed).
+5. Orders tab and Menu tab still work exactly as before (no regressions from the
+   `switchDrawerTab()` rewrite).
+6. Admin Panel's existing Customer Management "🔑 Generate Recovery Code" button still works
+   unchanged.
