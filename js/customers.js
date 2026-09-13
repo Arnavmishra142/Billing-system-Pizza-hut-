@@ -1,5 +1,22 @@
 // js/customers.js
 // Customer Management Panel — list, view, and delete customers.
+//
+// AI UPDATE [2026-09-13]:
+//   Added a FILTER + SORT panel (Joined Date, Last Order, Total Orders,
+//   Lifetime Spend, Customer Status, Coupons, Sort By) alongside the existing
+//   Name/Phone search — see admin/index.html #custFilterOverlay for markup.
+//   All filtering/sorting runs client-side over the SAME `_customers` array
+//   the cards already use (orderCount, totalSpending, lastOrderTs, createdAt
+//   — no new customer stats, no new customer-status system, no duplicate
+//   coupon logic). The only new Firestore read is a one-time, cached bulk
+//   fetch of the `coupons` collection, and only when the Coupons filter is
+//   actually set to something other than "All" (see _ensureCouponsLoaded).
+//   "Coupon Expired" has no backing data (coupons/{code} has no expiry field
+//   anywhere in this codebase) so it intentionally matches 0 customers with
+//   an on-screen note, rather than inventing a new expiry concept.
+//   Existing search, cards, detail overlay, coupon send, delete, and
+//   password-recovery flows are untouched.
+//
 // AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert().
 //
 // AI UPDATE [2026-07-29] session 17:
@@ -62,6 +79,32 @@ const _waitForAuth = () =>
 let _customers  = []; // enriched customer objects (see _fetchCustomers)
 let _search     = '';
 let _loaded     = false;
+
+// ── Filter + Sort state — AI UPDATE [2026-09-13] ───────────────────────────
+// All filtering/sorting runs client-side over the already-fetched `_customers`
+// array (same data the cards already use: orderCount, totalSpending,
+// lastOrderTs, createdAt). No new Firestore reads for filtering/sorting
+// itself — the single exception is the Coupons filter, which needs a
+// one-time bulk read of the `coupons` collection (see _ensureCouponsLoaded).
+const DEFAULT_FILTERS = {
+    joined: 'all', joinedFrom: '', joinedTo: '',
+    lastOrder: 'all', lastOrderFrom: '', lastOrderTo: '',
+    orders: 'all', ordersMin: '', ordersMax: '',
+    spend: 'all', spendMin: '', spendMax: '',
+    status: 'all',
+    coupon: 'all',
+    // Default matches the pre-existing (pre-filter-feature) sort order —
+    // most-recently-active customers first — so simply opening this feature
+    // does not change anything for operators who never touch the panel.
+    sort: 'recent-order',
+};
+function _DEFAULT_FILTERS_CLONE() { return JSON.parse(JSON.stringify(DEFAULT_FILTERS)); }
+let _filters = _DEFAULT_FILTERS_CLONE();
+
+// Lazy cache: phone -> array of that customer's coupon docs. Built once
+// (single getDocs over the whole `coupons` collection) the first time the
+// Coupons filter is used, and reused after that. Reset on manual refresh.
+let _couponsByPhone = null;
 
 // ── Public exports (called by admin.js) ──────────────────────────────────
 export async function initCustomerManagement() {
@@ -367,19 +410,193 @@ window._custSendCoupon = async function(phone) {
     }
 };
 
+// ── Filter + Sort helpers — AI UPDATE [2026-09-13] ──────────────────────────
+// Derives the customer's status bucket from the SAME fields already computed
+// by _fetchCustomers (orderCount, lastOrderTs) — no separate/conflicting
+// status system, no extra reads. Definitions (documented in AI_HANDOFF.md):
+//   never ordered  → orderCount === 0
+//   new             → exactly 1 completed order
+//   returning       → 2+ completed orders, ordered within the last 30 days
+//   inactive        → 1+ completed orders, but none in the last 30 days
+function _customerStatus(c) {
+    const n = c.orderCount || 0;
+    if (n === 0) return 'never';
+    const lastTs = c.lastOrderTs || 0;
+    const daysSinceLast = lastTs ? (Date.now() - lastTs) / 86400000 : Infinity;
+    if (daysSinceLast > 30) return 'inactive';
+    return n === 1 ? 'new' : 'returning';
+}
+
+function _sortCustomers(list, sort) {
+    const arr = list.slice();
+    const byCreated = c => c.createdAt?.toMillis?.() ?? 0;
+    switch (sort) {
+        case 'oldest':        arr.sort((a, b) => byCreated(a) - byCreated(b)); break;
+        case 'spend-high':    arr.sort((a, b) => (b.totalSpending || 0) - (a.totalSpending || 0)); break;
+        case 'spend-low':     arr.sort((a, b) => (a.totalSpending || 0) - (b.totalSpending || 0)); break;
+        case 'orders-most':   arr.sort((a, b) => (b.orderCount || 0) - (a.orderCount || 0)); break;
+        case 'orders-least':  arr.sort((a, b) => (a.orderCount || 0) - (b.orderCount || 0)); break;
+        case 'recent-order':  arr.sort((a, b) => (b.lastOrderTs || 0) - (a.lastOrderTs || 0)); break;
+        // "Longest since last order" — never-ordered customers (lastOrderTs = 0)
+        // sort first, since they have no order at all (the longest possible gap).
+        case 'longest-since': arr.sort((a, b) => (a.lastOrderTs || 0) - (b.lastOrderTs || 0)); break;
+        case 'newest':        arr.sort((a, b) => byCreated(b) - byCreated(a)); break;
+        default:              arr.sort((a, b) => (b.lastOrderTs || 0) - (a.lastOrderTs || 0)); break;
+    }
+    return arr;
+}
+
+// Bulk-loads the `coupons` collection once (single query, same collection/
+// fields used by _fetchCustomerCoupons and js/cart.js) and indexes it by
+// phone in memory. Only called when the Coupons filter is actually used —
+// never on every render — to avoid unnecessary Firestore reads.
+async function _ensureCouponsLoaded() {
+    if (_couponsByPhone) return;
+    try {
+        const snap = await getDocs(collection(db, 'coupons'));
+        const map = new Map();
+        snap.forEach(d => {
+            const data  = d.data();
+            const phone = data.phone;
+            if (!phone) return;
+            if (!map.has(phone)) map.set(phone, []);
+            map.get(phone).push(data);
+        });
+        _couponsByPhone = map;
+    } catch (err) {
+        console.warn('[customers] Coupon bulk fetch failed:', err);
+        _couponsByPhone = new Map(); // fail safe — treat as "no coupon data" rather than retry every render
+    }
+}
+
+// Combines search + all 6 filters + sort into the final list shown. Every
+// filter narrows the same array (AND semantics) so "Last 30 Days + 5,000+ +
+// Most Orders" naturally returns only customers matching all three.
+function _getFilteredCustomers() {
+    const q = _search.toLowerCase().trim();
+    let list = q
+        ? _customers.filter(c =>
+            (c.name  || '').toLowerCase().includes(q) ||
+            (c.phone || '').includes(q)
+          )
+        : _customers.slice();
+
+    const now = Date.now();
+    const DAY = 86400000;
+
+    if (_filters.joined !== 'all') {
+        list = list.filter(c => {
+            const ts = c.createdAt?.toMillis?.() ?? 0;
+            if (!ts) return false;
+            switch (_filters.joined) {
+                case 'today':  return now - ts < DAY;
+                case '7d':     return now - ts < 7 * DAY;
+                case '30d':    return now - ts < 30 * DAY;
+                case 'custom': {
+                    const from = _filters.joinedFrom ? new Date(_filters.joinedFrom).getTime() : -Infinity;
+                    const to   = _filters.joinedTo   ? new Date(_filters.joinedTo).getTime() + DAY - 1 : Infinity;
+                    return ts >= from && ts <= to;
+                }
+                default: return true;
+            }
+        });
+    }
+
+    if (_filters.lastOrder !== 'all') {
+        list = list.filter(c => {
+            const ts = c.lastOrderTs || 0;
+            if (_filters.lastOrder === 'never') return !ts;
+            if (!ts) return false;
+            switch (_filters.lastOrder) {
+                case 'today':  return now - ts < DAY;
+                case '7d':     return now - ts < 7 * DAY;
+                case '30d':    return now - ts < 30 * DAY;
+                case 'custom': {
+                    const from = _filters.lastOrderFrom ? new Date(_filters.lastOrderFrom).getTime() : -Infinity;
+                    const to   = _filters.lastOrderTo   ? new Date(_filters.lastOrderTo).getTime() + DAY - 1 : Infinity;
+                    return ts >= from && ts <= to;
+                }
+                default: return true;
+            }
+        });
+    }
+
+    if (_filters.orders !== 'all') {
+        list = list.filter(c => {
+            const n = c.orderCount || 0;
+            switch (_filters.orders) {
+                case '0':      return n === 0;
+                case '1-5':    return n >= 1 && n <= 5;
+                case '6-10':   return n >= 6 && n <= 10;
+                case '10+':    return n > 10;
+                case 'custom': {
+                    const min = _filters.ordersMin !== '' ? Number(_filters.ordersMin) : 0;
+                    const max = _filters.ordersMax !== '' ? Number(_filters.ordersMax) : Infinity;
+                    return n >= min && n <= max;
+                }
+                default: return true;
+            }
+        });
+    }
+
+    if (_filters.spend !== 'all') {
+        list = list.filter(c => {
+            const s = c.totalSpending || 0;
+            switch (_filters.spend) {
+                case '0':          return s === 0;
+                case '1-500':      return s >= 1 && s <= 500;
+                case '500-1000':   return s > 500 && s <= 1000;
+                case '1000-5000':  return s > 1000 && s <= 5000;
+                case '5000+':      return s > 5000;
+                case 'custom': {
+                    const min = _filters.spendMin !== '' ? Number(_filters.spendMin) : 0;
+                    const max = _filters.spendMax !== '' ? Number(_filters.spendMax) : Infinity;
+                    return s >= min && s <= max;
+                }
+                default: return true;
+            }
+        });
+    }
+
+    if (_filters.status !== 'all') {
+        list = list.filter(c => _customerStatus(c) === _filters.status);
+    }
+
+    if (_filters.coupon !== 'all') {
+        // Coupon data is loaded on-demand (see _ensureCouponsLoaded, called
+        // from _custApplyFilters before this function runs). If it isn't
+        // loaded yet for any reason, fail safe to "no matches" rather than
+        // silently ignoring the filter the operator selected.
+        const map = _couponsByPhone || new Map();
+        list = list.filter(c => {
+            const arr = map.get(c.phone || c.id) || [];
+            switch (_filters.coupon) {
+                case 'available': return arr.some(cp => !cp.used);
+                case 'none':      return !arr.some(cp => !cp.used);
+                case 'used':      return arr.some(cp => cp.used);
+                // No expiry field exists anywhere in the coupons/{code} schema
+                // today (see ARCHITECTURE_LOCK.md) — nothing to check against,
+                // so this intentionally matches 0 customers instead of
+                // inventing a new expiry concept. Surfaced to the operator via
+                // #filterCouponExpiredNote in the panel.
+                case 'expired':   return false;
+                default:          return true;
+            }
+        });
+    }
+
+    return _sortCustomers(list, _filters.sort);
+}
+
 // ── List rendering — uses existing bill-card / bill-card-* classes ────────
 function _renderList() {
     const listEl  = document.getElementById('customerCardList');
     const countEl = document.getElementById('customerCount');
     if (!listEl) return;
 
-    const q        = _search.toLowerCase().trim();
-    const filtered = q
-        ? _customers.filter(c =>
-            (c.name  || '').toLowerCase().includes(q) ||
-            (c.phone || '').includes(q)
-          )
-        : _customers;
+    const filtered      = _getFilteredCustomers();
+    const searchActive  = !!_search.trim();
+    const filtersActive = _custFiltersActive();
 
     if (countEl) {
         countEl.textContent = `${filtered.length} customer${filtered.length !== 1 ? 's' : ''}`;
@@ -387,8 +604,9 @@ function _renderList() {
 
     if (filtered.length === 0) {
         listEl.innerHTML = `<div class="empty-state">${
-            q ? '🔍 No customers match your search.'
-              : '👤 No customers registered yet.'
+            searchActive || filtersActive
+                ? '🔍 No customers match your search/filters.'
+                : '👤 No customers registered yet.'
         }</div>`;
         return;
     }
@@ -427,6 +645,124 @@ function _showSkeletons() {
 // ── Search (called from inline oninput) ───────────────────────────────────
 window._custSearch = function(val) {
     _search = val;
+    _renderList();
+};
+
+// ── Filter + Sort panel — AI UPDATE [2026-09-13] ────────────────────────────
+// Panel markup lives in admin/index.html (#custFilterOverlay). This module
+// only reads/writes its form fields and re-runs _renderList() — it never
+// touches customer history, coupon send/redeem, delete, or auth logic.
+
+// True if any filter differs from "All", or sort differs from the default —
+// used to badge the Filter button so operators can see a filter is active.
+function _custFiltersActive() {
+    return _filters.joined   !== DEFAULT_FILTERS.joined
+        || _filters.lastOrder !== DEFAULT_FILTERS.lastOrder
+        || _filters.orders    !== DEFAULT_FILTERS.orders
+        || _filters.spend     !== DEFAULT_FILTERS.spend
+        || _filters.status    !== DEFAULT_FILTERS.status
+        || _filters.coupon    !== DEFAULT_FILTERS.coupon
+        || _filters.sort      !== DEFAULT_FILTERS.sort;
+}
+
+function _updateFilterButtonBadge() {
+    document.getElementById('custFilterBtn')?.classList.toggle('active', _custFiltersActive());
+}
+
+// Shows/hides the "Custom …" range rows and the coupon-expired note based on
+// the CURRENT (unsaved) select values in the open panel — called on every
+// select change, before Apply is pressed.
+function _updateCustomRangeVisibility() {
+    const toggle = (selectId, rowId) => {
+        const sel = document.getElementById(selectId);
+        const row = document.getElementById(rowId);
+        if (sel && row) row.classList.toggle('hidden', sel.value !== 'custom');
+    };
+    toggle('filterJoined',    'filterJoinedRangeRow');
+    toggle('filterLastOrder', 'filterLastOrderRangeRow');
+    toggle('filterOrders',    'filterOrdersRangeRow');
+    toggle('filterSpend',     'filterSpendRangeRow');
+
+    const couponSel  = document.getElementById('filterCoupon');
+    const couponNote = document.getElementById('filterCouponExpiredNote');
+    if (couponSel && couponNote) couponNote.classList.toggle('hidden', couponSel.value !== 'expired');
+}
+
+// Writes the in-memory _filters state back into the form fields — used when
+// opening the panel (so it reflects the last-Applied filters) and on Reset.
+function _syncFilterFormFromState() {
+    const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val ?? ''; };
+    set('filterJoined',        _filters.joined);
+    set('filterJoinedFrom',    _filters.joinedFrom);
+    set('filterJoinedTo',      _filters.joinedTo);
+    set('filterLastOrder',     _filters.lastOrder);
+    set('filterLastOrderFrom', _filters.lastOrderFrom);
+    set('filterLastOrderTo',   _filters.lastOrderTo);
+    set('filterOrders',        _filters.orders);
+    set('filterOrdersMin',     _filters.ordersMin);
+    set('filterOrdersMax',     _filters.ordersMax);
+    set('filterSpend',         _filters.spend);
+    set('filterSpendMin',      _filters.spendMin);
+    set('filterSpendMax',      _filters.spendMax);
+    set('filterStatus',        _filters.status);
+    set('filterCoupon',        _filters.coupon);
+    set('filterSort',          _filters.sort);
+    _updateCustomRangeVisibility();
+}
+
+window._custOpenFilters = function() {
+    _syncFilterFormFromState();
+    document.getElementById('custFilterOverlay')?.classList.remove('hidden');
+};
+
+window._custCloseFilters = function() {
+    document.getElementById('custFilterOverlay')?.classList.add('hidden');
+};
+
+// Called from each filter <select>'s onchange — only toggles which "Custom
+// range" rows are visible. Does not apply the filter yet (Apply does that).
+window._custFilterFieldChange = function() {
+    _updateCustomRangeVisibility();
+};
+
+window._custResetFilters = function() {
+    _filters = _DEFAULT_FILTERS_CLONE();
+    _syncFilterFormFromState();
+    _updateFilterButtonBadge();
+    _renderList();
+};
+
+window._custApplyFilters = async function() {
+    const val = id => document.getElementById(id)?.value ?? '';
+
+    _filters = {
+        joined:        val('filterJoined'),
+        joinedFrom:    val('filterJoinedFrom'),
+        joinedTo:      val('filterJoinedTo'),
+        lastOrder:     val('filterLastOrder'),
+        lastOrderFrom: val('filterLastOrderFrom'),
+        lastOrderTo:   val('filterLastOrderTo'),
+        orders:        val('filterOrders'),
+        ordersMin:     val('filterOrdersMin'),
+        ordersMax:     val('filterOrdersMax'),
+        spend:         val('filterSpend'),
+        spendMin:      val('filterSpendMin'),
+        spendMax:      val('filterSpendMax'),
+        status:        val('filterStatus'),
+        coupon:        val('filterCoupon'),
+        sort:          val('filterSort') || DEFAULT_FILTERS.sort,
+    };
+
+    // Coupon data is only fetched (once, cached) when actually needed.
+    if (_filters.coupon !== 'all') {
+        const btn = document.getElementById('custFilterApplyBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+        await _ensureCouponsLoaded();
+        if (btn) { btn.disabled = false; btn.textContent = 'APPLY'; }
+    }
+
+    _updateFilterButtonBadge();
+    window._custCloseFilters();
     _renderList();
 };
 
@@ -648,6 +984,11 @@ window._custExecuteDelete = async function() {
 // ── Refresh (called when tab is reopened after data may have changed) ──────
 export async function refreshCustomerManagement() {
     _loaded = false;
+    // AI UPDATE [2026-09-13]: Drop the cached coupon-by-phone map so a manual
+    // refresh re-reads current coupon state (used/available) if the Coupons
+    // filter is applied again — otherwise a coupon sent/redeemed after the
+    // first filter use would show stale results indefinitely.
+    _couponsByPhone = null;
     _showSkeletons();
     await _waitForAuth();
     await _fetchCustomers();
