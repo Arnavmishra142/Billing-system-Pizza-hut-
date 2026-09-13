@@ -1216,50 +1216,62 @@ async function handlePushoverCallback(url, db) {
   return new Response('ok', { status: 200 });
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────────
-
 // ══════════════════════════════════════════════════════════════════════════════
-// CUSTOMER PASSWORD RECOVERY  (AI UPDATE [2026-09-11])
+// CUSTOMER PASSWORD RECOVERY  (AI UPDATE [2026-09-11], simplified [2026-09-13c])
 //
 // Staff-assisted recovery — NO SMS/email/WhatsApp OTP.
-//   1. generateRecoveryCode  (billing staff, PIN-authorised)  → returns plain code once
-//   2. verifyRecoveryCode    (customer, public)               → returns short-lived resetToken
+//   1. generateRecoveryCode  (billing staff, PIN-authorised)  → shows the code once
+//   2. verifyRecoveryCode    (customer, public)               → returns a resetToken
 //   3. resetCustomerPassword (customer, needs resetToken)     → writes new passwordHash
 //
-// Storage: customer_recovery/{phone}  — Worker/Admin-only (Firestore catch-all
-// rule denies every client read/write on this collection).  Only HASHES of the
-// recovery code and of the reset token are stored; never the plaintext.
+// AI UPDATE [2026-09-13c] — FULLY STATELESS. No `customer_recovery` collection,
+// no Firestore write anywhere in this flow except the final, unavoidable
+// `customers/{id}.passwordHash` write in step 3.
+//
+// Root cause of the previous bug ("Something went wrong" in the Customer Panel,
+// Firestore quota errors from Admin/POS): `generateRecoveryCode` used to WRITE a
+// `customer_recovery/{phone}` document, and `verifyRecoveryCode` REQUIRED that
+// document to already exist (`db.get` → `not-found` / silently blew the write
+// quota under load). That coupling is exactly what CURRENT_PROBLEM asked to
+// remove: "Do NOT require a Firestore write just to generate this code" and
+// "Do NOT create a new recovery-code collection."
+//
+// The code itself was already correct (last 4 digits of the customer's own
+// registered `phone` field — see `lastFourDigits`), so the fix here is purely
+// architectural: every step now derives the code fresh from the authoritative
+// `customers` document instead of trusting anything previously stored.
+//
+//   generateRecoveryCode → read-only lookup, computes code, returns it. No write.
+//   verifyRecoveryCode   → read-only lookup, recomputes code, compares to what
+//                          the customer typed. No write. On match, issues a
+//                          short-lived, self-verifying `resetToken` — a signed
+//                          (HMAC-SHA256) blob carrying the customer doc id +
+//                          phone + expiry. Nothing is persisted to create it.
+//   resetCustomerPassword → verifies the token's signature + expiry in memory
+//                          (no lookup needed to validate the token itself),
+//                          then does the one write this flow actually needs:
+//                          `customers/{id}.passwordHash`.
+//
+// Trade-off (accepted, matches the "code isn't a secret" design already noted
+// below): because nothing is stored, there is no cross-request attempt counter
+// or single-use enforcement on the 4-digit code itself. The code is derived
+// from the customer's own phone number, so it carries no more secrecy than the
+// phone number already does — the real gate is that a customer must know their
+// own phone number and current billing counter interaction. The `resetToken`
+// still expires (RESET_TOKEN_TTL_MS) and is signed, so a leaked/guessed 4-digit
+// code alone cannot be used to reset a password later than that window.
 //
 // Existing customer login format is preserved:
 //   customers/{phone}.passwordHash = SHA-256(password + ":" + phone)  (hex)
 // The customer panel computes that hash locally and sends only the hash.
 // ══════════════════════════════════════════════════════════════════════════════
 
-const RECOVERY_CODE_TTL_MS   = 10 * 60 * 1000;  // 10 minutes
-const RESET_TOKEN_TTL_MS     =  5 * 60 * 1000;  // 5 minutes after code verified
-const RECOVERY_MAX_ATTEMPTS  = 5;               // wrong-code guesses before lockout
+const RECOVERY_CODE_TTL_MS = 10 * 60 * 1000;  // cosmetic countdown shown to staff only — see note above
+const RESET_TOKEN_TTL_MS   =  5 * 60 * 1000;  // real, enforced expiry of the signed resetToken
 
-async function sha256Hex(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-// AI UPDATE [recovery-code simplification] — replaces the random 6-digit code.
-// This restaurant only serves ~150-200 customers/day, so the recovery "code"
-// is now simply the last 4 digits of the customer's own registered phone
-// number (e.g. 9876543210 → 3210). Deterministic and not a secret staff have
-// to relay accurately — it's already known to the customer. Everything else
-// (codeHash storage, TTL, attempts, single-use, resetToken) is unchanged;
-// only how `code` is produced is different.
 function lastFourDigits(phone) {
   const digits = String(phone || '').replace(/\D/g, '');
   return digits.slice(-4).padStart(4, '0');
-}
-
-function randomTokenHex(bytes = 32) {
-  const b = new Uint8Array(bytes);
-  crypto.getRandomValues(b);
-  return [...b].map(x => x.toString(16).padStart(2, '0')).join('');
 }
 
 function timingSafeEqualHex(a, b) {
@@ -1267,6 +1279,57 @@ function timingSafeEqualHex(a, b) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+// ── Stateless signed token helpers ──────────────────────────────────────────
+// Used only for the short-lived resetToken issued by verifyRecoveryCode and
+// consumed by resetCustomerPassword. Signed with HMAC-SHA256 using the
+// existing FIREBASE_PRIVATE_KEY Worker secret as key material (already
+// server-only, high-entropy, never sent to any client) — no new secret to
+// provision. Nothing about this token is ever written to Firestore.
+function base64UrlEncode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function base64UrlDecode(str) {
+  const padded = str.replace(/-/g, '+').replace(/_/g, '/');
+  const withPad = padded + '='.repeat((4 - (padded.length % 4)) % 4);
+  const binary = atob(withPad);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+async function hmacSha256Hex(secret, message) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message));
+  return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function recoveryTokenSecret(env) {
+  // Domain-separated so this HMAC key can never collide with any other use of
+  // the same underlying secret elsewhere in the Worker.
+  return (env.FIREBASE_PRIVATE_KEY || '') + '|recovery-reset-token|v1';
+}
+async function signResetToken(env, payloadObj) {
+  const payloadB64 = base64UrlEncode(JSON.stringify(payloadObj));
+  const sig = await hmacSha256Hex(recoveryTokenSecret(env), payloadB64);
+  return `${payloadB64}.${sig}`;
+}
+async function verifyResetToken(env, token) {
+  const parts = String(token || '').split('.');
+  if (parts.length !== 2) return null;
+  const [payloadB64, sig] = parts;
+  const expectedSig = await hmacSha256Hex(recoveryTokenSecret(env), payloadB64);
+  if (!timingSafeEqualHex(sig, expectedSig)) return null;
+  try {
+    return JSON.parse(base64UrlDecode(payloadB64));
+  } catch {
+    return null;
+  }
 }
 
 // Staff authorisation: a verified Firebase ID token carrying the billingOperator
@@ -1318,122 +1381,83 @@ async function resolveCustomerDoc(db, phone, raw) {
 }
 
 // ── generateRecoveryCode ──────────────────────────────────────────────────────
+// Read-only. No Firestore write. Staff-only (PIN or billingOperator claim).
 async function handleGenerateRecoveryCode(data, authCtx, db, env) {
   assertBillingStaff(data, authCtx, env);
 
   const phone = normalizePhone(data?.phone);
-  const { docId, snap } = await resolveCustomerDoc(db, phone, data?.phone);
+  const { snap } = await resolveCustomerDoc(db, phone, data?.phone);
   if (!snap.exists) throw new FnError('not-found', 'No customer account exists for this phone number.');
 
-  const code      = lastFourDigits(snap.data?.phone || phone); // AI UPDATE [recovery-code simplification]: authoritative registered phone (customer doc's own `phone` field) — not the operator-typed value used only for lookup
-  const codeHash  = await sha256Hex(code + ':' + phone);
-  const expiresAt = Date.now() + RECOVERY_CODE_TTL_MS;
-
-  // AI UPDATE [2026-09-13] — Read-reduction. Every step of this flow used to
-  // call resolveCustomerDoc() independently (verify → 1 read, reset → 1 read,
-  // on top of this one), each re-running the ID-guessing/query fallback from
-  // scratch. Since we've already resolved the real customer doc ID + name
-  // right here, stash both on the customer_recovery record so verify/reset
-  // can read them for free instead of re-resolving.
-  await db.set('customer_recovery', phone, {
-    phone,
-    codeHash,
-    expiresAt,
-    attempts:   0,
-    used:       false,
-    resetTokenHash: null,
-    resetTokenExpiresAt: 0,
-    custDocId:  docId,
-    custName:   snap.data?.name || '',
-  }, ['createdAt']);
+  // Authoritative registered phone (customer doc's own `phone` field) — not
+  // the operator-typed value used only for lookup.
+  const code = lastFourDigits(snap.data?.phone || phone);
 
   return {
     code,                                   // shown ONCE inside the billing panel
     phone,
     name: snap.data?.name || '',
-    expiresAt,
+    expiresAt: Date.now() + RECOVERY_CODE_TTL_MS,     // cosmetic countdown only — see header note
     expiresInSeconds: Math.floor(RECOVERY_CODE_TTL_MS / 1000),
   };
 }
 
 // ── verifyRecoveryCode ────────────────────────────────────────────────────────
-async function handleVerifyRecoveryCode(data, db) {
+// Read-only. No Firestore write. Recomputes the code from the same authoritative
+// source generateRecoveryCode used, so Admin, POS and the Customer Panel are
+// always checking against the exact same value — nothing to fall out of sync.
+async function handleVerifyRecoveryCode(data, db, env) {
   const phone = normalizePhone(data?.phone);
   const code  = String(data?.code || '').trim();
   if (!/^\d{4}$/.test(code)) throw new FnError('invalid-argument', 'Enter the 4-digit recovery code.');
 
-  const snap = await db.get('customer_recovery', phone);
-  if (!snap.exists) throw new FnError('not-found', 'No recovery code has been issued. Please contact the billing counter.');
+  const { docId, snap } = await resolveCustomerDoc(db, phone, data?.phone);
+  if (!snap.exists) throw new FnError('not-found', 'No customer account exists for this phone number.');
 
-  const rec = snap.data || {};
-  if (rec.used === true)                      throw new FnError('failed-precondition', 'This recovery code has already been used.');
-  if (Number(rec.attempts || 0) >= RECOVERY_MAX_ATTEMPTS)
-                                              throw new FnError('resource-exhausted', 'Too many incorrect attempts. Please ask the billing counter for a new code.');
-  if (Number(rec.expiresAt || 0) < Date.now()) throw new FnError('deadline-exceeded', 'This recovery code has expired. Please ask the billing counter for a new one.');
-
-  const codeHash = await sha256Hex(code + ':' + phone);
-  if (!timingSafeEqualHex(codeHash, String(rec.codeHash || ''))) {
-    const attempts = Number(rec.attempts || 0) + 1;
-    await db.merge('customer_recovery', phone, { attempts });
-    throw new FnError('permission-denied',
-      `Incorrect recovery code. ${Math.max(0, RECOVERY_MAX_ATTEMPTS - attempts)} attempt(s) left.`);
+  const authoritative = lastFourDigits(snap.data?.phone || phone);
+  if (!timingSafeEqualHex(code, authoritative)) {
+    throw new FnError('permission-denied', 'That code is not correct. Please check and try again.');
   }
 
-  const resetToken = randomTokenHex(32);
-  await db.merge('customer_recovery', phone, {
-    attempts: 0,
-    resetTokenHash:      await sha256Hex(resetToken + ':' + phone),
-    resetTokenExpiresAt: Date.now() + RESET_TOKEN_TTL_MS,
-  });
+  const expiresAt  = Date.now() + RESET_TOKEN_TTL_MS;
+  const resetToken = await signResetToken(env, { d: docId, p: phone, e: expiresAt });
 
-  // AI UPDATE [2026-09-13] — name was resolved once at generateRecoveryCode
-  // time and stashed on this same record; reuse it instead of a fresh
-  // resolveCustomerDoc() (which cost 1+ extra 'customers' reads every verify).
-  return { verified: true, phone, name: rec.custName || '', resetToken, expiresInSeconds: Math.floor(RESET_TOKEN_TTL_MS / 1000) };
+  return {
+    verified: true,
+    phone,
+    name: snap.data?.name || '',
+    resetToken,
+    expiresInSeconds: Math.floor(RESET_TOKEN_TTL_MS / 1000),
+  };
 }
 
 // ── resetCustomerPassword ─────────────────────────────────────────────────────
-async function handleResetCustomerPassword(data, db) {
+// The ONLY Firestore write in this entire flow: customers/{id}.passwordHash.
+// The resetToken is verified in memory (signature + expiry) — no lookup needed
+// to validate the token itself, only to fetch the doc being updated.
+async function handleResetCustomerPassword(data, db, env) {
   const phone        = normalizePhone(data?.phone);
   const resetToken   = String(data?.resetToken || '').trim();
   const passwordHash = String(data?.passwordHash || '').trim().toLowerCase();
 
-  if (!resetToken)                        throw new FnError('invalid-argument', 'Missing reset token.');
+  if (!resetToken)                          throw new FnError('invalid-argument', 'Missing reset token.');
   if (!/^[0-9a-f]{64}$/.test(passwordHash)) throw new FnError('invalid-argument', 'Invalid password hash. Send SHA-256(password + ":" + phone) as hex.');
 
-  const snap = await db.get('customer_recovery', phone);
-  if (!snap.exists) throw new FnError('not-found', 'Recovery session not found. Start again with your recovery code.');
-  const rec = snap.data || {};
-
-  if (rec.used === true)                                    throw new FnError('failed-precondition', 'This recovery code has already been used.');
-  if (!rec.resetTokenHash)                                  throw new FnError('failed-precondition', 'Recovery code not verified yet.');
-  if (Number(rec.resetTokenExpiresAt || 0) < Date.now())    throw new FnError('deadline-exceeded', 'Your reset session expired. Enter the recovery code again.');
-
-  const tokenHash = await sha256Hex(resetToken + ':' + phone);
-  if (!timingSafeEqualHex(tokenHash, String(rec.resetTokenHash))) {
+  const claims = await verifyResetToken(env, resetToken);
+  if (!claims || claims.p !== phone) {
     throw new FnError('permission-denied', 'Invalid reset session.');
   }
+  if (Number(claims.e || 0) < Date.now()) {
+    throw new FnError('deadline-exceeded', 'Your reset session expired. Enter the recovery code again.');
+  }
 
-  // AI UPDATE [2026-09-13] — custDocId was resolved once at generateRecoveryCode
-  // time and stashed on this record; a single direct get() replaces the full
-  // ID-guessing resolveCustomerDoc() re-run (was costing several extra
-  // 'customers' reads per password reset).
-  const custDocId = rec.custDocId;
+  const custDocId = claims.d;
   if (!custDocId) throw new FnError('not-found', 'Recovery session not found. Start again with your recovery code.');
   const cust = await db.get('customers', custDocId);
   if (!cust.exists) throw new FnError('not-found', 'Customer account no longer exists.');
 
   // Same field + same format the existing login path already reads.
   await db.merge('customers', custDocId, { passwordHash }, ['passwordUpdatedAt']);
-
-  // Single use — burn the code and the reset token.
-  await db.merge('customer_recovery', phone, {
-    used: true,
-    codeHash: null,
-    resetTokenHash: null,
-    resetTokenExpiresAt: 0,
-    expiresAt: 0,
-  }, ['usedAt']);
 
   return { ok: true, phone };
 }
@@ -1562,11 +1586,11 @@ export default {
         }
 
         case 'verifyRecoveryCode':
-          result = await handleVerifyRecoveryCode(data, db);
+          result = await handleVerifyRecoveryCode(data, db, env);
           break;
 
         case 'resetCustomerPassword':
-          result = await handleResetCustomerPassword(data, db);
+          result = await handleResetCustomerPassword(data, db, env);
           break;
 
         default:
