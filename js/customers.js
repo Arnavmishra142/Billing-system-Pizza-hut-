@@ -688,6 +688,13 @@ async function _callRecoveryFn(fnName, payload) {
     return json.result;
 }
 
+// AI UPDATE [2026-09-13]: Exported so other Billing Panel modules (the
+// Incoming Orders drawer's new "Customers" tab — js/incoming-orders-customers.js)
+// can call the exact same Worker endpoints for staff-assisted recovery instead
+// of duplicating this fetch/security logic. Nothing above this line changed;
+// window._custGenerateRecovery below (the Admin Panel's own button) is untouched.
+export { _callRecoveryFn as callRecoveryFn };
+
 window._custGenerateRecovery = async function(phone) {
     const c = _customers.find(x => x.id === phone);
     const overlay = document.getElementById('custRecoveryOverlay');
