@@ -4422,6 +4422,224 @@ the 4-vs-6 digit format check.
 
 ---
 
+# Customer Password Recovery — Stateless Fix, No `customer_recovery` Collection (AI UPDATE [2026-09-13c])
+
+## Audit performed first
+
+Traced the live recovery flow across all three surfaces before changing anything:
+
+| Surface | File | Found |
+|---|---|---|
+| Admin Panel | `js/customers.js` → `window._custGenerateRecovery` | Already calls Worker `generateRecoveryCode` (last-4-digits code). Not "old logic". |
+| POS / Incoming Orders | `js/incoming-orders-customers.js` → `window._ioGenerateRecovery` | Already calls the **same** `callRecoveryFn` re-exported from `js/customers.js` → same Worker endpoint. Not "old logic" either. |
+| Customer Panel | `Order-` repo `js/auth.js` → `_onRecoveryVerify` / `_onRecoverySetPassword` | Already calls `verifyRecoveryCode` / `resetCustomerPassword` with a 4-digit code. |
+
+So Admin, POS, and the Customer Panel were **already calling one consistent
+set of Worker endpoints** with one consistent code rule (last 4 digits of the
+registered phone). The inconsistency was not in the three front-ends — it was
+inside the Worker itself (`cloudflare-worker/src/index.js`):
+
+- `handleGenerateRecoveryCode` did `db.set('customer_recovery', phone, {...})`
+  — a **Firestore write** on every single "Generate Recovery Code" tap, purely
+  to store a hash of a code that is deterministically derivable from data
+  already sitting in `customers/{id}`. This is what was producing the
+  Firestore quota errors on Admin/POS.
+- `handleVerifyRecoveryCode` did `db.get('customer_recovery', phone)` and
+  **required that document to already exist**. If it didn't (quota-exhausted
+  write silently failed, code expired, or timing edge case), the Worker threw
+  `not-found` — or, when the write itself was failing under quota pressure,
+  an unhandled `internal` error — which the Customer Panel's
+  `_recoveryMessage()` maps to the generic **"Something went wrong. Please
+  try again."** This matches the exact reported symptom.
+
+## Fix — remove the coupling, not the UI
+
+Per the constraint ("keep the existing Forgot Password UI/flow, only replace
+the code-generation/verification logic"), **only
+`cloudflare-worker/src/index.js` was changed.** Zero changes to Admin, POS, or
+Customer Panel front-end code — all three already called the right endpoints
+with the right request/response shapes, so nothing there needed to move.
+
+`generateRecoveryCode`, `verifyRecoveryCode`, and `resetCustomerPassword` are
+now fully stateless with respect to the recovery code itself:
+
+| Step | Before | Now |
+|---|---|---|
+| `generateRecoveryCode` | Read customer doc, **write** `customer_recovery/{phone}` (codeHash, expiry, attempts, custDocId, custName) | Read customer doc only. Computes `lastFourDigits(customer.phone)` and returns it. **No write.** |
+| `verifyRecoveryCode` | **Read** `customer_recovery/{phone}`, compare `sha256(code+phone)` to stored hash, **write** attempts / resetTokenHash | **Read** the `customers` doc directly (same `resolveCustomerDoc` used by generate), recompute `lastFourDigits` fresh, compare directly. On match, returns a **self-verifying signed `resetToken`** (HMAC-SHA256 over `{custDocId, phone, expiresAt}`, keyed with the existing `FIREBASE_PRIVATE_KEY` secret — no new secret to provision). **No write.** |
+| `resetCustomerPassword` | **Read** `customer_recovery/{phone}`, check token hash + expiry, **write** `customers/{id}.passwordHash`, **write** `customer_recovery` used-flag | Verifies the signed token's signature + embedded expiry **in memory** (no read needed to validate the token). Reads `customers/{id}` to confirm it still exists, then does the one write this flow actually needs: `customers/{id}.passwordHash`. |
+
+Net result: **zero Firestore writes** anywhere in the recovery flow except the
+final, unavoidable password write — this is what eliminates the quota errors
+and the "Something went wrong" failure (verify no longer depends on anything
+generate may or may not have successfully written).
+
+The `customer_recovery` Firestore collection is no longer written to or read
+from anywhere. It is not deleted (no destructive migration needed) — it is
+simply dead going forward. `firestore.rules`' catch-all still blocks client
+access to it; no rules change needed or made.
+
+## Request/response shapes — unchanged
+
+All three functions keep **identical** request and response field names, so no
+caller (`js/customers.js`, `js/incoming-orders-customers.js`, Customer Panel
+`js/auth.js`) needed any change:
+
+- `generateRecoveryCode({ phone, pin })` → `{ code, phone, name, expiresAt, expiresInSeconds }`
+- `verifyRecoveryCode({ phone, code })` → `{ verified, phone, name, resetToken, expiresInSeconds }`
+- `resetCustomerPassword({ phone, resetToken, passwordHash })` → `{ ok, phone }`
+
+## Accepted trade-off (documented, not a defect)
+
+Because nothing is persisted, there is no cross-request attempt counter or
+single-use burn on the 4-digit code itself anymore. This is an accepted
+consequence of the "no storage" requirement: the code is derived from the
+customer's own phone number, so it never carried more secrecy than the phone
+number already does. The `resetToken` issued after a correct code is still
+short-lived (5 minutes) and cryptographically signed, so a stale or replayed
+token cannot be used to reset a password outside that window.
+
+`expiresAt` returned by `generateRecoveryCode` is now a **cosmetic countdown**
+for the staff-facing UI only (the code doesn't rotate or expire server-side
+any more, since it's a fixed function of the phone number) — the real,
+enforced expiry in this flow is the 5-minute `resetToken` window.
+
+## Files changed
+
+| File | Change |
+|---|---|
+| `cloudflare-worker/src/index.js` | Recovery section (`generateRecoveryCode` / `verifyRecoveryCode` / `resetCustomerPassword` handlers and their helpers) rewritten to be stateless. Removed: `customer_recovery` reads/writes, `sha256Hex`, `randomTokenHex`, `RECOVERY_MAX_ATTEMPTS`. Added: `base64UrlEncode/Decode`, `hmacSha256Hex`, `recoveryTokenSecret`, `signResetToken`, `verifyResetToken`. Kept unchanged: `lastFourDigits`, `timingSafeEqualHex`, `assertBillingStaff`, `customerDocIdCandidates`, `resolveCustomerDoc`. Router: `verifyRecoveryCode` / `resetCustomerPassword` cases now also pass `env` through (needed for the HMAC secret). |
+
+**Nothing else was touched** — no changes to Admin Panel, POS panel, Customer
+Panel, `firestore.rules`, or any other Worker function.
+
+## Testing performed
+
+Static: `node --check` on the modified Worker file passes. Extracted the pure
+helper logic (`lastFourDigits`, `timingSafeEqualHex`, `base64Url*`,
+`hmacSha256Hex`, `signResetToken`, `verifyResetToken`) into a standalone Node
+script (Web Crypto / `btoa`/`atob` are both available in that environment) and
+verified:
+- `6393349498 → 9498`, `9876543210 → 3210`, `7000012345 → 2345` (exact cases from the task).
+- A signed token round-trips correctly through sign → verify.
+- A tampered token (flipped trailing hex chars) fails verification.
+- An expired token's embedded expiry is correctly detected as past.
+- Wrong code (`9499`) correctly fails comparison against `9498`; correct code passes.
+
+**Still to be tested against the live Worker deployment** (no Firebase/Cloudflare
+credentials in this environment): Admin "Generate Recovery Code" shows the
+customer's own last-4 digits with no quota error; POS shows the identical
+value for the same customer; Customer Panel "Verify Code" with the correct 4
+digits now succeeds end-to-end into the new-password screen; wrong code is
+rejected; a second customer's code only works for that customer's account;
+existing login and existing (non-recovery) password behaviour are unaffected.
+
+---
+
+# Customer Password Recovery — Removed ALL Non-Essential Firestore Reads (AI UPDATE [2026-09-13d])
+
+## Why this round of changes happened
+
+After the [2026-09-13c] stateless fix above was deployed, the reported symptom
+persisted — but the screenshot evidence showed it was no longer the same bug:
+
+```
+Firestore GET failed: 429 { "code": 429, "message": "Quota exceeded.",
+"status": "RESOURCE_EXHAUSTED" }
+```
+
+This is a **real 429 from Google's Firestore REST API on a plain read**, not
+an app-level error this codebase produces. The project (`billing-system-f8531`)
+is confirmed to be on the free **Spark plan**, which has a hard **daily** cap
+(50k reads / 20k writes / 20k deletes, shared across the *entire* project —
+menu listeners, order tracking, everything, not just recovery). Once that
+daily cap is hit, every Firestore call in the whole app fails the same way
+until the next day's reset. No amount of code editing can un-exhaust an
+already-spent daily quota — that part is a Firebase plan/billing question, not
+a bug, and was communicated as such.
+
+That said, there was a legitimate follow-up code question: **why did the
+[2026-09-13c] version touch Firestore in `generateRecoveryCode` and
+`verifyRecoveryCode` at all?** The code is nothing but the last 4 digits of a
+phone number the caller already provided — computing and comparing that is
+pure arithmetic, not something that requires looking anything up. The [c]
+version still read the `customers` collection in both of those steps (to
+fetch an "authoritative" phone and a display name), which was unnecessary and,
+worse, actually read *more* than the original design once the per-call
+`customer_recovery` cache was removed (up to ~8 reads for legacy phone shapes,
+independently, in *both* generate and verify).
+
+## What changed in this pass
+
+`cloudflare-worker/src/index.js` only, same three functions:
+
+| Function | Firestore access now |
+|---|---|
+| `generateRecoveryCode` | **None.** Computes `lastFourDigits(normalizePhone(phone))` and returns it. No existence check — the "Generate Recovery Code" button only ever appears next to a customer already listed in the Admin/POS UI (populated by an existing listener elsewhere, not a new read), so re-verifying existence here was redundant anyway. |
+| `verifyRecoveryCode` | **None.** Recomputes `lastFourDigits(phone)` from the phone the customer typed and compares it (constant-time) to the code they typed. On match, issues the same signed, stateless `resetToken` as before (HMAC over `{ phone, expiresAt }` — dropped the `custDocId` claim since nothing is resolved at this step anymore). |
+| `resetCustomerPassword` | **The only touch point left: one `resolveCustomerDoc` read, one `merge` write.** This runs once, only when a customer actually completes a recovery — not on every generate or every verify click. This is also where a non-existent account now gets caught (`not-found`), since it's the one place account existence actually matters (there has to be a real document to write the new password to). |
+
+Net effect: a full recovery attempt (generate → verify → reset) now touches
+Firestore **exactly once for a read and once for a write, total** — down from
+up to ~24 reads across the three steps in the [c] version, and down from a
+write on every single generate click in the original [2026-09-11] version.
+
+## Response shape changes (checked against every caller first)
+
+`name` was dropped from both `generateRecoveryCode` and `verifyRecoveryCode`
+responses (nothing is looked up to produce it anymore). Verified this is safe
+before making the change:
+- `js/customers.js` and `js/incoming-orders-customers.js` already render
+  `${r.name || c?.name || 'Customer'}` — both already fall back to the
+  customer's name from their own local list, so the display is unaffected.
+- The Customer Panel's `js/auth.js` `_onRecoveryVerify` never reads
+  `result.name` at all.
+
+`custDocId` was dropped from the `resetToken`'s signed payload (verify no
+longer resolves a doc, so there is nothing to embed). `resetCustomerPassword`
+resolves the doc itself, at the point it's actually needed. No caller ever
+inspected the token's contents — it's opaque to every front-end — so this is
+invisible to all three panels.
+
+All three request/response **field names** the front-ends read
+(`code`, `phone`, `expiresAt`, `expiresInSeconds`, `verified`, `resetToken`,
+`ok`) are unchanged. No Admin, POS, or Customer Panel file needed edits.
+
+## What did NOT change
+
+- `firestore.rules` — `customer_recovery` remains unreferenced and blocked to clients (still dead, not deleted).
+- `lastFourDigits`, `timingSafeEqualHex`, `assertBillingStaff`, `customerDocIdCandidates`, `resolveCustomerDoc` — logic untouched, only where they're called from changed.
+- The staff-authorisation gate (PIN or `billingOperator` claim) on `generateRecoveryCode`.
+- Every other Worker function (`operatorSignIn`, `customerAuth`, `createCustomerOrder`, etc.).
+- Any Admin, POS, or Customer Panel file.
+
+## Testing performed
+
+`node --check` passes. Re-ran the standalone token-logic test script (see
+[2026-09-13c] above) with the `custDocId` claim removed from the payload —
+sign → verify round trip, tampered-token rejection, and expired-token
+detection all still pass; digit-derivation cases (`6393349498→9498`,
+`9876543210→3210`, `7000012345→2345`) unchanged.
+
+**Still to be verified live, once the Spark quota resets or the project is on
+Blaze:** Admin/POS "Generate Recovery Code" returns instantly with no
+Firestore call in the Cloudflare log; Customer Panel "Verify Code" likewise;
+only "Set New Password" shows a `customers` read + write in the log; a
+customer whose account doesn't exist is only rejected at the final step, with
+a clear "Customer account no longer exists" message.
+
+## Open item for the repository owner (not a code fix — an infrastructure decision)
+
+The daily Spark quota is a project-wide ceiling shared with menu real-time
+listeners, active-order tracking, and everything else in both panels — it is
+not specific to recovery and cannot be worked around from inside this flow
+alone. Recommended next step: check Firebase Console → Usage/Firestore Usage
+to see which quota is maxed, and consider upgrading to Blaze (pay-as-you-go)
+for production use, since Spark's hard daily cutoff isn't really viable for a
+live app serving real customers.
+
+---
+
 # Customer Password Recovery — Customer Panel Changes (for the next agent)
 
 Repository: `https://github.com/teamdovolve-hue/Order-`
