@@ -731,6 +731,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // "Open in POS" import. Used to verify a personalized coupon belongs to whoever is
     // actually seated in this slot before it can be applied (see applyCouponBtn handler).
     const getCustomerPhoneKey = () => `customerPhone_${getCurrentTable()}_${getCurrentCustomer()}`;
+    // [AI UPDATE 2026-09-15] Per-slot flag: has the manual-customer-identity
+    // popup already been resolved (Continue or Skip) for THIS bill? Stores
+    // JSON { name, phone } — phone is '' when skipped. Checked by the
+    // checkoutBtn/saveExitBtn handlers below so the popup only ever appears
+    // ONCE per bill; see the "two-step" flow fix in those handlers.
+    const getManualCustomerIdentityKey = () => `manualCustomerIdentity_${getCurrentTable()}_${getCurrentCustomer()}`;
 
     // ── AI UPDATE [2026-09-13]: Customer Coupons panel ──────────────────────────
     // Tapping the online customer name badge above (e.g. "Test2") opens a small
@@ -984,6 +990,9 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.removeItem(getCustomerNameKey());
             // [AI UPDATE 2026-09-12] session 2: clear the customer phone badge alongside the name.
             localStorage.removeItem(getCustomerPhoneKey());
+            // [AI UPDATE 2026-09-15]: Clear the resolved manual-identity flag too, so a
+            // fresh order in this slot always re-asks for customer details from scratch.
+            localStorage.removeItem(getManualCustomerIdentityKey());
             // AI UPDATE [2026-09-12]: Clear any applied coupon for this slot too.
             localStorage.removeItem(getCouponKey());
         } else {
@@ -1799,10 +1808,42 @@ document.addEventListener('DOMContentLoaded', () => {
             // Only prompt when THIS slot has no existing Customer Panel identity
             // (same key syncCustomerOrderCompletion() already gates on below) —
             // QR customers are never asked for their name/phone again.
+            //
+            // [AI UPDATE 2026-09-15] BUG FIX: this used to await the popup and then
+            // fall straight through into billing/printing/saving in the SAME click —
+            // so "Continue"/"Skip" silently settled the bill immediately. That's wrong:
+            // the popup must only CAPTURE the customer identity and hand control back
+            // to the cart screen. Billing itself only happens on the NEXT press of
+            // Bill & Settle, once an identity decision is already on record for this
+            // slot (see getManualCustomerIdentityKey()).
             const _hasCustomerIdentity = !!localStorage.getItem(`activeCustomerUid_${tableName}_${customerName}`);
             let _manualCustomer = { name: '', phone: '' };
             if (!_hasCustomerIdentity) {
-                _manualCustomer = await showCustomerDetailsPopup({ onLookupPhone: _lookupManualCustomerByPhone });
+                const _identityKey = getManualCustomerIdentityKey();
+                const _resolvedRaw = localStorage.getItem(_identityKey);
+                if (_resolvedRaw) {
+                    // Identity already resolved on a previous press — reuse it and
+                    // fall through to actually bill.
+                    try { _manualCustomer = JSON.parse(_resolvedRaw); } catch (_) { _manualCustomer = { name: '', phone: '' }; }
+                } else {
+                    // First press for this bill — ask, remember the answer, then STOP.
+                    const _picked = await showCustomerDetailsPopup({ onLookupPhone: _lookupManualCustomerByPhone });
+                    localStorage.setItem(_identityKey, JSON.stringify(_picked));
+
+                    // If details were given, show the same name badge an online order
+                    // gets (getCustomerNameKey()/getCustomerPhoneKey() — read by
+                    // renderCart() and the badge's click handler further up this file),
+                    // so tapping it opens the identical customer coupons/offers panel.
+                    if (_picked.name || _picked.phone) {
+                        localStorage.setItem(getCustomerNameKey(), _picked.name || 'Customer');
+                        if (_picked.phone) localStorage.setItem(getCustomerPhoneKey(), `+91${_picked.phone}`);
+                        renderCart();
+                    }
+
+                    // Return to the cart untouched — do NOT bill yet. The operator
+                    // presses Bill & Settle again to actually process the bill.
+                    return;
+                }
             }
 
             // AI UPDATE [2026-09-12]: rawTotal = pre-discount cart total (unchanged
@@ -1954,10 +1995,32 @@ document.addEventListener('DOMContentLoaded', () => {
             // there's actually something to save (an empty-cart Save & Exit is
             // just closing an untouched table — nothing to associate a customer
             // with, so skip the popup entirely rather than interrupt that).
+            //
+            // [AI UPDATE 2026-09-15] Same two-step fix as Bill & Settle above:
+            // the popup only records the identity decision and returns control
+            // to the cart. Save & Exit itself only runs on the NEXT press once
+            // an identity decision is already on record for this slot.
             const _hasCustomerIdentity = !!localStorage.getItem(`activeCustomerUid_${tableName}_${customerName}`);
             let _manualCustomer = { name: '', phone: '' };
             if (!_hasCustomerIdentity && cartSnapshot.length > 0) {
-                _manualCustomer = await showCustomerDetailsPopup({ onLookupPhone: _lookupManualCustomerByPhone });
+                const _identityKey = getManualCustomerIdentityKey();
+                const _resolvedRaw = localStorage.getItem(_identityKey);
+                if (_resolvedRaw) {
+                    try { _manualCustomer = JSON.parse(_resolvedRaw); } catch (_) { _manualCustomer = { name: '', phone: '' }; }
+                } else {
+                    const _picked = await showCustomerDetailsPopup({ onLookupPhone: _lookupManualCustomerByPhone });
+                    localStorage.setItem(_identityKey, JSON.stringify(_picked));
+
+                    if (_picked.name || _picked.phone) {
+                        localStorage.setItem(getCustomerNameKey(), _picked.name || 'Customer');
+                        if (_picked.phone) localStorage.setItem(getCustomerPhoneKey(), `+91${_picked.phone}`);
+                        renderCart();
+                    }
+
+                    // Return to the cart untouched — do NOT save/exit yet. The
+                    // operator presses Save & Exit again to actually process it.
+                    return;
+                }
             }
 
             // AI UPDATE [2026-09-12]: same coupon handling as Bill & Settle —
