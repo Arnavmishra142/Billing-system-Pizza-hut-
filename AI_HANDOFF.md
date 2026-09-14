@@ -5158,3 +5158,156 @@ Static/logic verification in this environment (no live Firebase credentials avai
   unlikely in a single billing session), and `syncManualCustomerProfile`
   re-checks `snap.exists()` itself rather than trusting the popup's earlier
   answer, so that race can never produce a duplicate.
+
+# Individual Item Timers in POS (AI UPDATE [2026-09-14])
+
+## Objective
+
+In addition to the existing **overall table/order timer** (unchanged — still based on
+the earliest KOT press for the table, via the `kotTime_<table>_<slot>` localStorage key
+and `.order-timer` badge in `js/tables.js`), each **individual cart item** now gets its
+own independent elapsed-time badge, shown next to that item wherever items are listed:
+POS cart (`cartItems`) and table-card item rows (`js/tables.js` `loadGrid()`).
+
+Example from the task, and how it now works:
+- 5:00 PM — Margherita Pizza added + KOT pressed → that item's `kotStartTime` = 5:00.
+- 5:05 PM — Paneer Sandwich added + KOT pressed → that item's `kotStartTime` = 5:05.
+- At 5:10 PM: overall table timer still reads 10 min (unchanged); Margherita's own
+  badge reads 10 min; Paneer Sandwich's own badge reads 5 min. Independent per item.
+
+## Audit performed before coding
+
+Read `ARCHITECTURE_LOCK.md` and this file per the mandatory reading order, then located
+every part of the **existing, frozen** overall-timer system before touching anything:
+- `js/tables.js`: `kotTime_<table>_<slot>` localStorage key (set once, on first KOT, by
+  `js/cart.js`'s `printKOT()`), rendered as `.order-timer` badges in `loadGrid()` (table
+  cards) and `renderRunningOrders()` (home-screen running orders list), computed live by
+  `refreshTimers()` (`Date.now() - data-start`, colored `timer-ok/warn/danger` at
+  15/30 min), ticking on a 30s `setInterval`.
+- `js/cart.js`'s `printKOT()`: writes `kotTimeKey` once (`if (!localStorage.getItem(...))`)
+  — this is the exact "do not reset on new item" behavior the task said to preserve, and
+  it was **not touched**.
+- Cart item shape: plain objects (`id, name, price, qty, printedQty, extras, parcel,
+  specialRequest, ...`) stored as JSON in `localStorage['cart_<table>_<slot>']`
+  (`saveLocalCart`/`getLocalCart`, not modified) — confirmed a new plain field survives
+  round-tripping with no other change needed.
+- Confirmed `js/tables.js` and `js/cart.js` render into the **same document** (`index.html`
+  is a single-page app; both `<script type="module">` tags load into one page — see
+  `index.html` lines 511/513), so `js/tables.js`'s existing 30s `refreshTimers()` interval
+  already sweeps `document.querySelectorAll('.order-timer')` regardless of which screen
+  (grid vs. POS) is currently visible — no new interval/timer loop was needed.
+
+## What was added (additive only)
+
+1. **`js/cart.js` — `printKOT()`**: after the existing `itemsToPrint` list is computed
+   (unchanged), a `Set` of those items' ids is built. In the existing `setTimeout(...)`
+   block that already sets `item.printedQty = item.qty` for every cart item, one new
+   conditional line stamps `item.kotStartTime = Date.now()` **only** for items that are
+   part of this KOT press **and** don't already have a `kotStartTime`. This means:
+   - A brand-new item's timer starts exactly when its own KOT is pressed (partial or Full).
+   - Re-printing a Full KOT, or bumping an already-printed item's quantity, never resets
+     its `kotStartTime` (mirrors the existing overall-timer's "never overwrite" rule).
+   - Items never sent to the kitchen simply have no `kotStartTime` and show no badge —
+     same "no badge until KOT" convention the overall timer already uses.
+2. **`js/cart.js` — `renderCart()`**: each item row now includes an
+   `<span class="order-timer item-timer" data-start="...">` badge (only when
+   `item.kotStartTime` is set), appended into the existing item-name header line. Reuses
+   the `order-timer` class so it's picked up automatically by the existing color/threshold
+   logic; `item-timer` is an additional class used purely for layout overrides (see CSS).
+   Also added one call to `window._refreshOrderTimers()` (see below) at the end of
+   `renderCart()` so a freshly-printed item's badge shows the correct minute count right
+   away instead of waiting up to 30s for the next tick.
+3. **`js/tables.js`**: `loadGrid()`'s per-item row (`table-item-row`, inside each occupied
+   table card) now also renders the same `order-timer item-timer` badge when the item has
+   `kotStartTime`, reading it straight off the same cart JSON already being parsed from
+   `localStorage` for that row. `renderRunningOrders()` (home-screen list) was **not**
+   changed — it only ever showed an item *count*, never individual items, so there was
+   nothing to attach a per-item badge to there.
+   Also exposed the existing (unmodified) `refreshTimers()` function as
+   `window._refreshOrderTimers` so `js/cart.js` can trigger one, on the same shared
+   `.order-timer` sweep, right after it inserts new item badges — avoids duplicating the
+   timer-threshold logic in `cart.js`.
+4. **`css/style.css`**: added an `.item-timer` rule that overrides
+   `.table-card .order-timer`'s absolute top-right positioning (used for the *table-level*
+   badge) back to normal inline flow, so per-item badges sit next to each item's name
+   instead of stacking on top of each other/the table badge. Also added a small
+   `.cart-item-header .item-timer` sizing rule for the POS cart. All new rules; no existing
+   rule was edited.
+5. **`sw.js`**: cache version bumped `pos-static-v44` → `pos-static-v45` (per
+   `ARCHITECTURE_LOCK.md`'s service-worker rule — any JS/CSS change must bust the cache).
+   `STATIC_ASSETS` list itself unchanged.
+
+## What was explicitly NOT changed
+
+- The overall table/order timer: `kotTimeKey` write-once logic in `printKOT()`, the
+  `.order-timer` badge on table cards / running-orders cards, `refreshTimers()`'s
+  threshold logic, and the 30s interval — all byte-for-byte untouched. Confirmed by diff.
+- `renderRunningOrders()` — no items are listed there, so no item-timer badge was added;
+  the overall timer badge it already shows is unchanged.
+- Firestore: no new fields, no new collections, no writes added. `kotStartTime` lives only
+  in the client-side localStorage cart JSON — it is **not** the same thing as the
+  Firestore `pending_table_orders.itemMeta.<id>.kotAt` field that already existed for the
+  Customer Panel's own per-item "Preparing" tracking (that field/logic in `printKOT()`'s
+  async Firestore-sync block is untouched). The two are separate, parallel per-item
+  timestamps for two different UIs (Customer Panel vs. this Billing Panel's POS/table
+  cards) — worth knowing if a future session wants to unify them.
+- Billing, KOT printing/text, Save & Exit, Bill & Settle, coupon logic, customer sync,
+  parcel toggle, served-item tracking — not touched.
+- `admin/sw.js` — does not cache `js/cart.js`/`js/tables.js`/`css/style.css`, so no bump
+  needed there.
+
+## Files Modified
+
+| File | Repo | Change |
+|---|---|---|
+| `js/cart.js` | Billing Panel | `printKOT()`: stamp `item.kotStartTime` once per item on its own first KOT press. `renderCart()`: render `.item-timer` badge per item when set; trigger `window._refreshOrderTimers()` after render. |
+| `js/tables.js` | Billing Panel | `loadGrid()`: render `.item-timer` badge per item in table-card item rows. Exposed `refreshTimers` as `window._refreshOrderTimers`. |
+| `css/style.css` | Billing Panel | Added `.item-timer` layout-override rules (table cards + POS cart header); no existing rule edited. |
+| `sw.js` | Billing Panel | Cache version `pos-static-v44` → `pos-static-v45`. |
+
+## Testing performed
+
+Static/logic verification in this environment (no live browser/Firebase available):
+- `node --check js/cart.js`, `node --check js/tables.js`, `node --check sw.js` — all parse
+  cleanly.
+- CSS brace count balanced (403/403) after the edit.
+- Manual diff review of every changed line in `js/cart.js` and `js/tables.js` against the
+  pre-edit versions — confirmed every existing line outside the new blocks is byte-for-byte
+  untouched (verified with `diff` against the original archive).
+- Traced the example scenario from the task by hand against the new code path: two items
+  added/KOT'd 5 minutes apart on the same table → each gets its own `kotStartTime`; the
+  existing `kotTimeKey` (table-level) is written only once, at the first item's KOT, and
+  is never touched again by the new code, so the table-level "10 min" and the two
+  item-level "10 min" / "5 min" badges are all independently correct at the same instant.
+- Confirmed a Full KOT re-print of an already-printed item does not touch its
+  `kotStartTime` (guarded by `!item.kotStartTime`), and confirmed increasing an
+  already-printed item's quantity (`qty-plus`/`qty-input`) never runs through `printKOT()`
+  at all, so it cannot reset that item's timer either.
+
+**Still to be tested against a live browser:**
+1. Visual check of badge placement/sizing on a real device — table cards (narrow item
+   rows) and the POS cart panel — to confirm the `.item-timer` override doesn't clip or
+   overlap with the parcel toggle / "New" / parcel badges also on that line.
+2. Confirm `window._refreshOrderTimers` is defined by the time `js/cart.js`'s first
+   `renderCart()` call runs (both scripts are plain `<script type="module">` tags loaded
+   in document order — `tables.js` before `cart.js` — so this should already hold, but
+   worth a console check; the call is guarded with `typeof === 'function'` regardless, so
+   even a load-order edge case degrades to "badge just waits for the next 30s tick"
+   rather than throwing).
+3. Confirm the service worker actually serves `pos-static-v45` (not stale `v44`) after
+   deploy, per the existing network-first + versioned-cache pattern.
+
+## Important information for a future AI agent
+
+- `item.kotStartTime` is a **new, additive field on cart items only** — it is not part of
+  any Firestore schema and has no relationship to `ARCHITECTURE_LOCK.md` §5's documented
+  collections. Do not confuse it with `pending_table_orders.kotAt` (order-level, existing)
+  or `pending_table_orders.itemMeta.<id>.kotAt` (Firestore per-item, existing, used by the
+  Customer Panel) — those two are untouched and remain the source of truth for the
+  Customer Panel's own timers.
+- If a future session wants the POS's item timer and the Customer Panel's item timer to
+  be the *same* number (they currently can drift slightly, e.g. if `printKOT()`'s
+  Firestore sync fails but the local stamp still succeeds, or vice versa), that would mean
+  reading `itemMeta.<id>.kotAt` back into the local cart instead of using a local
+  `Date.now()` stamp — a larger change, out of scope here since the task only asked for a
+  POS-side display and explicitly said not to touch the frozen overall-timer/KOT systems.
