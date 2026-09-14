@@ -169,6 +169,18 @@
 
         </div><!-- /customersSection -->
 
+        <!-- ══ STAFF MANAGEMENT SECTION ══ -->
+        <div id="staffSection" class="section">
+            <div class="section-action-bar">
+                <div>
+                    <div class="section-page-title">Staff Management</div>
+                    <div class="staff-subtitle">Manage staff and daily records</div>
+                </div>
+                <button class="btn btn-primary btn-sm" id="addStaffBtn">+ Add Staff</button>
+            </div>
+            <div id="staffCardList" class="bills-list"></div>
+        </div><!-- /staffSection -->
+
         <!-- ══ EXPENSE SECTION ══ -->
         <div id="expenseSection" class="section">
 
@@ -232,6 +244,10 @@
         <button class="bnav-btn" id="bnav-customers" onclick="switchTab('customers', this)">
             <span class="bnav-icon">👥</span>
             <span class="bnav-label">Customers</span>
+        </button>
+        <button class="bnav-btn" id="bnav-staff" onclick="switchTab('staff', this)">
+            <span class="bnav-icon">Staff</span>
+            <span class="bnav-label">Management</span>
         </button>
         <button class="bnav-btn" id="bnav-expense" onclick="switchTab('expense', this)">
             <span class="bnav-icon">📉</span>
@@ -448,6 +464,39 @@
     </div>
 </div>
 
+<!-- ── STAFF ADD MODAL ── -->
+<div id="staffAddOverlay" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width:440px;">
+        <div class="modal-header">
+            <h2>Add Staff Member</h2>
+            <button class="modal-close-x" id="closeStaffAddBtn">✕</button>
+        </div>
+        <div class="form-group">
+            <label for="staffNameInput">Name</label>
+            <input type="text" id="staffNameInput" maxlength="80" placeholder="e.g. Dilkusha" autocomplete="off">
+        </div>
+        <div class="form-group">
+            <label for="staffRoleInput">Role <span style="font-weight:400;text-transform:none;font-size:0.78rem;opacity:0.55;">(optional)</span></label>
+            <input type="text" id="staffRoleInput" maxlength="80" placeholder="e.g. Counter staff" autocomplete="off">
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-cancel" id="cancelStaffAddBtn">Cancel</button>
+            <button class="btn btn-primary" id="saveStaffBtn">Add Staff</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── STAFF DETAIL MODAL ── -->
+<div id="staffDetailOverlay" class="modal-overlay hidden">
+    <div class="modal-box staff-detail-modal">
+        <div class="modal-header">
+            <h2 id="staffDetailTitle">Staff Details</h2>
+            <button class="modal-close-x" id="closeStaffDetailBtn">✕</button>
+        </div>
+        <div id="staffDetailBody"></div>
+    </div>
+</div>
+
 <!-- ── ITEM MODAL ── -->
 <!-- AI UPDATE [2026-08-02]: Added Description field (Feature 1) and
      improved Image UX (Features 2–3): eager upload on file-select,
@@ -505,6 +554,7 @@
 
 <script type="module" src="../js/admin.js?v=22"></script>
 <script type="module" src="../js/customers.js?v=3"></script>
+<script type="module" src="../js/staff.js?v=1"></script>
 
 <!-- ── SMART AI MANAGER ── -->
 <button id="aiManagerFab" title="Smart AI Manager" aria-label="Open AI Manager">🤖</button>
