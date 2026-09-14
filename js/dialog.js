@@ -189,6 +189,26 @@ const DIALOG_CSS = `
 .bp-dialog.bp-type-warning { border-top: 3px solid #f59e0b; }
 .bp-dialog.bp-type-info    { border-top: 3px solid #3b82f6; }
 
+/* ── [AI UPDATE 2026-09-14] Manual customer lookup card (showCustomerDetailsPopup) ── */
+.bp-cust-lookup-msg { margin: -8px 0 18px; font-size: 0.88rem; }
+.bp-cust-found-card {
+    text-align: left;
+    background: #0d1117;
+    border: 1px solid #238636;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 0.9rem;
+    color: #e6edf3;
+    line-height: 1.6;
+}
+.bp-cust-found-title {
+    color: #3fb950;
+    font-weight: 800;
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+    margin-bottom: 4px;
+}
+
 /* Mobile-friendly */
 @media (max-width: 480px) {
     .bp-dialog {
@@ -423,6 +443,117 @@ export function showPrompt(message, {
     });
 }
 
+// ── showCustomerDetailsPopup ─────────────────────────────────────────────────
+// [AI UPDATE 2026-09-14] Manual POS customer identification.
+// Optional name/phone entry for manual/walk-in bills that have no existing
+// Customer Panel identity attached. Both fields are always optional — Skip or
+// Continue-with-nothing both resolve immediately so billing is never blocked.
+//
+// UI-only, like the rest of this module: it does not know about Firestore.
+// The caller (js/cart.js) supplies `onLookupPhone(rawTenDigitPhone)`, called
+// once a full 10-digit phone has been typed; it should resolve to
+// `{ name, createdAt, lifetimeSpend }` if an existing customer is found, or
+// `null` otherwise. This dialog just renders whatever comes back.
+// @param {object} [opts]
+// @param {(phone: string) => Promise<object|null>} [opts.onLookupPhone]
+// @returns {Promise<{name: string, phone: string}>} Always resolves — never
+//          rejects, never blocks. Both fields are '' when skipped.
+export function showCustomerDetailsPopup({ onLookupPhone } = {}) {
+    return new Promise(resolve => {
+        const overlay = _makeOverlay(`
+            <div class="bp-dialog bp-type-info" role="dialog" aria-label="Customer Details">
+                <span class="bp-dialog-icon">🧾</span>
+                <h3 class="bp-dialog-title">Customer Details</h3>
+                <p class="bp-dialog-message">Optional — add a name or phone number for this bill.</p>
+                <input
+                    class="bp-dialog-input"
+                    id="bpCustNameInput"
+                    type="text"
+                    placeholder="Name (optional)"
+                    autocomplete="off"
+                />
+                <input
+                    class="bp-dialog-input"
+                    id="bpCustPhoneInput"
+                    type="tel"
+                    placeholder="Phone number (optional)"
+                    inputmode="numeric"
+                    maxlength="10"
+                    autocomplete="off"
+                />
+                <p class="bp-cust-lookup-msg" id="bpCustLookupMsg"></p>
+                <div class="bp-dialog-actions">
+                    <button class="bp-btn bp-btn-cancel" data-action="skip">Skip</button>
+                    <button class="bp-btn bp-btn-ok"      data-action="continue">Continue</button>
+                </div>
+            </div>
+        `);
+
+        const nameInput    = overlay.querySelector('#bpCustNameInput');
+        const phoneInput   = overlay.querySelector('#bpCustPhoneInput');
+        const lookupMsg    = overlay.querySelector('#bpCustLookupMsg');
+        const continueBtn  = overlay.querySelector('[data-action="continue"]');
+        let _lookupToken   = 0; // guards against a stale lookup overwriting a newer one
+
+        const finish = (name, phone) => _close(overlay, resolve, {
+            name:  (name  || '').trim(),
+            phone: (phone || '').trim(),
+        });
+
+        overlay.querySelector('[data-action="skip"]').addEventListener('click', () => finish('', ''));
+        continueBtn.addEventListener('click', () => finish(nameInput.value, phoneInput.value));
+
+        phoneInput.addEventListener('input', () => {
+            phoneInput.value = phoneInput.value.replace(/\D/g, '').slice(0, 10);
+            continueBtn.textContent = 'Continue';
+
+            if (phoneInput.value.length !== 10 || typeof onLookupPhone !== 'function') {
+                lookupMsg.innerHTML = '';
+                return;
+            }
+
+            const myToken = ++_lookupToken;
+            lookupMsg.innerHTML = '<span style="color:#8b949e;">Checking…</span>';
+
+            Promise.resolve(onLookupPhone(phoneInput.value)).then(result => {
+                if (myToken !== _lookupToken) return; // phone changed again since — discard
+                if (result) {
+                    if (result.name && !nameInput.value.trim()) nameInput.value = result.name;
+                    continueBtn.textContent = '✅ Use This Customer';
+                    const joined = result.createdAt
+                        ? new Date(result.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                        : '—';
+                    const spend = `₹${(result.lifetimeSpend || 0).toFixed(0)}`;
+                    lookupMsg.innerHTML = `
+                        <div class="bp-cust-found-card">
+                            <div class="bp-cust-found-title">✅ CUSTOMER FOUND</div>
+                            <div><b>${_esc(result.name || 'Unnamed')}</b></div>
+                            <div>Phone: ${_esc(phoneInput.value)}</div>
+                            <div>Joined: ${_esc(joined)}</div>
+                            <div>Lifetime Spend: ${_esc(spend)}</div>
+                        </div>`;
+                } else {
+                    lookupMsg.innerHTML = '<span style="color:#8b949e;">No existing customer — will be added as new.</span>';
+                }
+            }).catch(() => { if (myToken === _lookupToken) lookupMsg.innerHTML = ''; });
+        });
+
+        const onKey = (e) => {
+            if (e.key === 'Escape') {
+                document.removeEventListener('keydown', onKey);
+                finish('', '');
+            }
+        };
+        document.addEventListener('keydown', onKey);
+
+        // Click backdrop = same as Skip (never block billing on an accidental tap-out)
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) finish('', ''); });
+
+        _open(overlay);
+        setTimeout(() => nameInput?.focus(), 60);
+    });
+}
+
 // ── HTML escape helper ────────────────────────────────────────────────────────
 function _esc(str) {
     return String(str ?? '')
@@ -434,4 +565,4 @@ function _esc(str) {
 
 // ── Global exposure for non-module inline scripts ─────────────────────────────
 // Any <script> block that loads after this module can use window.BillingDialog.*
-window.BillingDialog = { showAlert, showConfirm, showPrompt };
+window.BillingDialog = { showAlert, showConfirm, showPrompt, showCustomerDetailsPopup };

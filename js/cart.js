@@ -9,7 +9,7 @@ import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebas
 // AI UPDATE [2026-07-30]: Import receipt builder for ESC/POS bill printing.
 import { initReceiptPrinter, buildBillReceipt } from './receipt-builder.js';
 // AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert()/confirm().
-import { showAlert, showConfirm } from './dialog.js';
+import { showAlert, showConfirm, showCustomerDetailsPopup } from './dialog.js';
 
 // NOTE [2026-09-13]: The two historical session notes immediately below (dated
 // 2026-07-28) describe the ORIGINAL table-only-scoped implementation and are
@@ -170,6 +170,146 @@ async function _maybeIssueLoyaltyCoupon(phone, name) {
         console.log(`[Loyalty] Issued coupon ${code} to ${phone}`);
     } catch (err) {
         console.warn('[Loyalty] Coupon issue failed (non-fatal):', err.message || err);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI UPDATE [2026-09-14]: MANUAL POS CUSTOMER IDENTIFICATION
+//
+// Audit finding (per ARCHITECTURE_LOCK.md §6 + syncCustomerOrderCompletion()
+// above): a table/order slot already HAS a customer identity if and only if
+// `activeCustomerUid_<table>_<slot>` exists in localStorage — that key is
+// written only by the QR/Customer-Panel "Open in POS" import flow
+// (js/incoming-orders.js), never by manual billing. This is the exact same
+// signal syncCustomerOrderCompletion() already gates on, so it's reused
+// unchanged here rather than inventing a second notion of "identity".
+//
+// This feature adds an OPTIONAL name/phone popup for manual/walk-in orders
+// ONLY — i.e. only when that key is absent for the slot being billed. QR
+// orders are never shown this popup (see checkoutBtn / saveExitBtn below).
+//
+// Customer association reuses the EXISTING customers/{phone} +stats
+// architecture — see Order-/js/auth.js registration write for the field
+// shape this mirrors. No second customer system, no new collections.
+//
+// customer_order_history is keyed by `customers/{phone}.uid` everywhere else
+// in this app (see js/customers.js resolvedUid = c.uid || c.authUid). A
+// walk-in has no real Firebase Auth uid, so a manually-created profile here
+// sets uid = phone — this is the one deliberate convention choice, and it's
+// what makes a manual customer's history show up correctly in the existing
+// admin Customer Detail screen without any changes to js/customers.js.
+//
+// Both new functions below are read/lookup-only or fire-and-forget — neither
+// can ever delay or block Save & Exit / Bill & Settle.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Looks up an existing customer by phone for the popup's live "Customer Found"
+// card. Returns null (silently, non-fatal) on any error or no match — the
+// popup treats that identically to "no existing customer".
+async function _lookupManualCustomerByPhone(rawTenDigitPhone) {
+    const phone = `+91${rawTenDigitPhone}`;
+    try {
+        const snap = await getDoc(doc(db, 'customers', phone));
+        if (!snap.exists()) return null;
+        const d = snap.data();
+        return {
+            name:          d.name || '',
+            createdAt:     d.createdAt?.toMillis?.() ?? null,
+            lifetimeSpend: typeof d.lifetimeSpend === 'number' ? d.lifetimeSpend : 0,
+        };
+    } catch (err) {
+        console.warn('[ManualCustomer] Lookup failed (non-fatal):', err.message || err);
+        return null;
+    }
+}
+
+// Associates a manual bill with a customer profile, creating one only if the
+// phone truly doesn't exist yet (never a duplicate — same doc ID as every
+// other customer lookup/write in this app: customers/{phone}).
+// No-op if no phone was given (walk-in with no details, or name-only — see
+// requirement 5: a name alone is printed on the bill but does not create or
+// touch any customer profile, since phone is this app's customer key).
+async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tableName, completionReason, cartSnapshot) {
+    if (!rawPhone) return;
+    const phone = rawPhone.startsWith('+91') ? rawPhone : `+91${rawPhone}`;
+
+    try {
+        const ref  = doc(db, 'customers', phone);
+        const snap = await getDoc(ref);
+        let resolvedUid;
+        let resolvedName = (name || '').trim();
+
+        if (snap.exists()) {
+            // Existing customer (QR-registered or previously walk-in) — reuse
+            // their real identity as-is. Never overwrite an existing name.
+            const data   = snap.data();
+            resolvedUid  = data.uid || data.authUid || phone;
+            resolvedName = data.name || resolvedName;
+        } else {
+            // New customer, created from the billing counter. Field shape
+            // mirrors Order-/js/auth.js registration exactly so this profile
+            // is indistinguishable from a self-registered one to every
+            // existing reader (admin Customer panel, loyalty coupons, etc.).
+            // phoneVerified: false is REQUIRED — firestore.rules only allows
+            // creating customers/{phone} when that field is present and false.
+            resolvedUid = phone;
+            await setDoc(ref, {
+                phone,
+                name:          resolvedName,
+                uid:           phone,
+                phoneVerified: false,
+                createdAt:     serverTimestamp(),
+                updatedAt:     serverTimestamp(),
+                totalOrders:   0,
+                lifetimeSpend: 0,
+                lastOrderAt:   null,
+                source:        'manual_pos', // provenance flag only, not read elsewhere
+            });
+        }
+
+        if (cartSnapshot.length > 0) {
+            const historyId = `ORDER_${Date.now()}`;
+            await setDoc(
+                doc(db, 'customer_order_history', resolvedUid, 'orders', historyId),
+                {
+                    orderId:       historyId,
+                    billNumber:    billNumber || null,
+                    orderStatus:   'completed',
+                    tableId:       tableName,
+                    customerName:  resolvedName,
+                    customerPhone: phone,
+                    items: cartSnapshot.map(i => {
+                        const ep = Array.isArray(i.extras) ? i.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
+                        return {
+                            name:           i.name,
+                            price:          i.price,
+                            quantity:       i.qty,
+                            extras:         Array.isArray(i.extras) ? i.extras : [],
+                            specialRequest: i.specialRequest || '',
+                            subtotal:       +((i.price + ep) * i.qty).toFixed(2),
+                        };
+                    }),
+                    total:            +total.toFixed(2),
+                    completedAt:      serverTimestamp(),
+                    completionReason, // 'bill_settle' | 'save_exit'
+                    orderedAt:        new Date().toISOString(),
+                }
+            );
+        }
+
+        // Same atomic stats update every QR completion already uses.
+        await updateDoc(ref, {
+            totalOrders:   increment(1),
+            lifetimeSpend: increment(+total.toFixed(2)),
+            lastOrderAt:   serverTimestamp(),
+        });
+
+        // A manual customer who crosses the loyalty milestone earns the same
+        // reward a QR customer would — reuses the existing check as-is.
+        _maybeIssueLoyaltyCoupon(phone, resolvedName);
+    } catch (err) {
+        // Non-fatal — the bill is already complete; this is CRM sync only.
+        console.warn('[ManualCustomer] Profile sync failed (non-fatal):', err.message || err);
     }
 }
 
@@ -1649,11 +1789,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Bill & Settle ──────────────────────────────────────────────────────────
     if (checkoutBtn) {
-        checkoutBtn.addEventListener('click', () => {
+        checkoutBtn.addEventListener('click', async () => {
             if (currentCart.length === 0) return;
 
             const tableName    = getCurrentTable();
             const customerName = getCurrentCustomer();
+
+            // [AI UPDATE 2026-09-14] Manual POS customer identification.
+            // Only prompt when THIS slot has no existing Customer Panel identity
+            // (same key syncCustomerOrderCompletion() already gates on below) —
+            // QR customers are never asked for their name/phone again.
+            const _hasCustomerIdentity = !!localStorage.getItem(`activeCustomerUid_${tableName}_${customerName}`);
+            let _manualCustomer = { name: '', phone: '' };
+            if (!_hasCustomerIdentity) {
+                _manualCustomer = await showCustomerDetailsPopup({ onLookupPhone: _lookupManualCustomerByPhone });
+            }
+
             // AI UPDATE [2026-09-12]: rawTotal = pre-discount cart total (unchanged
             // calculation). discount comes from any validly-applied coupon. total is
             // now the final payable amount used for the bill, sales_history, and
@@ -1743,6 +1894,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 // AI UPDATE [2026-09-12]: coupon audit trail on the sale record.
                 couponCode:     discount > 0 ? _couponToRedeem.code : null,
                 couponDiscount: discount,
+                // [AI UPDATE 2026-09-14] Optional manual-customer details entered
+                // in the popup, for traceability on the bill record itself.
+                // Purely additive — does not replace the existing `customer` slot field.
+                manualCustomerName:  _manualCustomer.name  || null,
+                manualCustomerPhone: _manualCustomer.phone ? `+91${_manualCustomer.phone}` : null,
                 timestamp: new Date().toISOString()
             }).catch(err => console.error("Bill save failed:", err));
 
@@ -1773,6 +1929,14 @@ document.addEventListener('DOMContentLoaded', () => {
             // C1/C2/... slot id) — see syncCustomerOrderCompletion() header comment.
             syncCustomerOrderCompletion(tableName, customerName, cartSnapshot, total, 'bill_settle', shortOrderId);
 
+            // [AI UPDATE 2026-09-14] Manual POS customer identification — only
+            // runs if the staff actually entered a phone in the popup above.
+            // No-op (and impossible to reach) for QR orders, which never show
+            // the popup in the first place.
+            if (_manualCustomer.phone) {
+                syncManualCustomerProfile(_manualCustomer.name, _manualCustomer.phone, total, shortOrderId, tableName, 'bill_settle', cartSnapshot);
+            }
+
             // ── Release customer table lock in background (non-blocking) ──────
             releaseTableLockInBackground(tableName, 'bill_settle');
         });
@@ -1780,10 +1944,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Save & Exit ────────────────────────────────────────────────────────────
     if (saveExitBtn) {
-        saveExitBtn.addEventListener('click', () => {
+        saveExitBtn.addEventListener('click', async () => {
             const tableName    = getCurrentTable();
             const customerName = getCurrentCustomer();
             const cartSnapshot = currentCart.slice();
+
+            // [AI UPDATE 2026-09-14] Manual POS customer identification.
+            // Same identity check as Bill & Settle above. Only prompts when
+            // there's actually something to save (an empty-cart Save & Exit is
+            // just closing an untouched table — nothing to associate a customer
+            // with, so skip the popup entirely rather than interrupt that).
+            const _hasCustomerIdentity = !!localStorage.getItem(`activeCustomerUid_${tableName}_${customerName}`);
+            let _manualCustomer = { name: '', phone: '' };
+            if (!_hasCustomerIdentity && cartSnapshot.length > 0) {
+                _manualCustomer = await showCustomerDetailsPopup({ onLookupPhone: _lookupManualCustomerByPhone });
+            }
+
             // AI UPDATE [2026-09-12]: same coupon handling as Bill & Settle —
             // rawTotal is the pre-discount amount, total is what's actually saved
             // as revenue/lifetime-spend after any valid applied coupon.
@@ -1812,6 +1988,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     // AI UPDATE [2026-09-12]: coupon audit trail on the sale record.
                     couponCode:     discount > 0 ? _couponToRedeem.code : null,
                     couponDiscount: discount,
+                    // [AI UPDATE 2026-09-14] Optional manual-customer details — see
+                    // Bill & Settle above for the matching field.
+                    manualCustomerName:  _manualCustomer.name  || null,
+                    manualCustomerPhone: _manualCustomer.phone ? `+91${_manualCustomer.phone}` : null,
                     timestamp: new Date().toISOString()
                 }).catch(err => console.error("Save & Exit Firestore failed:", err));
 
@@ -1841,6 +2021,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 // AI UPDATE [2026-09-13]: pass customerSlot (customerName here holds
                 // the C1/C2/... slot id) — see syncCustomerOrderCompletion().
                 syncCustomerOrderCompletion(tableName, customerName, cartSnapshot, total, 'save_exit');
+
+                // [AI UPDATE 2026-09-14] Manual POS customer identification —
+                // only runs if the staff entered a phone in the popup above.
+                if (_manualCustomer.phone) {
+                    syncManualCustomerProfile(_manualCustomer.name, _manualCustomer.phone, total, shortOrderId, tableName, 'save_exit', cartSnapshot);
+                }
             } else {
                 // Cart is empty — if an order was imported via "Open in POS" but
                 // the operator removed every item before saving, auto-cancel it.
