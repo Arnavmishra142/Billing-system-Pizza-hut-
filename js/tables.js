@@ -58,7 +58,14 @@ document.addEventListener('DOMContentLoaded', () => {
                                 itemCount++;
                                 // Sirf shuruat ke 4 items dikhayenge, baki ko hide karenge
                                 if (itemCount <= 7) {
-                                    tableItemsHTML += `<div class="table-item-row">${item.name} <span style="font-weight:bold; color:#059669;">x${item.qty}</span></div>`;
+                                    // AI UPDATE [2026-09-14]: Per-item timer badge (item.kotStartTime,
+                                    // set by js/cart.js printKOT() on this item's own first KOT press).
+                                    // Only shown once the item actually has a start time — additive,
+                                    // does not touch the existing table-level ⏱ badge above.
+                                    const itemTimerHTML = item.kotStartTime
+                                        ? `<span class="order-timer item-timer" data-start="${item.kotStartTime}">⏱ 0m</span>`
+                                        : '';
+                                    tableItemsHTML += `<div class="table-item-row">${item.name} <span style="font-weight:bold; color:#059669;">x${item.qty}</span>${itemTimerHTML}</div>`;
                                 }
                             });
                         }
@@ -335,6 +342,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     setInterval(refreshTimers, 30000); // Har 30 sec mein sab timers live update honge
+
+    // AI UPDATE [2026-09-14]: Exposed so js/cart.js can trigger an immediate refresh
+    // right after it renders per-item timer badges in the POS cart (instead of
+    // waiting up to 30s for this interval). Same document/SPA, so this is safe —
+    // refreshTimers() already just does a document-wide querySelectorAll('.order-timer').
+    window._refreshOrderTimers = refreshTimers;
 
     renderRunningOrders();
 

@@ -1240,12 +1240,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? '<div style="margin-top:5px;padding:5px 8px;background:rgba(99,102,241,0.10);border-left:2px solid #6366f1;border-radius:0 4px 4px 0;font-size:0.75rem;color:#a5b4fc;">📝 ' + _escHtml(item.specialRequest) + '</div>'
                 : '';
 
+            // AI UPDATE [2026-09-14]: Individual item timer badge. Shown only once the
+            // item has its own KOT start time (item.kotStartTime, set in printKOT()).
+            // Reuses the existing .order-timer badge/refresh mechanism (tables.js
+            // refreshTimers(), already running on a 30s interval document-wide) —
+            // the .item-timer class only overrides layout, not the color/threshold logic.
+            // This is purely additive and does not touch the existing overall table timer.
+            const _itemTimerHTML = item.kotStartTime
+                ? `<span class="order-timer item-timer" data-start="${item.kotStartTime}">⏱ 0m</span>`
+                : '';
+
             const cartItemDiv = document.createElement('div');
             cartItemDiv.className = 'cart-item';
             cartItemDiv.innerHTML = `
                 <button class="cart-item-remove" data-id="${item.id}" title="Remove item">✕</button>
                 <div class="cart-item-header">
-                    <span style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">${_parcelToggle}${item.name} ${unprintedTag}${_parcelBadge}</span>
+                    <span style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">${_parcelToggle}${item.name} ${unprintedTag}${_parcelBadge}${_itemTimerHTML}</span>
                     <span class="editable-price" data-id="${item.id}" style="cursor:pointer; color:#10b981; font-weight:bold; border-bottom:1px dashed #10b981;">
                         ₹${itemTotal}
                     </span>
@@ -1275,6 +1285,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         cartTotalElement.innerText = `₹${totalAmount.toFixed(2)}`;
         _updateCouponUI(totalAmount); // AI UPDATE [2026-09-12]: refresh coupon discount / payable rows
+
+        // AI UPDATE [2026-09-14]: Immediately compute correct "Xm" text + color state
+        // for the per-item timer badges just inserted above, instead of waiting for
+        // tables.js's next 30s tick. Reuses tables.js's existing refreshTimers()
+        // (exposed as window._refreshOrderTimers) rather than duplicating the
+        // threshold logic here. No-op if tables.js hasn't loaded yet.
+        if (typeof window._refreshOrderTimers === 'function') {
+            window._refreshOrderTimers();
+        }
 
         document.querySelectorAll('.qty-minus').forEach(btn => {
             btn.addEventListener('click', (e) => updateQuantity(e.target.dataset.id, -1));
@@ -1709,9 +1728,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         triggerRawBTPrint(kotText);
 
+        // AI UPDATE [2026-09-14]: Per-item timer support. Build a lookup of which
+        // items are actually part of THIS KOT press (itemsToPrint, computed above)
+        // so each item can be stamped with its own start time the first time it is
+        // ever sent to the kitchen — independent of, and without touching, the
+        // existing overall table timer (kotTimeKey, set earlier in this function).
+        const _itemsToPrintIds = new Set(itemsToPrint.map(i => i.id));
+
         setTimeout(() => {
+            const _kotNow = Date.now();
             for (const item of currentCart) {
                 item.printedQty = item.qty;
+                // Stamp this item's own timer start once, on its first KOT press
+                // (partial or full). Never overwritten afterward, so re-printing a
+                // Full KOT or bumping quantity later does not reset an item's timer.
+                if (_itemsToPrintIds.has(item.id) && !item.kotStartTime) {
+                    item.kotStartTime = _kotNow;
+                }
             }
             saveLocalCart(currentCart);
             renderCart();
