@@ -1216,6 +1216,36 @@ body {
     }
 }
 
+/* =========================================
+   ⏱ INDIVIDUAL ITEM TIMER BADGE (AI UPDATE [2026-09-14])
+   Reuses .order-timer's color states (timer-ok/warn/danger) and the same
+   30s refresh loop, but must NOT inherit the table-level badge's absolute
+   top-right positioning (".table-card .order-timer") — this pulls it back
+   into normal inline flow next to the item name/qty wherever it appears
+   (table cards' item rows, POS cart item rows). Purely additive; the
+   overall table timer badge above is untouched.
+   ========================================= */
+.table-card .item-timer {
+    position: static !important;
+    top: auto !important;
+    right: auto !important;
+    margin-left: 4px !important;
+    font-size: 0.62rem !important;
+    padding: 1px 6px !important;
+}
+
+.cart-item-header .item-timer {
+    font-size: 0.68rem !important;
+    padding: 1px 6px !important;
+}
+
+@media (min-width: 768px) {
+    .table-card .item-timer {
+        font-size: 0.75rem !important;
+        padding: 2px 8px !important;
+    }
+}
+
 /* 0-14 min: sab theek hai */
 .order-timer.timer-ok {
     background: rgba(16, 185, 129, 0.18);
