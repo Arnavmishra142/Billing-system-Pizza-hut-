@@ -1,6 +1,59 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-13 (Admin Panel — Customer Filter + Sort panel)
+> Last updated: 2026-09-14 (Admin Panel — Staff Management)
+
+---
+
+## [AI UPDATE 2026-09-14] — Staff Management
+
+### What Was Built
+
+Added a separate Staff Management tab in the Admin Panel, outside Expenses. Admin can add staff members, open details, delete staff, and maintain date-wise daily records with Holiday/Leave and Advance amount fields. Existing POS, billing, customer, online-order, coupon, menu, and Expenses logic was not changed.
+
+### Firestore Data Structure
+
+```text
+staff/{staffId}
+  name: string
+  role: string
+  createdAt: Timestamp
+  updatedAt: Timestamp
+
+staff/{staffId}/daily_records/{YYYY-MM-DD}
+  date: string                 // local calendar date, e.g. 2026-09-14
+  holiday: boolean
+  advance: number              // non-negative rupee amount
+  updatedAt: Timestamp
+```
+
+Daily records use the date as the document ID, so saving a date updates only that date and never overwrites another day. Staff details calculate total advance from the complete subcollection history.
+
+### Security
+
+Added Firestore rules for `staff` and `staff/{staffId}/daily_records` using the existing `isOperator()` architecture. Staff collections are not referenced by customer-facing code. In this project, the Admin Panel is PIN-gated and Firebase identifies the operator through the existing anonymous-auth operator flow; no existing rules were weakened.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `admin/index.html` | Added Staff Management tab, add modal, detail/history modal, and module script |
+| `js/admin.js` | Added Staff tab routing without changing Expenses behavior |
+| `js/staff.js` | Added staff CRUD, daily record save/history, holiday toggle, and total advance |
+| `css/admin.css` | Added dark-theme, tablet-friendly staff cards and history styles |
+| `firestore.rules` | Added Admin Panel operator-only rules for staff and daily records |
+| `AI_HANDOFF.md` | Documented feature and schema |
+
+### Explicitly Not Implemented
+
+Expenses → Advance and Expenses → Credit/Udhari remain untouched.
+
+---
+
+## Previous Updates
+
+> The historical project notes continue below.
+
+## [AI UPDATE 2026-09-13] — Admin Panel — Customer Filter + Sort panel)
 
 ---
 

@@ -204,6 +204,17 @@ service cloud.firestore {
     match /expenses/{docId}       { allow read, write: if isOperator(); }
     match /daily_expenses/{docId} { allow read, write: if isOperator(); }
 
+    // ── staff management (Admin Panel only) ───────────────────────────────────
+    // staff/{staffId}: { name, role, createdAt, updatedAt }
+    // staff/{staffId}/daily_records/{YYYY-MM-DD}: { date, holiday, advance, updatedAt }
+    // This collection is never read by customer-facing pages.
+    match /staff/{staffId} {
+      allow read, write: if isOperator();
+    }
+    match /staff/{staffId}/daily_records/{recordId} {
+      allow read, write: if isOperator();
+    }
+
     // ── customer_order_history ────────────────────────────────────────────────
     // Written by the billing panel (operator) when Bill & Settle / Save & Exit
     // completes an order that originated from the Customer Panel.
