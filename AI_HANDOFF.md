@@ -5043,3 +5043,118 @@ environment):
   one bulk coupon read — if a future task adds a filter that needs data not already on the
   `_customers` array, follow the same "lazy, cached, invalidated-on-refresh" pattern used for
   coupons here rather than fetching per-customer per-render.
+
+# Manual POS Customer Identification (AI UPDATE [2026-09-14])
+
+## Objective
+
+Add an optional customer-identification popup for **manual/walk-in** billing
+(Save & Exit / Bill & Settle) — without ever re-asking a QR/Customer-Panel
+customer for their name or phone, without blocking a bill if no details are
+given, and without creating a second customer system or duplicate customers.
+
+## Audit performed before coding
+
+Read `ARCHITECTURE_LOCK.md` §5–6 and traced `js/cart.js` end-to-end before
+touching anything:
+
+- **How QR vs. manual is currently distinguished:** `syncCustomerOrderCompletion()`
+  (existing, untouched) already gates all Customer-Panel sync on
+  `localStorage.getItem('activeCustomerUid_<table>_<slot>')`. That key is
+  written only by `js/incoming-orders.js` when a QR order is imported via
+  "Open in POS" — manual bills never set it. This is the one authoritative
+  signal for "does this order already have a customer identity," so the new
+  popup reuses it unchanged rather than inventing a second identity check.
+- **Table vs. slot vs. identity:** per the 2026-09-13 slot-scoping fix already
+  in this file, identity keys are scoped `<table>_<slot>` (e.g. `Table 3_C1`),
+  not just `<table>` — so two customers (QR + manual, or two QR) at the same
+  table are already independent. The new popup keys off the same
+  `<table>_<slot>` pair `getCurrentTable()`/`getCurrentCustomer()` already
+  compute, so this independence carries over automatically.
+- **Customer data model:** `customers/{phone}` (doc ID = `+91XXXXXXXXXX`) is
+  the one authoritative customer record — fields `name`, `phone`, `uid`,
+  `phoneVerified`, `createdAt`, `totalOrders`, `lifetimeSpend`, `lastOrderAt`
+  (see `Order-/js/auth.js` registration write, the source of truth for this
+  shape). `customer_order_history/{uid}/orders/{orderId}` is keyed by
+  **uid**, not phone — `js/customers.js` resolves it as
+  `c.uid || c.authUid || ''` when rendering the admin Customer Detail screen.
+  A manual walk-in has no real Firebase Auth uid, so the only way to make a
+  manually-created profile's history show up in that existing screen with
+  **zero changes to `js/customers.js`** is to set `uid: phone` on it — that's
+  the one deliberate new convention this session introduces.
+- **Firestore rules constraint found during audit:** `firestore.rules` only
+  allows `create` on `customers/{phone}` when
+  `request.resource.data.phoneVerified == false` is present — a new manual
+  customer doc omitting that field would be silently rejected. Included it.
+
+## Required flow (implemented exactly as specified)
+
+1. QR/online customer (slot has `activeCustomerUid_<table>_<slot>`) → **no popup**, either button.
+2. Manual order, no identity → popup on Save & Exit / Bill & Settle. Name + phone both optional; Skip always available; backdrop click / Esc = Skip. Never blocks billing.
+3. Phone entered (10 digits) → live lookup against `customers/{phone}`. If found: autofill name (only if the operator hasn't already typed one), show a compact ID card (Name / Phone / Joined / Lifetime Spend), button label becomes "✅ Use This Customer".
+4. Phone not found + details given → `customers/{phone}` created on Continue (mirrors the Customer Panel registration field shape, `uid: phone`, `phoneVerified: false`).
+5. Popup skipped, or only a name given with no phone → bill completes normally; a name-only entry is stored on the bill record for reference but never creates/touches a customer profile (phone is this app's customer key).
+
+## Files Modified
+
+| File | Repo | Change |
+|---|---|---|
+| `js/dialog.js` | Billing Panel | Added exported `showCustomerDetailsPopup({ onLookupPhone })` — new Promise-based dialog reusing the existing `.bp-overlay`/`.bp-dialog`/`.bp-btn` CSS classes unchanged. UI-only, like the rest of this module: it takes a caller-supplied `onLookupPhone(phone)` callback and just renders whatever comes back (or nothing, if omitted) — it has no Firestore knowledge itself. Added ~20 lines of new CSS (`.bp-cust-lookup-msg`, `.bp-cust-found-card`, `.bp-cust-found-title`) for the "CUSTOMER FOUND" card, purely additive. Added the new function to `window.BillingDialog` alongside the existing three. `showAlert`, `showConfirm`, `showPrompt`, and all existing CSS rules are byte-for-byte unchanged. |
+| `js/cart.js` | Billing Panel | Added `_lookupManualCustomerByPhone(rawTenDigitPhone)` (read-only `getDoc` against `customers/{+91...}`, returns `{name, createdAt, lifetimeSpend}` or `null`) and `syncManualCustomerProfile(name, phone, total, billNumber, tableName, completionReason, cartSnapshot)` (creates the customer profile only if it doesn't already exist, then writes one `customer_order_history` entry and atomically increments `totalOrders`/`lifetimeSpend`/`lastOrderAt` — same `increment()` pattern `syncCustomerOrderCompletion()` already uses — then runs the existing `_maybeIssueLoyaltyCoupon()` unchanged). Both `checkoutBtn` and `saveExitBtn` click handlers are now `async`; each computes the `<table>_<slot>` identity key first and awaits `showCustomerDetailsPopup()` only when that key is absent (Save & Exit additionally skips the popup when the cart is empty — nothing to bill, nothing to associate). `cartSnapshot`/`total`/coupon recalculation still happen **after** the await, so any cart edits made while the popup is open are captured correctly. Added optional `manualCustomerName`/`manualCustomerPhone` fields to both `sales_history` writes (additive, does not replace the existing `customer` slot-id field). Added one call to `syncManualCustomerProfile()` alongside each existing `syncCustomerOrderCompletion()` call, gated on `_manualCustomer.phone` being non-empty. |
+
+## What Was NOT Changed
+
+- `syncCustomerOrderCompletion()` — the entire QR sync path is untouched, including its slot-scoping, doc-ID-only order lookup, and localStorage key clearing.
+- `customers.js` (admin Customer panel, search, detail overlay, order history rendering, coupon send, delete, password recovery) — no changes were needed; the `uid: phone` convention makes manual customers render correctly in that screen as-is.
+- `firestore.rules`, `firestore.indexes.json` — no changes; the existing `customers`/`customer_order_history` rules already permit everything this feature does (verified during audit, see above).
+- Billing calculations, KOT, QR ordering flow, coupon redemption logic, table state/locking — untouched. The popup sits strictly between "button clicked" and "bill actually processed"; nothing about how the bill itself is computed or printed changed.
+- `index.html` — no markup changes needed. `showCustomerDetailsPopup` builds its own DOM at call time, exactly like `showAlert`/`showConfirm`/`showPrompt` already do.
+
+## Testing performed
+
+Static/logic verification in this environment (no live Firebase credentials available):
+- `node --check js/dialog.js` and `node --check js/cart.js` — both parse cleanly as ES modules.
+- Manual diff review of every changed line in both files against the pre-edit versions — confirmed every existing line outside the new blocks is untouched.
+- Traced all 10 required test cases against the code paths above:
+  1. QR → Save & Exit: `activeCustomerUid_<table>_<slot>` present → popup skipped → identical to pre-existing behavior.
+  2. QR → Bill & Settle: same.
+  3. Manual, existing phone: `_lookupManualCustomerByPhone` returns a match → card shown, name autofilled, `snap.exists()` branch in `syncManualCustomerProfile` → reuses existing `uid`, no duplicate doc, one new history entry, `increment(1)`/`increment(total)`.
+  4. Manual, new phone + name: lookup returns `null` → "will be added as new" message → on Continue, `customers/{phone}` created with `phoneVerified:false`, `uid:phone`.
+  5. Manual, name only, no phone: `syncManualCustomerProfile` no-ops (`if (!rawPhone) return`) — bill completes, `manualCustomerName` stored on the sale record only.
+  6. Manual, phone only, no name: `resolvedName` falls back to `''`/existing doc name — bill and profile sync both proceed.
+  7. Manual, popup skipped: `_manualCustomer = {name:'', phone:''}` → both sync calls' guards (`if (_manualCustomer.phone)`) short-circuit → bill completes exactly as before this feature existed.
+  8. Manual + QR same table: independent `<table>_<slot>` keys — verified `syncCustomerOrderCompletion` and `syncManualCustomerProfile` are only ever called with the one slot's own data, never cross-slot.
+  9. Existing customer stats: `increment()` is additive and atomic — an existing customer's prior `totalOrders`/`lifetimeSpend`/`createdAt` are never overwritten, only added to; `resolvedName` prefers the existing stored name over what's in the popup.
+  10. No duplicate by phone: `customers/{phone}` doc ID is the phone itself — `setDoc` for a new customer only ever runs inside the `!snap.exists()` branch, so a second bill for the same phone always hits the reuse branch instead.
+
+**Still to be tested against a live backend** (no network/Firebase access in this environment):
+1. The popup rendering and the live phone-lookup debounce/race-guard (`_lookupToken`) in an actual browser — visual check on a narrow mobile viewport, and confirm rapid phone edits never let a stale lookup response overwrite a newer one.
+2. A real create against `customers/{phone}` from the billing panel's anonymous auth session — confirm the `phoneVerified == false` rule condition is satisfied as written (relies on `request.resource.data.phoneVerified`, not `resource.data`, being checked at create time — should be correct per current rules but wasn't run against live Firestore).
+3. That a manually-created customer (`uid: phone`) actually renders correctly end-to-end in the admin Customer panel's detail overlay (order history, stats) — the code path matches `js/customers.js`'s existing `resolvedUid` fallback logic, but this was verified by reading, not by a live render.
+4. Regression check on existing QR billing (test cases 1–2) in a real browser — expected unaffected since the popup gate never triggers when `activeCustomerUid_<table>_<slot>` is set, but worth confirming nothing about the `async` handler change introduced a timing issue with `backToTablesBtn.click()` or the ESC/POS print call.
+
+## Important information for a future AI agent
+
+- The `uid: phone` convention for manually-created customers is a **deliberate
+  workaround**, not a schema change — it exists solely so `customer_order_history`
+  lookups (which everywhere else in this app resolve via `customers/{phone}.uid`)
+  keep working for walk-ins with no real Firebase Auth account. If a future
+  session ever gives walk-in customers real anonymous Auth accounts, this
+  convention should be revisited so `uid` isn't overloaded to mean two
+  different things.
+- `source: 'manual_pos'` was added to manually-created customer docs as a
+  provenance flag. Nothing currently reads it — it's there so a future agent
+  (or the operator) can distinguish self-registered from counter-created
+  customers if that's ever needed (e.g. for a different loyalty rule, or an
+  admin-panel badge). Safe to ignore until such a need exists.
+- `manualCustomerName`/`manualCustomerPhone` on `sales_history` are informational
+  only — no existing code reads them. If a future "Recent Bills" or receipt
+  view should display the customer's name, these are the fields to read.
+- The popup's phone lookup and the profile-sync-on-submit are two **separate**
+  Firestore reads of the same `customers/{phone}` doc (one for the live card,
+  one inside `syncManualCustomerProfile` after Continue is clicked). This is
+  intentional, not an oversight — the gap between them means a phone number
+  could theoretically be registered by someone else in between (extremely
+  unlikely in a single billing session), and `syncManualCustomerProfile`
+  re-checks `snap.exists()` itself rather than trusting the popup's earlier
+  answer, so that race can never produce a duplicate.
