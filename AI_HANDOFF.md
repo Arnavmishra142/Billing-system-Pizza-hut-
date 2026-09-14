@@ -1,6 +1,58 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-13 (Admin Panel — Customer Filter + Sort panel)
+> Last updated: 2026-09-15 (Admin Panel — Staff Management)
+
+---
+
+## [AI UPDATE 2026-09-15] — Staff Management
+
+### What Was Built
+
+Added a separate Admin Panel Staff Management section, independent of Expenses. Admins can add staff members, view the staff list, open staff details, delete staff, and maintain date-wise daily records with Holiday / Leave and Advance fields. Daily records are stored by date and preserved as history; the detail view also shows the total advance across all saved dates.
+
+### Firestore Data Structure
+
+```text
+staff/{staffId}
+  name: string
+  phone: string (optional)
+  role: string (optional)
+  createdAt: server timestamp
+
+staff/{staffId}/daily_records/{YYYY-MM-DD}
+  date: YYYY-MM-DD string
+  holiday: boolean
+  advance: number
+  updatedAt: server timestamp
+```
+
+### Security
+
+Added Firestore rules for `staff/{staffId}` and `staff/{staffId}/daily_records/{recordDate}`. Both collections allow read/write only through the existing `isOperator()` guard. No customer-facing code exposes staff data, and no existing POS, billing, customer, online-order, coupon, or Expenses logic was changed.
+
+### Files Modified
+
+| File | Change |
+|---|---|
+| `admin/index.html` | Added Staff Management navigation section, add-staff form, and staff detail/history modal |
+| `js/admin.js` | Wired Staff tab and staff module |
+| `js/staff-management.js` | Added Firestore CRUD, daily record saving, date history, and total advance UI logic |
+| `css/admin.css` | Added dark-theme, tablet-friendly staff cards, totals, toggle, and history styles |
+| `firestore.rules` | Added Admin-only rules for staff documents and daily records |
+| `AI_HANDOFF.md` | Documented Staff Management and data structure |
+
+### Verification Checklist
+
+| Check | Status |
+|---|---|
+| Add staff | Implemented |
+| Delete staff and daily history | Implemented |
+| Open staff details | Implemented |
+| Holiday ON/OFF | Implemented |
+| Add advance and save by date | Implemented |
+| View multiple dates without overwriting old records | Implemented |
+| Total advance | Implemented |
+| Admin-only Firestore rules | Implemented |
 
 ---
 
@@ -2447,7 +2499,7 @@ syncCustomerOrderCompletion() — fire-and-forget
 Admin opens Customers tab (admin/index.html)
     │
     ▼
-refreshCustomerManagement()  ← was initCustomerManagement() [stale cache bug]
+refreshCustomerManagement()  ��� was initCustomerManagement() [stale cache bug]
     │
     ▼
 getDocs(customers) from IndexedDB → fast path (totalOrders is number) → correct stats ✅

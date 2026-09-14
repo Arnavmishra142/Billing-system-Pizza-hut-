@@ -570,6 +570,28 @@ input:checked + .slider::before { transform: translateX(18px); }
 .exp-del-btn:active { transform: scale(0.88); }
 
 /* =========================================
+   STAFF MANAGEMENT
+   ========================================= */
+.staff-list { display:flex; flex-direction:column; gap:10px; }
+.staff-card { display:flex; align-items:center; gap:10px; background:#161b22; border:1px solid #30363d; border-radius:14px; padding:8px 10px 8px 12px; }
+.staff-card-main { display:flex; align-items:center; gap:12px; flex:1; min-width:0; border:0; background:transparent; color:inherit; text-align:left; cursor:pointer; padding:5px 0; }
+.staff-avatar { width:42px; height:42px; border-radius:50%; display:grid; place-items:center; background:#1f6feb; color:#fff; font-weight:900; font-size:1.1rem; flex-shrink:0; }
+.staff-card-info { display:flex; flex-direction:column; gap:3px; min-width:0; }
+.staff-card-info strong { color:#e6edf3; font-size:1rem; }
+.staff-card-info span, .section-muted { color:#8b949e; font-size:.82rem; }
+.staff-chevron { color:#8b949e; font-size:1.8rem; line-height:1; }
+.staff-total-card { display:flex; justify-content:space-between; align-items:center; background:#21262d; border:1px solid #30363d; border-left:4px solid #3fb950; border-radius:12px; padding:14px 16px; margin-bottom:18px; color:#8b949e; font-weight:700; }
+.staff-total-card strong, .staff-advance { color:#3fb950; font-size:1.2rem; }
+.staff-daily-form { border-bottom:1px solid #30363d; padding-bottom:18px; margin-bottom:18px; }
+.staff-toggle { display:flex; align-items:center; gap:10px; padding:12px 0; color:#e6edf3; font-weight:700; }
+.staff-toggle input { width:20px; height:20px; accent-color:#1f6feb; }
+.staff-history-title { margin-top:4px; }
+.staff-history-list { display:flex; flex-direction:column; gap:8px; }
+.staff-history-row { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:11px 12px; background:#0d1117; border:1px solid #30363d; border-radius:10px; }
+.staff-history-row div { display:flex; flex-direction:column; gap:3px; }
+.staff-history-row span { color:#8b949e; font-size:.78rem; }
+
+/* =========================================
    MODAL
    ========================================= */
 .modal-overlay {
