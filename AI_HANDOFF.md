@@ -915,6 +915,32 @@ Without the Customer Panel deploy, notifications continue to work through the ol
 
 ---
 
+## [AI UPDATE 2026-09-15] — Staff Management
+
+Implemented one shared Staff Management feature for the Admin Panel and POS/Manager screen. Admin uses the separate Staff bottom-nav section; POS uses the separate Staff Management home button and opens the same module and Firestore source of truth.
+
+### Data structure
+- `staff/{staffId}` profile documents contain `name` and server-generated `joinedAt`.
+- `staff/{staffId}/daily_records/{yyyy-MM-dd}` records contain `date`, `holiday`, `advance`, and `updatedAt`.
+- Each date is an independent document, so saving one date updates only that date and preserves all other history.
+- Total advance is derived by summing the loaded daily records; it is not stored redundantly.
+
+### Access and security
+- Existing anonymous Firebase operator authentication and `isOperator()` Firestore authorization are reused; no new authentication system was introduced.
+- Rules allow the `staff` profile path and `daily_records` subcollection only for `isOperator()`. No customer/order/expense rules were changed.
+- Staff deletion removes only the selected profile and its daily record documents, not unrelated business data.
+
+### Files modified
+- Added `js/staff-management.js`.
+- Modified `index.html`, `admin/index.html`, `js/admin.js`, `css/style.css`, `css/admin.css`, `firestore.rules`, and this handoff.
+
+### Explicit scope limits
+- Expenses → Advance is NOT implemented.
+- Expenses → Credit/Udhari is NOT implemented.
+- Staff daily advances are isolated from the existing Expenses feature.
+
+---
+
 ## [AI UPDATE 2026-08-01] — Native Pushover Acknowledgement Sync
 
 ### Overview
@@ -2447,7 +2473,7 @@ syncCustomerOrderCompletion() — fire-and-forget
 Admin opens Customers tab (admin/index.html)
     │
     ▼
-refreshCustomerManagement()  ← was initCustomerManagement() [stale cache bug]
+refreshCustomerManagement()  ��� was initCustomerManagement() [stale cache bug]
     │
     ▼
 getDocs(customers) from IndexedDB → fast path (totalOrders is number) → correct stats ✅

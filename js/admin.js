@@ -4,6 +4,7 @@
 // AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert()/confirm().
 import { db, auth, functions } from './firebase-config.js';
 import { initCustomerManagement, refreshCustomerManagement } from './customers.js';
+import { initStaffManagement } from './staff-management.js';
 import { showAlert, showConfirm } from './dialog.js';
 // AI UPDATE [2026-08-02]: Switched menu image storage from Firebase Storage to Cloudinary.
 // Credentials are server-side only; this module calls the Express proxy endpoints.
@@ -147,6 +148,7 @@ window.switchTab = function(tabName, navBtn) {
     // the Firestore IndexedDB cache (which already reflects the increment() write
     // from syncCustomerOrderCompletion via persistentMultipleTabManager).
     if (tabName === 'customers') refreshCustomerManagement();
+    if (tabName === 'staff') initStaffManagement(document.getElementById('staffSection'));
 };
 
 // ==========================================

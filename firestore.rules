@@ -275,8 +275,16 @@ service cloud.firestore {
       allow write: if isOperator();
     }
 
-    // ── Catch-all ─────────────────────────────────────────────────────────────
-    match /{document=**} {
+  // ── Staff management ─────────────────────────────────────────────────────
+  match /staff/{staffId} {
+    allow read, write: if isOperator();
+  }
+  match /staff/{staffId}/daily_records/{recordId} {
+    allow read, write: if isOperator();
+  }
+
+  // ── Catch-all ─────────────────────────────────────────────────────────────
+  match /{document=**} {
       allow read, write: if false;
     }
   }

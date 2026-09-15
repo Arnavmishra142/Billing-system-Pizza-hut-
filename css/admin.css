@@ -1018,3 +1018,15 @@ input:checked + .slider::before { transform: translateX(18px); }
     cursor: grabbing;
 }
 
+#staffSection { padding: 20px; overflow-y: auto; }
+#staffSection .staff-card { font: inherit; }
+#staffSection .btn { border: 0; }
+#staffSection .btn-primary { background: #0f766e; color: #fff; }
+#staffSection .btn-cancel { background: #303642; color: #fff; }
+#staffSection .btn-danger { background: #b91c1c; color: #fff; }
+#staffSection .staff-pos-body { padding: 0; }
+#staffSection .staff-history-row { border: 1px solid #262a35; }
+#staffSection .staff-detail-body { max-width: 720px; }
+#staffSection .staff-form input, #staffSection .staff-record-form input { width: 100%; }
+#staffSection .staff-form, #staffSection .staff-record-form { max-width: 720px; }
+

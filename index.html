@@ -262,10 +262,14 @@
                 <span class="title">Takeaway Parcel</span>
             </button>
 
-            <button class="menu-big-btn" onclick="window.location.href='expense.html'" style="background: linear-gradient(135deg, #f43f5e, #e11d48);">
-                <span class="icon">💸</span>
-                <span class="title">Add Expense</span>
-            </button>
+  <button class="menu-big-btn" onclick="window.location.href='expense.html'" style="background: linear-gradient(135deg, #f43f5e, #e11d48);">
+  <span class="icon">💸</span>
+  <span class="title">Add Expense</span>
+  </button>
+  <button class="menu-big-btn" id="staffManagementBtn" onclick="window.openStaffManagement()" style="background: linear-gradient(135deg, #0f766e, #14b8a6);">
+  <span class="icon">👤</span>
+  <span class="title">Staff Management</span>
+  </button>
 
             <button class="menu-big-btn" id="btn-orders" style="background: linear-gradient(135deg, #f59e0b, #fbbf24); position:relative;">
                 <span id="orders-badge"></span>
@@ -499,6 +503,13 @@
     
     <div id="printArea"></div>
 
+    <div id="staffPosOverlay" class="staff-pos-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="staffPosTitle">
+        <div class="staff-pos-panel">
+            <div class="staff-pos-header"><h2 id="staffPosTitle">Staff Management</h2><button id="staffPosCloseBtn" class="close-cart-btn" type="button">Close</button></div>
+            <div id="staffPosBody" class="staff-pos-body"></div>
+        </div>
+    </div>
+
     <!-- AI UPDATE [2026-07-30]: esc-pos-encoder (Niels Leenheer) — browser-compatible
          ESC/POS library used by js/receipt-builder.js for professional bill receipts.
          UMD build exposes window.EscPosEncoder. Loaded before module scripts so it is
@@ -512,6 +523,7 @@
     <script type="module" src="js/menu.js"></script>
     <script type="module" src="js/cart.js"></script>
     <script type="module" src="js/incoming-orders.js"></script>
+    <script type="module" src="js/staff-management.js?v=1"></script>
     
      <script>
         let posPrompt;
