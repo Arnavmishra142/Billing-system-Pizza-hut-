@@ -977,6 +977,61 @@ input:checked + .slider::before { transform: translateX(18px); }
 }
 @keyframes imgSpin { to { transform: rotate(360deg); } }
 
+/* =========================================
+   STAFF MANAGEMENT — AI UPDATE [2026-09-15]
+   Reuses bill-card / cust-av / stat-card / modal-* / filter-pill /
+   date-pill / form-group from above for the list, Add/Edit modal, and
+   overall Detail overlay layout (see js/staff-admin.js). Only the pieces
+   with no existing equivalent are added here.
+   ========================================= */
+.staff-detail-profile {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 20px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+}
+.staff-detail-profile-field { min-width: 90px; }
+.staff-detail-profile-value { font-weight: 700; color: #e6edf3; font-size: 0.98rem; margin-top: 2px; }
+.staff-detail-profile-actions { display: flex; gap: 8px; margin-left: auto; }
+
+.staff-range-summary {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-left: 4px solid #1f6feb;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+}
+.staff-range-summary-range { font-size: 0.8rem; color: #8b949e; font-weight: 700; margin-bottom: 4px; }
+.staff-range-summary-stats { display: flex; gap: 18px; font-size: 0.92rem; color: #e6edf3; }
+.staff-range-summary-stats strong { color: #3fb950; }
+
+.staff-record-list { display: flex; flex-direction: column; gap: 6px; }
+.staff-record-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+.staff-record-date { font-weight: 700; font-size: 0.88rem; color: #e6edf3; min-width: 92px; flex-shrink: 0; }
+.staff-record-mid { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.staff-record-note { font-size: 0.82rem; color: #8b949e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.staff-record-advance { font-weight: 800; font-size: 0.92rem; color: #3fb950; flex-shrink: 0; }
+
+.status-pill-sm {
+    font-size: 0.7rem; font-weight: 700; padding: 2px 9px; border-radius: 20px; flex-shrink: 0; white-space: nowrap;
+}
+.status-pill-sm.off { background: rgba(139,148,158,0.12); color: #8b949e; border: 1px solid #30363d; }
+.status-pill-sm.on  { background: rgba(240,136,62,0.15); color: #f0883e; border: 1px solid rgba(240,136,62,0.4); }
+
 /* ═══════════════════════════════════════════════
    SMART AI MANAGER — FAB
 ═══════════════════════════════════════════════ */
