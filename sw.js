@@ -76,7 +76,9 @@
 // the same photo uploaded from the Admin Panel, falling back to the
 // existing letter avatar). js/staff-shared.js also changed (new
 // updateStaffPhoto export) — already precached above, covered by this bump.
-const CACHE_NAME = 'pos-static-v48'; const STATIC_ASSETS = [
+// AI UPDATE [2026-09-15]: Bumped pos-static-v48 → pos-static-v49 (js/cart.js
+// changed: Parcel KOT large centered "P" marker — see AI_HANDOFF.md).
+const CACHE_NAME = 'pos-static-v49'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
