@@ -21,7 +21,10 @@
 // js/staff-admin.js + js/staff-shared.js — not precached here, same as
 // js/admin-menu.js/js/customers.js above, since network-first always fetches
 // fresh module code first anyway).
-const CACHE = 'admin-pos-v11';
+// AI UPDATE [2026-09-15] session 2: v11→v12 — bust cached js/staff-admin.js
+// after adding historical-record editing (Edit This Date) + default-Working
+// display for dates with no saved record.
+const CACHE = 'admin-pos-v12';
 const PRECACHE = [
     '/admin/index.html',
     '/css/admin.css',
