@@ -68,7 +68,10 @@
 // AI UPDATE [2026-09-15]: v45→v46 — new Staff Management feature. Added
 // staff.html, js/staff-shared.js, js/staff-pos.js and updated index.html
 // (new "Staff Management" button) to the pre-cache list.
-const CACHE_NAME = 'pos-static-v46'; const STATIC_ASSETS = [
+// AI UPDATE [2026-09-15] session 2: v46→v47 — bust cached staff.html and
+// js/staff-pos.js after correcting POS Staff Management to be TODAY-ONLY
+// (removed date navigation) with default-Working semantics.
+const CACHE_NAME = 'pos-static-v47'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',

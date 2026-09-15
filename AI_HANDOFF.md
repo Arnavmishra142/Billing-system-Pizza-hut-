@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-15 (Staff Management — POS + Admin Panel, see bottom of file)
+> Last updated: 2026-09-15 session 2 (Staff Management corrections — POS today-only, default-Working, Admin historical editing; see bottom of file)
 
 ---
 
@@ -5493,3 +5493,178 @@ live browser or deploy Firestore rules in this environment):**
   `staff/{id}/dailyRecords/{date}.advance` as a source, or maintains its own entry — do
   not assume the two need to be merged into one write path without re-reading this
   section and `ARCHITECTURE_LOCK.md` §5 first.
+
+---
+
+## [AI UPDATE 2026-09-15 session 2] — Staff Management Corrections (POS Today-Only + Default-Working + Historical Editing)
+
+### Context
+
+A follow-up task corrected three behaviors in the Staff Management feature
+shipped earlier the same day (see the entry directly above this one). This
+session made no unrelated changes — same scope discipline as before.
+
+### What Changed
+
+**1. POS Staff Management is now TODAY-ONLY.**
+Removed the ◀ / ▶ previous/next-day navigation buttons and all date-switching
+logic from `staff.html` / `js/staff-pos.js`. The POS page now always reads
+and writes `dailyRecords/{today}` only — there is no way to browse or edit
+any other date from the POS. `_currentDateKey` is still recomputed (via
+`dateKey()` from `js/staff-shared.js`) but is never mutated by user
+interaction. A `setInterval` check every 60s detects an actual midnight
+rollover (tablet left open overnight) and automatically refreshes to the new
+day's list — still with no manual date control exposed to the manager.
+Historical viewing **and editing** are now exclusively an Admin Panel
+capability (see point 3).
+
+**2. Default status is now explicitly "Working" — no daily doc needed.**
+Previously the UI already *displayed* a missing record as Holiday
+OFF/₹0/Working, but this session made that contract explicit and
+non-negotiable: `getDailyRecord()` returning `null` is documented in
+`js/staff-shared.js` and `ARCHITECTURE_LOCK.md` §5 as meaning the default
+(Working, Holiday OFF, Advance ₹0) — never an "unknown"/"no data" state.
+**No code was added anywhere to pre-create a "Working, ₹0" Firestore
+document.** A document is written only when `saveDailyRecord()` is actually
+called — i.e. only when Holiday is turned ON, an Advance is entered, and/or
+a Note is entered. This keeps the database exactly as clean as the original
+spec required: most staff, most days, have zero Firestore writes.
+
+**3. Admin can now edit historical daily records (new capability).**
+Previously the Admin "Staff" tab's particular-date/date-range filters were
+**view-only**. This was the main functional gap this session fixed. In
+`js/staff-admin.js`:
+- Selecting a **particular date** with no explicit record no longer shows a
+  "No daily record exists" empty state — it now synthesizes and displays the
+  default row (`{holiday:false, advance:0, note:''}`) exactly like the POS
+  does, per point 2.
+- A new **"✏️ Edit \<date\>"** button appears under the particular-date view,
+  and every row in the full-history / date-range list is now clickable —
+  both open a new **`_openEditDateModal(dateStr)`** modal (Status:
+  Working/Holiday toggle, Advance ₹ input, Note input, prefilled from the
+  live Firestore record for that date). Saving calls the exact same
+  `saveDailyRecord(staffId, dateStr, {...})` from `js/staff-shared.js` that
+  the POS uses — there is still only one write path into
+  `dailyRecords/{date}`, just now callable by Admin for **any** date
+  (past, present) whereas the POS can only call it for today.
+- After a historical save, the overlay re-fetches
+  `fetchAllDailyRecords(staffId)` and re-renders both the All-Time stat cards
+  and whichever date/range view was active, so an edit to 14 Sep is reflected
+  immediately without needing to close/reopen the staff's detail overlay —
+  and the previously-existing 15 Sep record is provably untouched (the save
+  call only ever targets the single `dateStr` document ID passed to it).
+
+### Daily Record Semantics (corrected, final)
+
+```
+staff/{staffId}/dailyRecords/{YYYY-MM-DD}
+    { date, holiday, advance, note, updatedAt }
+```
+- Document exists  → use its `holiday`/`advance`/`note` values as-is.
+- Document missing → treat as `{ holiday: false, advance: 0, note: '' }`
+  ("Working", no advance). This is now enforced identically in both
+  `js/staff-pos.js` (today only) and `js/staff-admin.js` (any date, with an
+  Edit action attached to the synthesized default row).
+- Holiday and Advance remain fully independent fields on the same document —
+  a date can be `holiday:true` AND have `advance:500` at once; nothing in
+  either UI makes them mutually exclusive (the Admin edit modal's
+  Working/Holiday toggle only ever changes the `holiday` field; the Advance
+  and Note inputs are untouched by it).
+- Holiday-count and Total-Advance aggregation (`summarizeRecords()` in
+  `js/staff-shared.js`) still iterate only over **explicit** saved documents
+  — this is intentionally unchanged and is still correct under the
+  default-Working rule: a date with no document simply isn't Working=false,
+  so it correctly contributes 0 to both `holidayDays` and `totalAdvance`
+  without needing to be materialized as a document first.
+
+### Files Modified (this session only)
+
+| File | Change |
+|------|--------|
+| `staff.html` | Removed `#prevDayBtn` / `#nextDayBtn` markup and their CSS; date bar now shows a static "today" label only. |
+| `js/staff-pos.js` | Removed all date-navigation event handlers and the `addDaysToKey` import; `_currentDateKey` is now effectively read-only from the UI's perspective. Added a 60s `setInterval` midnight-rollover check. Detail screen's default-before-load state now explicitly starts at Working/Holiday-OFF (was already the end result once the record fetch resolved; now also true for the brief moment before it resolves). |
+| `js/staff-admin.js` | Imported `getDailyRecord`/`saveDailyRecord` from `staff-shared.js`. Rewrote `_renderDetailRecords()`'s particular-date branch to synthesize the Working/₹0 default and render an "Edit This Date" button instead of an empty state. Made every history-list row clickable. Added new `_openEditDateModal(dateStr)` function (the only new function this session) — a small modal reusing existing `.modal-overlay`/`.form-group`/`.btn` classes, no new CSS needed. Added an explanatory line under the History & Filters row clarifying the default-Working behavior to Admin users. |
+| `sw.js` | Bumped `pos-static-v46 → pos-static-v47` (busts cached `staff.html`/`js/staff-pos.js`). |
+| `admin/sw.js` | Bumped `admin-pos-v11 → admin-pos-v12` (busts cached `js/staff-admin.js`). |
+| `ARCHITECTURE_LOCK.md` | §5: documented the default-Working contract for a missing `dailyRecords` doc and the POS-today-only / Admin-can-edit-any-date split. §6: annotated `getDailyRecord`'s return-value contract. |
+| `js/staff-shared.js` | Added a doc comment above `getDailyRecord()` codifying the null-means-default contract (no functional change to the function itself — it already returned `null` correctly; only the contract is now explicit so a future agent doesn't "fix" the null into a thrown error or a placeholder document). |
+
+### Explicitly NOT Changed / NOT Implemented (unchanged from the previous session)
+
+- ✗ Expenses → Advance — still not implemented; the Advance field is not
+  written to `expenses`/`daily_expenses` and does not affect any expense
+  total.
+- ✗ Expenses → Credit/Udhari — not implemented.
+- ✗ Customer Credit — not implemented.
+- ✗ No changes to `js/staff-shared.js`'s Firestore read/write logic itself —
+  only a doc comment was added. `firestore.rules`, staff profile CRUD, soft
+  delete, and the single-source-of-truth architecture from the previous
+  session are all unchanged.
+- ✗ No changes to billing, cart, tables, customers, online ordering,
+  incoming/running orders, coupons, sales history, menu, or existing
+  expenses.
+
+### Testing Performed
+
+- `node --check` passed on `js/staff-pos.js` and `js/staff-admin.js` after
+  every edit — no syntax errors.
+- Manually traced TEST 1–16 from the corrected task spec against the code:
+  - Confirmed `js/staff-pos.js` no longer imports or calls `addDaysToKey`
+    anywhere, and contains no DOM element capable of changing
+    `_currentDateKey` other than the automatic midnight check — satisfies
+    "POS has NO historical date navigation."
+  - Confirmed a brand-new staff member with zero `dailyRecords` documents
+    renders as "Working" in both the POS list (`renderStaffList()`'s
+    `holiday = !!(rec && rec.holiday)` — `false` when `rec` is `null`) and
+    the Admin particular-date view (`_renderDetailRecords()`'s synthesized
+    default object) — satisfies "default status is Working" without any
+    extra manager action.
+  - Confirmed saving Holiday ON for one staff member on today's date
+    (`saveDailyRecord`) writes only that one staff's `dailyRecords/{today}`
+    document — every other staff member's list row is computed independently
+    via its own `getDailyRecord()` call in the `Promise.all`, so it's
+    structurally impossible for one save to flip another staff member's
+    displayed status.
+  - Confirmed the Admin `_openEditDateModal` save path targets `dateStr`
+    (whatever date was clicked/selected) and nothing else — editing 14 Sep's
+    advance cannot touch 15 Sep's document, matching TEST 10's requirement.
+  - Confirmed Holiday + Advance coexist: `_openEditDateModal`'s Working/
+    Holiday toggle only calls `setStatus()`, which never reads or clears
+    `stEditAdvanceInput`/`stEditNoteInput` — both are read independently at
+    Save time and passed through to `saveDailyRecord` unchanged, satisfying
+    TEST scenario 7 (Holiday ON + Advance ₹500 together).
+
+**Still to be tested against a live Firebase project / real devices** (same
+limitation as the previous session — no live browser/Firestore available in
+this environment):
+1. Live verification that the 60s midnight-rollover check actually fires and
+   correctly refreshes an open POS tablet at the real day boundary.
+2. Live cross-panel check: edit a historical date (e.g. yesterday) from the
+   Admin Panel, then confirm the exact Firestore document was
+   created/updated as expected (correct doc ID, correct fields) via the
+   Firebase console.
+3. Visual check of the new "Edit This Date" button and edit modal on an
+   actual tablet screen size.
+4. Confirm `pos-static-v47` / `admin-pos-v12` are actually served (not a
+   stale prior version) after deploy.
+
+## Important information for a future AI agent
+
+- **Never make `getDailyRecord()` create a document as a side effect**, and
+  never change it to return a default object instead of `null` — every
+  caller already correctly interprets `null` as "Working, ₹0" per the
+  contract documented in `js/staff-shared.js` and `ARCHITECTURE_LOCK.md` §5.
+  If a future change needs a "has this staff+date ever been touched at all"
+  distinction (different from "is it Working"), add a *new* explicit field
+  or function rather than overloading `null`.
+- **Do not re-add date navigation to `staff.html`/`js/staff-pos.js`.** This
+  was deliberately removed per an explicit "POS = TODAY ONLY, Admin Panel =
+  FULL HISTORY + EDITING" architectural decision (see `ARCHITECTURE_LOCK.md`
+  §5). If a future task asks for POS-side historical viewing again, treat
+  that as requiring explicit re-confirmation before implementing, since it
+  directly reverses this session's change.
+- The Admin edit-date flow (`_openEditDateModal`) is intentionally the
+  *only* place that can write a `dailyRecords` document for a non-today
+  date. If a future feature needs another historical write path (e.g. a
+  bulk-import tool), reuse `saveDailyRecord()` from `js/staff-shared.js`
+  rather than writing to Firestore directly.

@@ -401,10 +401,24 @@ that date and can never modify any other date's document.
 }
 ```
 Only dates that were actually saved from the UI have a document — no
-document is pre-created for every date. Security: `firestore.rules`
-restricts both `staff/{staffId}` and its `dailyRecords` subcollection to
-`isOperator()` only (same pattern as `daily_expenses` above) — customers
-can never read staff data.
+document is pre-created for every date. **A missing document is not an
+"unknown"/"no data" state — it means the default: Working, Holiday OFF,
+Advance ₹0** (corrected 2026-09-15 session 2; see `js/staff-shared.js` —
+`getDailyRecord()` returning `null` MUST be interpreted by every caller as
+this default, never rendered as an error or blank state). Security:
+`firestore.rules` restricts both `staff/{staffId}` and its `dailyRecords`
+subcollection to `isOperator()` only (same pattern as `daily_expenses`
+above) — customers can never read staff data.
+
+**POS (`staff.html`) is TODAY-ONLY** (corrected 2026-09-15 session 2): it has
+no date navigation of any kind and only ever reads/writes
+`dailyRecords/{today}`. All historical viewing AND editing (particular date,
+date range, correcting a past Holiday/Working mistake, adding a missed
+advance) is exclusively an Admin Panel capability, via
+`js/staff-admin.js`'s "Edit This Date" flow — which calls the same
+`saveDailyRecord()` the POS uses, so there is still only one write path into
+this subcollection, just gated by which UI is allowed to call it for which
+dates.
 
 ---
 
@@ -442,7 +456,7 @@ export function getStaffMember(staffId)
 export function addStaffMember({ name, workType })
 export function updateStaffMember(staffId, { name, workType })
 export function deleteStaffMember(staffId)                  // soft delete (active:false)
-export function getDailyRecord(staffId, key)
+export function getDailyRecord(staffId, key)                // null return = default (Working, Holiday OFF, ₹0) — see §5
 export function saveDailyRecord(staffId, key, { holiday, advance, note })
 export function fetchAllDailyRecords(staffId)
 export function filterRecordsInRange(records, fromKey, toKey)

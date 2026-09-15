@@ -30,13 +30,7 @@
             display: flex; align-items: center; justify-content: center; gap: 14px;
             padding: 14px 16px; flex-shrink: 0;
         }
-        .date-nav-btn {
-            width: 38px; height: 38px; border-radius: 50%; border: 1px solid #30363d;
-            background: #161b22; color: #e6edf3; font-size: 1.1rem; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-        }
-        .date-nav-btn:active { transform: scale(0.9); }
-        .date-nav-btn:disabled { opacity: 0.35; cursor: default; }
+        .date-nav-btn { display: none; } /* AI UPDATE [2026-09-15] session 2: nav buttons removed — POS is today-only */
         .date-label { font-size: 1.05rem; font-weight: 800; color: #58a6ff; min-width: 150px; text-align: center; }
         .date-today-pill {
             font-size: 0.72rem; font-weight: 700; color: #3fb950; background: rgba(63,185,80,0.12);
@@ -118,9 +112,11 @@
     </div>
 
     <div class="date-bar">
-        <button class="date-nav-btn" id="prevDayBtn" title="Previous day">◀</button>
+        <!-- AI UPDATE [2026-09-15] session 2: Removed prev/next day navigation
+             buttons per corrected spec — POS Staff Management is TODAY-ONLY.
+             Historical date browsing/editing now belongs exclusively to the
+             Admin Panel's Staff tab. -->
         <span class="date-label" id="dateLabel">…</span>
-        <button class="date-nav-btn" id="nextDayBtn" title="Next day">▶</button>
     </div>
 
     <div class="container">
