@@ -24,7 +24,13 @@
 // AI UPDATE [2026-09-15] session 2: v11→v12 — bust cached js/staff-admin.js
 // after adding historical-record editing (Edit This Date) + default-Working
 // display for dates with no saved record.
-const CACHE = 'admin-pos-v12';
+// AI UPDATE [2026-09-15] session 3: v12→v13 — bust cached js/staff-admin.js
+// + css/admin.css after adding Staff Profile Image (Upload/Change Photo)
+// support. js/staff-shared.js and js/cloudinary-upload.js are also updated
+// but, per the note above, are not in PRECACHE — the version bump still
+// invalidates any previously-cached copy of them via the network-first
+// fetch handler below.
+const CACHE = 'admin-pos-v13';
 const PRECACHE = [
     '/admin/index.html',
     '/css/admin.css',
