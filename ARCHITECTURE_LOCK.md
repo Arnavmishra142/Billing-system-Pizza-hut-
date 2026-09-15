@@ -380,12 +380,31 @@ shared data layer `js/staff-shared.js`. There is no separate
   createdAt: Timestamp
   updatedAt: Timestamp
   deletedAt: Timestamp       // present only if active === false
+  profileImageUrl:       string | null  // Cloudinary secure_url (added 2026-09-15 session 3)
+  profileImagePublicId:  string | null  // Cloudinary public_id, for delete-on-replace (added 2026-09-15 session 3)
 }
 ```
 Deletion is a SOFT delete (`active: false`) — the profile document and its
 full `dailyRecords` history are never physically removed, so historical
 Holiday/Advance business data survives staff turnover (per explicit task
 requirement — do not destroy history on delete).
+
+**Profile photo (added 2026-09-15 session 3):** `profileImageUrl` /
+`profileImagePublicId` live on this PROFILE document ONLY — never inside
+`dailyRecords/{date}`. This is permanent staff-profile data (same bucket as
+`name`/`workType`), so changing a staff member's photo never touches any
+daily Holiday/Advance record. Uploaded through the EXISTING Cloudinary
+unsigned-upload system (`js/cloudinary-upload.js`, the same helper
+`js/admin-menu.js` uses for category/product images) — no second Cloudinary
+config, no new upload provider. Upload/Change is Admin-only
+(`js/staff-admin.js`, Staff Detail overlay); the POS (`staff.html` /
+`js/staff-pos.js`) only ever *displays* the stored URL, in both the staff
+list and the daily-record detail header. A staff member with no photo falls
+back to the existing letter-avatar in both UIs — never a broken image or a
+fabricated Cloudinary URL. Written via the dedicated
+`updateStaffPhoto(staffId, { url, publicId })` in `js/staff-shared.js`,
+kept separate from `updateStaffMember()` so a photo change and a
+name/workType edit can never clobber each other.
 
 #### `staff/{staffId}/dailyRecords/{YYYY-MM-DD}` — One record per staff per date (added 2026-09-15)
 Doc ID IS the local calendar date key, which guarantees "one staff + one
@@ -455,6 +474,7 @@ export function fetchStaffList({ includeInactive })
 export function getStaffMember(staffId)
 export function addStaffMember({ name, workType })
 export function updateStaffMember(staffId, { name, workType })
+export function updateStaffPhoto(staffId, { url, publicId })  // profile photo only — added 2026-09-15 session 3
 export function deleteStaffMember(staffId)                  // soft delete (active:false)
 export function getDailyRecord(staffId, key)                // null return = default (Working, Holiday OFF, ₹0) — see §5
 export function saveDailyRecord(staffId, key, { holiday, advance, note })

@@ -51,7 +51,13 @@
             width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
             background: linear-gradient(135deg, #1f6feb, #388bfd); color: #fff;
             display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.15rem;
+            overflow: hidden; /* AI UPDATE [2026-09-15] session 3: clips the profile photo <img> to the circle */
         }
+        /* AI UPDATE [2026-09-15] session 3: staff profile photo — displays the
+           SAME Cloudinary URL uploaded from the Admin Panel. If a staff member
+           has no photo, the existing letter-avatar (above) is shown instead;
+           POS never generates or fakes an image URL. */
+        .staff-av img { width: 100%; height: 100%; object-fit: cover; }
         .staff-row-info { flex: 1; min-width: 0; }
         .staff-row-name { font-weight: 700; font-size: 1rem; color: #e6edf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .staff-row-type { font-size: 0.82rem; color: #8b949e; margin-top: 2px; }
@@ -72,6 +78,18 @@
             background: #161b22; border: 1px solid #30363d; border-radius: 14px;
             padding: 18px; margin: 4px 0 18px; text-align: center;
         }
+        /* AI UPDATE [2026-09-15] session 3: staff profile photo in the daily-
+           record header. Displays the SAME staff-profile image shown in the
+           Admin Panel / POS staff list — read-only here (photo upload is
+           Admin-only). Falls back to a letter avatar when no photo exists. */
+        .detail-photo {
+            width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 10px;
+            background: linear-gradient(135deg, #1f6feb, #388bfd); color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 800; font-size: 1.6rem; overflow: hidden;
+        }
+        .detail-photo:empty { display: none; }
+        .detail-photo img { width: 100%; height: 100%; object-fit: cover; }
         .detail-name-card .name { font-size: 1.25rem; font-weight: 800; color: #e6edf3; }
         .detail-name-card .type { font-size: 0.85rem; color: #8b949e; margin-top: 2px; }
 
@@ -130,6 +148,7 @@
             <button class="detail-back-btn" id="detailBackBtn">← Back to Staff List</button>
 
             <div class="detail-name-card">
+                <div class="detail-photo" id="detailPhoto"></div>
                 <div class="name" id="detailName">—</div>
                 <div class="type" id="detailType">—</div>
                 <div class="type" id="detailDate">—</div>

@@ -71,7 +71,12 @@
 // AI UPDATE [2026-09-15] session 2: v46→v47 — bust cached staff.html and
 // js/staff-pos.js after correcting POS Staff Management to be TODAY-ONLY
 // (removed date navigation) with default-Working semantics.
-const CACHE_NAME = 'pos-static-v47'; const STATIC_ASSETS = [
+// AI UPDATE [2026-09-15] session 3: v47→v48 — bust cached staff.html and
+// js/staff-pos.js after adding Staff Profile Image display (POS now shows
+// the same photo uploaded from the Admin Panel, falling back to the
+// existing letter avatar). js/staff-shared.js also changed (new
+// updateStaffPhoto export) — already precached above, covered by this bump.
+const CACHE_NAME = 'pos-static-v48'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',

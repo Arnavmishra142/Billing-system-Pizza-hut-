@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-15 session 2 (Staff Management corrections — POS today-only, default-Working, Admin historical editing; see bottom of file)
+> Last updated: 2026-09-15 session 3 (Staff Profile Image — Upload/Change Photo via existing Cloudinary system; see bottom of file)
 
 ---
 
@@ -5668,3 +5668,170 @@ this environment):
   date. If a future feature needs another historical write path (e.g. a
   bulk-import tool), reuse `saveDailyRecord()` from `js/staff-shared.js`
   rather than writing to Firestore directly.
+
+---
+
+## [AI UPDATE 2026-09-15 session 3] — Staff Profile Image (Upload/Change Photo)
+
+### Context
+
+Added a profile-photo option to the Staff Management feature (shipped in
+the two sessions directly above this one). Scope was explicitly limited to
+Admin → Staff Management → Staff Profile → Upload/Change Photo, and
+displaying that same photo in the Admin Staff Profile + POS Staff
+Management. No other feature area was touched.
+
+### What Was Built
+
+**1. Reused the EXISTING Cloudinary upload system — no new upload path.**
+Audited `js/cloudinary-upload.js` (the unsigned direct-to-Cloudinary upload
+helper already used by `js/admin-menu.js` for category/product images) and
+`js/cloudinary-public.js` (the existing, already-committed `cloud_name` +
+`upload_preset` config). Both are reused completely unchanged. Staff photo
+upload calls the exact same `uploadMenuImage(blob, oldPublicId)` /
+`extractCloudinaryPublicId(url)` exports — no second Cloudinary
+configuration, no new upload provider, no secrets added anywhere.
+
+**2. Admin Panel — Staff Detail overlay gets an Upload/Change Photo control.**
+In `js/staff-admin.js`, the Staff Detail overlay (`_detailShellHtml`) now
+opens with a circular photo box + a single button that reads "📤 Upload
+Photo" (no photo yet) or "📤 Change Photo" (photo already set), plus a
+hidden `<input type="file" accept="image/*">`. Selecting a file:
+1. Downscales/converts it to WebP client-side (`_toWebP()` — a local copy
+   of the same private helper already used by `js/admin-menu.js`, since
+   that one isn't exported).
+2. Uploads via `uploadMenuImage(blob, oldPublicId)`, passing the staff
+   member's previous `profileImagePublicId` (if any) so the old Cloudinary
+   image is deleted on replace — mirrors the existing category/product
+   image-replace behavior exactly.
+3. Persists the result immediately via the new
+   `updateStaffPhoto(staffId, { url, publicId })` in `js/staff-shared.js` —
+   this is a small, isolated Firestore write that touches ONLY
+   `profileImageUrl` / `profileImagePublicId` / `updatedAt` on the
+   `staff/{staffId}` PROFILE document. It never touches `name`, `workType`,
+   `active`, or any `dailyRecords/{date}` document.
+4. Updates in-memory state (`_detailStaff` + the matching entry in
+   `_staffList`) and repaints both the open Detail overlay's photo box
+   (`_refreshDetailPhotoUI()`) and the card grid behind it (`_renderList()`)
+   immediately — no full page reload or re-fetch needed to see the new
+   photo, satisfying "Display it immediately after successful upload."
+
+The card grid (`_renderList()`) also now shows the stored photo (as an
+`<img>` inside the existing `.cust-av` circle) instead of the letter avatar,
+for every staff member who has one.
+
+**3. Storage — permanent staff-profile data, not daily history.**
+`profileImageUrl` / `profileImagePublicId` were added only to the
+`staff/{staffId}` document shape (see `ARCHITECTURE_LOCK.md` §5, updated
+this session) — the same document that already holds `name` / `workType` /
+`joinedAt`. They are never written to, or read from,
+`staff/{staffId}/dailyRecords/{date}`. Changing/replacing a staff member's
+photo therefore cannot affect any Holiday/Advance daily record, by
+construction (verified: `updateStaffPhoto()` only ever calls `updateDoc()`
+on the `staff/{staffId}` document reference, never on a `dailyRecords`
+reference).
+
+**4. POS Staff Management — displays the same image (read-only).**
+`js/staff-pos.js`'s `renderStaffList()` now shows the stored
+`profileImageUrl` (as an `<img>` inside the existing `.staff-av` circle)
+for each staff row, and `openStaffDetail()` populates a new `#detailPhoto`
+element in the daily-record header (`staff.html`) the same way. The POS
+never uploads or changes a photo — it only ever displays the URL already
+stored on the staff profile by the Admin Panel, per spec ("Do NOT create
+another POS-specific image").
+
+**5. Missing-image / broken-image handling.**
+A staff member with no `profileImageUrl` renders the existing letter-avatar
+(first letter of their name) in every location — card grid, Staff Detail
+overlay, POS list, POS daily-record header. No broken `<img>` tag is ever
+rendered, and no Cloudinary URL is ever fabricated client-side; the letter
+avatar is a plain text/CSS fallback, identical to how the Staff Management
+feature already displayed avatars before this session.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `js/staff-shared.js` | Documented `profileImageUrl` / `profileImagePublicId` in the Firestore-shape comment block; added new exported `updateStaffPhoto(staffId, { url, publicId })` function (isolated write — only touches those two fields + `updatedAt` on the `staff/{staffId}` doc). |
+| `js/staff-admin.js` | Imported `uploadMenuImage` + `extractCloudinaryPublicId` from `js/cloudinary-upload.js` and `updateStaffPhoto` from `js/staff-shared.js`. Card grid (`_renderList`) now renders an `<img>` inside `.cust-av` when `profileImageUrl` is set. Added a photo box + Upload/Change Photo button + hidden file input to `_detailShellHtml`, wired in `_wireDetailShell`. Added `_uploadStaffPhoto(file)`, `_refreshDetailPhotoUI()`, and a local `_toWebP(file)` helper (mirrors the private helper of the same name in `js/admin-menu.js`). Added `_photoUploadBusy` module-state flag to prevent double-uploads. |
+| `js/staff-pos.js` | Added a `detailPhoto` DOM ref. `renderStaffList()` now renders an `<img>` inside `.staff-av` when `profileImageUrl` is set (falls back to the existing initial-letter avatar otherwise). `openStaffDetail()` now populates `#detailPhoto` the same way. No new imports — POS only displays the URL already on the fetched staff object; it does not call any Cloudinary function. |
+| `staff.html` | Added `<div class="detail-photo" id="detailPhoto"></div>` inside `.detail-name-card`. Added `.staff-av img` (clip photo to the existing circular avatar) and `.detail-photo` / `.detail-photo img` CSS. |
+| `css/admin.css` | Added `.staff-detail-photo-row`, `.staff-detail-photo`, `.staff-detail-photo-initial` (new — sized/positioned specifically for the Staff Detail overlay's larger photo, reusing the already-existing generic `.img-upload-btn` / `.img-spinner` classes from the Menu Item Modal section for the button and upload spinner, so no duplicate button/spinner styling was added). Added `.cust-av img` so the customer-management avatar circle (borrowed by the Staff card list) can also hold a photo — this selector only ever matches staff cards today, since customers have no `profileImageUrl`. |
+| `ARCHITECTURE_LOCK.md` | §5: documented `profileImageUrl` / `profileImagePublicId` on `staff/{staffId}` and the "permanent profile data, never in dailyRecords" rule. §6: added `updateStaffPhoto(staffId, { url, publicId })` to the `js/staff-shared.js` public-API list. |
+| `sw.js` | Bumped `pos-static-v47 → pos-static-v48` (busts cached `staff.html` / `js/staff-pos.js`; `js/staff-shared.js` is also precached and covered by the same bump). |
+| `admin/sw.js` | Bumped `admin-pos-v12 → admin-pos-v13` (busts cached `js/staff-admin.js` — not precached, but the bump still invalidates it via the network-first handler — and `css/admin.css`, which IS in `PRECACHE`). |
+| `AI_HANDOFF.md` | This entry. |
+
+### Explicitly NOT Changed
+
+- ✗ `js/cloudinary-upload.js` / `js/cloudinary-public.js` — reused exactly as-is; no edits, no second config, no new upload provider.
+- ✗ `firestore.rules` — no change needed. The existing `match /staff/{staffId} { allow read, write: if isOperator(); }` rule already covers the whole document (no field-level restriction to extend), so the new `profileImageUrl` / `profileImagePublicId` fields are automatically covered by the same operator-only access as the rest of the profile.
+- ✗ Customer images, product/menu images, or any existing Cloudinary-driven UI in `js/admin-menu.js` — untouched.
+- ✗ `updateStaffMember()` / `addStaffMember()` / `deleteStaffMember()` in `js/staff-shared.js` — unchanged. `updateStaffMember()`'s `updateDoc()` call only ever writes `name` / `workType` / `updatedAt`, so it structurally cannot clobber a staff member's photo, and vice versa (`updateStaffPhoto()` cannot clobber name/workType).
+- ✗ No changes to `dailyRecords`, `saveDailyRecord()`, `getDailyRecord()`, or any Holiday/Advance logic.
+- ✗ No changes to POS billing, Orders, Incoming Orders, Customers, Coupons, or Expenses.
+- ✗ No Cloudinary secrets/API keys were added, read, or exposed anywhere in this session's changes.
+
+### Testing Performed
+
+- `node --check` passed on `js/staff-shared.js`, `js/staff-admin.js`,
+  `js/staff-pos.js`, `sw.js`, and `admin/sw.js` after every edit — no
+  syntax errors.
+- Verified brace/tag balance in `css/admin.css` (223 `{` / 223 `}`) and
+  `staff.html` (16 `<div` / 16 `</div>`) after all edits.
+- Manually traced the task spec's TEST 1–14 against the code:
+  - Confirmed `_uploadStaffPhoto()` calls `updateStaffPhoto(_detailStaff.id, …)`
+    — a `staff/{staffId}` document write — and never references any
+    `dailyRecords` path, satisfying "changing the staff photo must NOT
+    affect any daily history" (TEST 13).
+  - Confirmed a staff member with `profileImageUrl` unset renders the
+    letter-avatar fallback in all four render sites (`_renderList`,
+    `_detailShellHtml`, `renderStaffList`, `openStaffDetail`) — no bare
+    `<img src="">` is ever emitted, satisfying TEST 14.
+  - Confirmed the POS list/detail render paths read `s.profileImageUrl` /
+    `staff.profileImageUrl` directly from the same `fetchStaffList()` /
+    staff object the Admin Panel writes to via `updateStaffPhoto()` — same
+    Firestore document, same field names — satisfying "POS must use the
+    same image URL stored for that staff member" (no POS-specific image
+    path exists anywhere in `js/staff-pos.js`).
+  - Confirmed `_uploadStaffPhoto()` passes the OLD `profileImagePublicId`
+    into `uploadMenuImage(blob, oldPublicId)` before overwriting it with the
+    new one, so changing a photo triggers the existing best-effort deletion
+    of the previous Cloudinary image (TEST 11–12, "replace" behavior).
+
+**Still to be tested against a live Firebase/Cloudinary project / real
+devices** (same limitation as prior sessions — no live browser, Firestore,
+or Cloudinary account reachable in this environment):
+1. Live upload of an actual staff photo from the Admin Panel's Staff Detail
+   overlay through to a real Cloudinary `secure_url`, and confirming that
+   URL round-trips correctly into `profileImageUrl` on the Firestore
+   document.
+2. Live confirmation that the POS (`staff.html`) picks up the newly-set
+   photo on next load/refresh.
+3. Live confirmation that changing a photo actually deletes the previous
+   Cloudinary asset (the delete call is best-effort/fire-and-forget by
+   design, same as the existing category/product image delete path).
+4. Confirm `pos-static-v48` / `admin-pos-v13` are actually served (not a
+   stale prior version) after deploy.
+
+## Important information for a future AI agent
+
+- **`profileImageUrl` / `profileImagePublicId` belong ONLY on
+  `staff/{staffId}`.** Never write them to, or read them from, a
+  `dailyRecords/{date}` document — this would violate the explicit
+  "profile image is permanent staff-profile data" requirement and would
+  make photo history incorrectly per-date.
+- **Always go through `updateStaffPhoto()`** (not a raw `updateDoc()`) when
+  writing a staff photo, and always pass the previous `profileImagePublicId`
+  into `uploadMenuImage()`'s `oldPublicId` parameter when replacing a photo,
+  so the existing best-effort Cloudinary cleanup keeps firing. Do not
+  introduce a second Cloudinary config/preset for staff photos — continue
+  reusing `js/cloudinary-upload.js` / `js/cloudinary-public.js` for any
+  future image needs in this app.
+- **POS (`js/staff-pos.js`) must remain display-only for photos.** If a
+  future task asks for photo upload from the POS/Manager screen too, treat
+  that as a new explicit requirement to confirm — the current architecture
+  deliberately keeps photo upload Admin-only, matching "I will manually
+  upload the photos for all staff members from the Admin Panel" in the
+  original task spec.
+
