@@ -141,6 +141,12 @@ function dailyCol(staffId) {
     return collection(db, STAFF_COL, staffId, 'dailyRecords');
 }
 
+// Returns null when no record exists for this staff+date. IMPORTANT: a null
+// return is NOT an error or "unknown" state — every caller (POS and Admin)
+// MUST interpret it as the default: Working (holiday:false), Advance ₹0, no
+// note. This is intentional — see "DEFAULT STATUS MUST BE WORKING" in the
+// task spec (2026-09-15 session 2): we do not pre-create a "Working, ₹0"
+// document for every staff+date just to avoid ever returning null.
 export async function getDailyRecord(staffId, key) {
     await waitForStaffAuth();
     const snap = await getDoc(doc(dailyCol(staffId), key));

@@ -21,7 +21,8 @@
 import { showAlert, showConfirm } from './dialog.js';
 import {
     fetchStaffList, addStaffMember, updateStaffMember, deleteStaffMember,
-    fetchAllDailyRecords, filterRecordsInRange, summarizeRecords, formatDateLabel
+    fetchAllDailyRecords, filterRecordsInRange, summarizeRecords, formatDateLabel,
+    getDailyRecord, saveDailyRecord
 } from './staff-shared.js';
 
 // ── Module state ────────────────────────────────────────────────────────────
@@ -292,6 +293,13 @@ function _detailShellHtml(staff) {
                     <input type="date" id="stDetailTo" class="date-pill">
                     <button class="filter-pill" id="stDetailClearBtn" title="Clear filters">✕ Clear</button>
                 </div>
+                <!-- AI UPDATE [2026-09-15] session 2: Working is now the implicit
+                     default for any date with no saved record — clarify this
+                     directly in the UI rather than showing a bare "no data" state. -->
+                <div style="font-size:0.75rem;color:#8b949e;margin:-4px 0 10px;">
+                    A date with no saved record defaults to <strong style="color:#8b949e;">Working, ₹0</strong>.
+                    Pick a date above (or tap any row below) to add/correct a historical entry.
+                </div>
 
                 <div id="stDetailRangeSummary" class="staff-range-summary hidden"></div>
 
@@ -366,23 +374,48 @@ function _renderDetailStats() {
 }
 
 // Renders the date-wise list per the active filter mode ('all' | 'date' | 'range').
-// Only dates that actually have a saved record are ever shown — no synthetic
-// rows are invented for days without a record.
+// AI UPDATE [2026-09-15] session 2: Working is now the DEFAULT state — a date
+// with no explicit Firestore record is synthesized as {holiday:false,
+// advance:0, note:''} for display (never shown as "no data"/"unknown"), and
+// every row (including a synthesized default one) is editable so Admin can
+// add a missed historical advance or correct a Working/Holiday mistake.
 function _renderDetailRecords() {
     const listEl    = document.getElementById('stDetailRecords');
     const summaryEl = document.getElementById('stDetailRangeSummary');
     if (!listEl) return;
 
+    // ── Particular-date mode: always show exactly one row (real record or the
+    //    default Working/₹0), plus a direct Edit affordance for that date. ──
+    if (_detailMode === 'date' && _detailDateSel) {
+        summaryEl.classList.add('hidden');
+        const rec = _detailAllRecords.find(r => r.id === _detailDateSel)
+            || { id: _detailDateSel, holiday: false, advance: 0, note: '' };
+        listEl.innerHTML = `
+            <div class="staff-record-row">
+                <div class="staff-record-date">${esc(formatDateLabel(rec.id))}</div>
+                <div class="staff-record-mid">
+                    <span class="status-pill-sm ${rec.holiday ? 'on' : 'off'}">${rec.holiday ? 'Holiday' : 'Working'}</span>
+                    ${rec.note ? `<span class="staff-record-note">${esc(rec.note)}</span>` : ''}
+                </div>
+                <div class="staff-record-advance">${rec.advance ? '₹' + rec.advance : '—'}</div>
+            </div>
+            <button class="btn btn-primary btn-sm" id="stEditDateBtn" style="width:100%;margin-top:10px;">
+                ✏️ Edit ${esc(formatDateLabel(rec.id))}
+            </button>
+        `;
+        document.getElementById('stEditDateBtn').addEventListener('click', () => _openEditDateModal(rec.id));
+        return;
+    }
+
+    // ── "All history" / range mode: only dates with an EXPLICIT saved record
+    //    are listed (keeps the database — and this list — clean; every other
+    //    date in between is implicitly Working/₹0 and is not itemized here).
+    //    Holiday-count / total-advance below are always computed from this
+    //    same explicit-records list, so missing dates correctly count as
+    //    Working and never inflate the holiday count. ──
     let records = _detailAllRecords;
 
-    if (_detailMode === 'date' && _detailDateSel) {
-        records = records.filter(r => r.id === _detailDateSel);
-        summaryEl.classList.add('hidden');
-        if (records.length === 0) {
-            listEl.innerHTML = `<div class="empty-state">No daily record exists for ${esc(formatDateLabel(_detailDateSel))}.</div>`;
-            return;
-        }
-    } else if (_detailMode === 'range' && _detailFrom && _detailTo) {
+    if (_detailMode === 'range' && _detailFrom && _detailTo) {
         records = filterRecordsInRange(_detailAllRecords, _detailFrom, _detailTo);
         const s = summarizeRecords(records);
         summaryEl.classList.remove('hidden');
@@ -398,12 +431,12 @@ function _renderDetailRecords() {
     }
 
     if (records.length === 0) {
-        listEl.innerHTML = `<div class="empty-state">No daily records ${_detailMode === 'range' ? 'in this range' : 'yet'}.</div>`;
+        listEl.innerHTML = `<div class="empty-state">No explicit daily records ${_detailMode === 'range' ? 'in this range' : 'yet'} — every date defaults to Working, ₹0. Use the Date field above to add one.</div>`;
         return;
     }
 
     listEl.innerHTML = records.map(r => `
-        <div class="staff-record-row">
+        <div class="staff-record-row" data-date="${esc(r.id)}" style="cursor:pointer;" title="Tap to edit this date">
             <div class="staff-record-date">${esc(formatDateLabel(r.id))}</div>
             <div class="staff-record-mid">
                 <span class="status-pill-sm ${r.holiday ? 'on' : 'off'}">${r.holiday ? 'Holiday' : 'Working'}</span>
@@ -412,6 +445,104 @@ function _renderDetailRecords() {
             <div class="staff-record-advance">${r.advance ? '₹' + r.advance : '—'}</div>
         </div>
     `).join('');
+
+    listEl.querySelectorAll('.staff-record-row').forEach(row => {
+        row.addEventListener('click', () => _openEditDateModal(row.dataset.date));
+    });
+}
+
+// ── Edit a specific date's daily record (create, correct Holiday/Working,
+// add a missed/late advance, edit the note). This is the ONLY write path for
+// historical dates — it calls the exact same saveDailyRecord() used by the
+// POS, so "one staff + one date = one daily record" holds identically here:
+// saving 14 Sep can never touch 15 Sep's already-saved document. ──
+async function _openEditDateModal(dateStr) {
+    if (!_detailStaff) return;
+
+    // Re-fetch fresh (rather than trusting the possibly-stale in-memory
+    // _detailAllRecords) in case the POS or another Admin tab wrote to this
+    // exact date in the meantime.
+    let rec = null;
+    try {
+        rec = await getDailyRecord(_detailStaff.id, dateStr);
+    } catch (e) {
+        console.error('[staff-admin] getDailyRecord failed:', e);
+    }
+    const holiday = !!(rec && rec.holiday);
+    const advance = rec && rec.advance ? rec.advance : '';
+    const note    = rec && rec.note ? rec.note : '';
+
+    const html = `
+        <div class="modal-overlay" id="stEditDateModal">
+            <div class="modal-box">
+                <div class="modal-header">
+                    <h2>${esc(formatDateLabel(dateStr))}</h2>
+                    <button class="modal-close-x" id="stEditDateCloseBtn">✕</button>
+                </div>
+                <div class="form-group">
+                    <label>Status</label>
+                    <div style="display:flex;gap:10px;">
+                        <button type="button" class="btn ${!holiday ? 'btn-primary' : 'btn-cancel'}" id="stEditWorkingBtn" style="flex:1;">Working</button>
+                        <button type="button" class="btn ${holiday ? 'btn-primary' : 'btn-cancel'}" id="stEditHolidayBtn" style="flex:1;">Holiday</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Advance (₹)</label>
+                    <input type="number" id="stEditAdvanceInput" value="${esc(String(advance))}" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label>Note (optional)</label>
+                    <input type="text" id="stEditNoteInput" value="${esc(note)}" placeholder="e.g. Personal emergency">
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-cancel" id="stEditDateCancelBtn">Cancel</button>
+                    <button class="btn btn-primary" id="stEditDateSaveBtn">Save</button>
+                </div>
+            </div>
+        </div>
+    `;
+    _appendModal('stEditDateModalHost', html);
+
+    let _editHoliday = holiday;
+    const workingBtn = document.getElementById('stEditWorkingBtn');
+    const holidayBtn = document.getElementById('stEditHolidayBtn');
+    const setStatus = (h) => {
+        _editHoliday = h;
+        workingBtn.className = `btn ${!h ? 'btn-primary' : 'btn-cancel'}`;
+        holidayBtn.className = `btn ${h ? 'btn-primary' : 'btn-cancel'}`;
+    };
+    // Holiday and Advance are independent — toggling Status never clears the
+    // Advance/Note fields, so both can be saved together on the same date.
+    workingBtn.addEventListener('click', () => setStatus(false));
+    holidayBtn.addEventListener('click', () => setStatus(true));
+
+    const close = () => document.getElementById('stEditDateModalHost')?.remove();
+    document.getElementById('stEditDateCloseBtn').addEventListener('click', close);
+    document.getElementById('stEditDateCancelBtn').addEventListener('click', close);
+    document.getElementById('stEditDateSaveBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('stEditDateSaveBtn');
+        btn.disabled = true;
+        btn.textContent = 'Saving…';
+        try {
+            await saveDailyRecord(_detailStaff.id, dateStr, {
+                holiday: _editHoliday,
+                advance: document.getElementById('stEditAdvanceInput').value,
+                note: document.getElementById('stEditNoteInput').value,
+            });
+            close();
+            // Refresh the overlay's full history + stats so the edit is
+            // reflected immediately in both the All-Time totals and any
+            // currently-active date/range view.
+            _detailAllRecords = await fetchAllDailyRecords(_detailStaff.id);
+            _renderDetailStats();
+            _renderDetailRecords();
+        } catch (e) {
+            console.error('[staff-admin] saveDailyRecord failed:', e);
+            await showAlert('Save nahi hua. Internet check karo.', 'error', 'Save Failed');
+            btn.disabled = false;
+            btn.textContent = 'Save';
+        }
+    });
 }
 
 // ── Small helpers ─────────────────────────────────────────────────────────

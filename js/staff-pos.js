@@ -1,33 +1,39 @@
 // js/staff-pos.js
 // AI UPDATE [2026-09-15]: NEW FILE — POS / Manager side of Staff Management.
+// AI UPDATE [2026-09-15] session 2: CORRECTED per updated task spec —
+//   1. POS is now TODAY-ONLY. Removed all previous/next-day navigation —
+//      historical date browsing/editing belongs exclusively to the Admin
+//      Panel's Staff tab (js/staff-admin.js).
+//   2. Default status is now explicitly "Working": a staff member with no
+//      Firestore dailyRecords/{today} document is displayed as Working,
+//      Holiday OFF, Advance ₹0 — the manager never has to press Save just to
+//      mark someone Working. Saving only happens when there is something to
+//      actually record (Holiday ON, an advance, and/or a note).
+//   3. The current date auto-advances at midnight without a page reload
+//      (checked every 60s) so a tablet left open overnight shows the new
+//      day's (empty-by-default) staff list automatically.
+//
 // Loaded by staff.html only. All Firestore access goes through
-// js/staff-shared.js — the SAME module the Admin Panel's Staff tab
-// (js/staff-admin.js) uses, so both sides always read/write identical data.
+// js/staff-shared.js — the SAME module the Admin Panel's Staff tab uses, so
+// both sides always read/write identical data.
 //
 // Screens:
-//   #screenList   — today's (or selected date's) staff list
-//   #screenDetail — one staff member's daily record (Holiday / Advance / Note)
-//
-// Date-wise storage rule (see staff-shared.js): each date has its own
-// dailyRecords/{date} document. Switching dates never overwrites another
-// date's record, and a date with no saved record simply shows the defaults
-// (Holiday OFF, Advance empty, Note empty) until Save is pressed.
+//   #screenList   — today's staff list (each defaulting to Working)
+//   #screenDetail — one staff member's TODAY record (Holiday / Advance / Note)
 
 import { showAlert } from './dialog.js';
 import {
-    dateKey, formatDateLabel, addDaysToKey,
+    dateKey, formatDateLabel,
     fetchStaffList, getDailyRecord, saveDailyRecord
 } from './staff-shared.js';
 
-let _staffList     = [];
+let _staffList      = [];
 let _currentDateKey = dateKey();
 let _selectedStaff  = null; // { id, name, workType }
 let _holidayValue   = false;
 
 // ── DOM refs ──
 const dateLabelEl   = document.getElementById('dateLabel');
-const prevDayBtn    = document.getElementById('prevDayBtn');
-const nextDayBtn    = document.getElementById('nextDayBtn');
 const screenList    = document.getElementById('screenList');
 const screenDetail  = document.getElementById('screenDetail');
 const staffListArea = document.getElementById('staffListArea');
@@ -43,11 +49,9 @@ const saveRecordBtn = document.getElementById('saveRecordBtn');
 
 function esc(s = '') { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-// ── Date bar ──
+// ── Date bar (today only — no navigation) ──
 function renderDateBar() {
-    const isToday = _currentDateKey === dateKey();
-    dateLabelEl.innerHTML = `${formatDateLabel(_currentDateKey)}${isToday ? ' <span class="date-today-pill">TODAY</span>' : ''}`;
-    nextDayBtn.disabled = isToday; // never navigate into the future
+    dateLabelEl.innerHTML = `${formatDateLabel(_currentDateKey)} <span class="date-today-pill">TODAY</span>`;
 }
 
 // ── Screen switching ──
@@ -80,9 +84,10 @@ async function renderStaffList() {
         return;
     }
 
-    // Fetch each staff member's record for the currently selected date so the
-    // list shows at-a-glance Holiday/Advance status (small staff count in a
-    // restaurant POS, so fetching in parallel is cheap).
+    // Fetch each staff member's record for TODAY only (small staff count in a
+    // restaurant POS, so fetching in parallel is cheap). A staff member with
+    // no document for today is — by design — Working / Holiday OFF / ₹0, so
+    // a missing record is never an error state, just the default.
     const records = await Promise.all(
         _staffList.map(s => getDailyRecord(s.id, _currentDateKey).catch(() => null))
     );
@@ -112,7 +117,7 @@ async function renderStaffList() {
     });
 }
 
-// ── Daily record detail ──
+// ── Daily record detail (always TODAY — _currentDateKey never changes via UI) ──
 async function openStaffDetail(staffId) {
     const staff = _staffList.find(s => s.id === staffId);
     if (!staff) return;
@@ -123,7 +128,7 @@ async function openStaffDetail(staffId) {
     detailDate.textContent = formatDateLabel(_currentDateKey);
     advanceInput.value = '';
     noteInput.value = '';
-    setHoliday(false);
+    setHoliday(false); // default: Working (Holiday OFF) until the actual record loads
 
     showDetailScreen();
 
@@ -134,24 +139,7 @@ async function openStaffDetail(staffId) {
             advanceInput.value = rec.advance ? rec.advance : '';
             noteInput.value = rec.note || '';
         }
-    } catch (e) {
-        console.error('[staff-pos] getDailyRecord failed:', e);
-    }
-}
-
-async function reloadDetailForDateChange() {
-    if (!_selectedStaff) return;
-    detailDate.textContent = formatDateLabel(_currentDateKey);
-    advanceInput.value = '';
-    noteInput.value = '';
-    setHoliday(false);
-    try {
-        const rec = await getDailyRecord(_selectedStaff.id, _currentDateKey);
-        if (rec) {
-            setHoliday(!!rec.holiday);
-            advanceInput.value = rec.advance ? rec.advance : '';
-            noteInput.value = rec.note || '';
-        }
+        // No record → defaults already applied above (Working / ₹0 / no note).
     } catch (e) {
         console.error('[staff-pos] getDailyRecord failed:', e);
     }
@@ -164,27 +152,6 @@ function setHoliday(val) {
 }
 
 // ── Event wiring ──
-prevDayBtn.addEventListener('click', async () => {
-    _currentDateKey = addDaysToKey(_currentDateKey, -1);
-    renderDateBar();
-    if (screenDetail.classList.contains('active')) {
-        await reloadDetailForDateChange();
-    } else {
-        await renderStaffList();
-    }
-});
-
-nextDayBtn.addEventListener('click', async () => {
-    if (nextDayBtn.disabled) return;
-    _currentDateKey = addDaysToKey(_currentDateKey, 1);
-    renderDateBar();
-    if (screenDetail.classList.contains('active')) {
-        await reloadDetailForDateChange();
-    } else {
-        await renderStaffList();
-    }
-});
-
 detailBackBtn.addEventListener('click', async () => {
     showListScreen();
     await renderStaffList();
@@ -198,6 +165,9 @@ saveRecordBtn.addEventListener('click', async () => {
     saveRecordBtn.disabled = true;
     saveRecordBtn.textContent = 'Saving…';
     try {
+        // Holiday ON and/or Advance/Note can coexist freely — never mutually
+        // exclusive (Holiday and Advance are independent fields on the same
+        // daily record).
         await saveDailyRecord(_selectedStaff.id, _currentDateKey, {
             holiday: _holidayValue,
             advance: advanceInput.value,
@@ -213,6 +183,26 @@ saveRecordBtn.addEventListener('click', async () => {
         saveRecordBtn.textContent = '💾 Save';
     }
 });
+
+// ── Midnight rollover ──
+// If this tablet/page is left open across midnight, automatically switch to
+// the new day's (fresh, all-Working-by-default) staff list without requiring
+// a manual reload. Checked every 60s — cheap and simple, matches the "keep
+// POS simple" instruction better than a precise setTimeout-to-midnight timer.
+setInterval(() => {
+    const nowKey = dateKey();
+    if (nowKey !== _currentDateKey) {
+        _currentDateKey = nowKey;
+        renderDateBar();
+        if (screenDetail.classList.contains('active')) {
+            // Currently viewing a staff member's record when the day rolled
+            // over — return to the list so the manager isn't left editing
+            // what is now yesterday's (already-saved) record by mistake.
+            showListScreen();
+        }
+        renderStaffList();
+    }
+}, 60 * 1000);
 
 // ── Start ──
 document.addEventListener('DOMContentLoaded', () => {
