@@ -984,6 +984,37 @@ input:checked + .slider::before { transform: translateX(18px); }
    overall Detail overlay layout (see js/staff-admin.js). Only the pieces
    with no existing equivalent are added here.
    ========================================= */
+/* AI UPDATE [2026-09-15] session 3: Staff profile photo. Reuses the generic
+   .img-upload-btn / .img-spinner components already defined above (Menu
+   Item Modal section) — no new upload-button styling invented. */
+.staff-detail-photo-row {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.staff-detail-photo {
+    position: relative;
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: linear-gradient(135deg, #1f6feb, #388bfd);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.staff-detail-photo img { width: 100%; height: 100%; object-fit: cover; }
+.staff-detail-photo-initial { color: #fff; font-weight: 800; font-size: 2rem; }
+
+/* Card-grid thumbnail — same .cust-av circle the Staff list borrows from
+   Customer Management; adding an <img> variant here only ever fires for
+   staff (customers have no profileImageUrl), so customer avatars are
+   unaffected. */
+.cust-av img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+
 .staff-detail-profile {
     display: flex;
     flex-wrap: wrap;
