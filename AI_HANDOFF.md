@@ -1,6 +1,57 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-15 session 3 (Staff Profile Image — Upload/Change Photo via existing Cloudinary system; see bottom of file)
+> Last updated: 2026-09-15 session 4 (Parcel KOT — large centered "P" marker; see below)
+
+---
+
+## [AI UPDATE 2026-09-15 session 4] — Parcel KOT: Large Centered "P" Marker
+
+### What Changed
+
+Parcel KOTs now automatically print a large, centered **"P"** between the
+table/time header and the food item list, so kitchen staff can spot a parcel
+order at a glance without a staff member writing "P" on it by hand.
+
+- **Parcel KOTs** (table name contains `"Parcel"`, e.g. `Parcel G`, `Parcel A`) →
+  large centered "P" prints automatically.
+- **Dine-in KOTs** (`Table 4`, `Table 7`, etc.) → completely unchanged, no "P".
+
+### File / Function Changed
+
+`js/cart.js` → `printKOT()` (the single place Parcel/KOT text is generated,
+right after the `Table:` header line is appended to `kotText`). No other KOT,
+billing, order, cart, or printer-transport code was touched.
+
+### How It Works
+
+- Detection reuses the **exact same pattern already used elsewhere in this
+  file** (`js/cart.js` line ~1212, the item-level parcel-toggle visibility
+  check): `getCurrentTable().includes('Parcel')`. No new detection logic was
+  invented.
+- Printing reuses the **exact same raw ESC/POS transport** already used for
+  the existing `BOLD_ON`/`BOLD_OFF` bytes in `printKOT()`
+  (`triggerRawBTPrint` → `rawbt:` URI) — no new printing mechanism was added.
+- Two standard ESC/POS commands are used, both reset immediately after the
+  "P" so the item list below prints exactly as before (left-aligned, normal
+  size): `ESC a 1` (center justification) and `GS ! 0x11` (double height +
+  double width). This is the same class of control byte the file already
+  sends manually, just two additional sequences.
+
+### What Was NOT Changed
+
+KOT numbering, KOT time, table name, item names/qty/prices, existing KOT
+layout otherwise, printer connection, any other ESC/POS commands, billing
+logic, cart logic, parcel *ordering* logic (the separate item-level
+`[PARCEL]` section for dine-in tables — untouched), dine-in KOT output,
+Incoming Orders, Running Orders, Customer system, Expenses, Staff Management.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `js/cart.js` | `printKOT()`: added the Parcel-only large centered "P" block (7 lines) right after the `Table:` line is appended |
+| `sw.js` | Bumped cache `pos-static-v48` → `pos-static-v49` |
+| `AI_HANDOFF.md` | This update |
 
 ---
 

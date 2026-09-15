@@ -1694,6 +1694,23 @@ document.addEventListener('DOMContentLoaded', () => {
         kotText += `Time: ${timeStr}\n`;
         kotText += `Table: ${getDisplayTitle()}\n\n`;
 
+        // AI UPDATE [2026-09-15]: Large centered "P" marker for Parcel KOTs only.
+        // Purpose: make Parcel KOTs instantly recognisable to kitchen staff without
+        // manually writing "P" with a pen (see AI_HANDOFF.md for full note).
+        // Reuses the SAME raw ESC/POS transport already used for BOLD_ON/BOLD_OFF
+        // above (triggerRawBTPrint / rawbt: URI) — no new printing mechanism.
+        // ESC a 1  = center justification | GS ! 0x11 = double height + double width
+        // Both are reset immediately after the "P" so the item list below prints
+        // exactly as it always has (left-aligned, normal size) — no overflow risk.
+        const _isParcelKOT = getCurrentTable().includes('Parcel');
+        if (_isParcelKOT) {
+            const ESC_CENTER     = '\x1B\x61\x01'; // center justification
+            const ESC_LEFT       = '\x1B\x61\x00'; // restore left justification
+            const GS_DOUBLE_SIZE = '\x1D\x21\x11'; // double height + double width
+            const GS_NORMAL_SIZE = '\x1D\x21\x00'; // restore normal text size
+            kotText += ESC_CENTER + GS_DOUBLE_SIZE + 'P' + GS_NORMAL_SIZE + ESC_LEFT + '\n\n';
+        }
+
         // Helper: renders one KOT item with its extras and special request
         const _renderKOTItem = (item) => {
             let s = `${item.name} (${item.printQty})\n`;
