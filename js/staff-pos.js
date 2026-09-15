@@ -38,6 +38,7 @@ const screenList    = document.getElementById('screenList');
 const screenDetail  = document.getElementById('screenDetail');
 const staffListArea = document.getElementById('staffListArea');
 const detailBackBtn = document.getElementById('detailBackBtn');
+const detailPhoto   = document.getElementById('detailPhoto');
 const detailName    = document.getElementById('detailName');
 const detailType    = document.getElementById('detailType');
 const detailDate    = document.getElementById('detailDate');
@@ -97,9 +98,17 @@ async function renderStaffList() {
         const holiday = !!(rec && rec.holiday);
         const advance = rec ? Number(rec.advance) || 0 : 0;
         const initial = (s.name || '?').trim().charAt(0).toUpperCase() || '?';
+        // AI UPDATE [2026-09-15] session 3: staff profile photo. POS only
+        // DISPLAYS the image stored on the staff profile (via staff-shared.js
+        // fetchStaffList) — uploading/changing the photo is Admin-only, per
+        // spec. No image is missing → broken; a staff member with no
+        // profileImageUrl simply falls back to the existing initial avatar.
+        const avatarHtml = s.profileImageUrl
+            ? `<img src="${esc(s.profileImageUrl)}" alt="">`
+            : initial;
         return `
             <div class="staff-row" data-id="${esc(s.id)}">
-                <div class="staff-av">${initial}</div>
+                <div class="staff-av">${avatarHtml}</div>
                 <div class="staff-row-info">
                     <div class="staff-row-name">${esc(s.name || 'Unnamed')}</div>
                     <div class="staff-row-type">${esc(s.workType || '')}</div>
@@ -123,6 +132,12 @@ async function openStaffDetail(staffId) {
     if (!staff) return;
     _selectedStaff = staff;
 
+    if (detailPhoto) {
+        const initial = (staff.name || '?').trim().charAt(0).toUpperCase() || '?';
+        detailPhoto.innerHTML = staff.profileImageUrl
+            ? `<img src="${esc(staff.profileImageUrl)}" alt="">`
+            : `<span class="detail-photo-initial">${esc(initial)}</span>`;
+    }
     detailName.textContent = staff.name || 'Unnamed';
     detailType.textContent = staff.workType || '';
     detailDate.textContent = formatDateLabel(_currentDateKey);

@@ -22,8 +22,13 @@ import { showAlert, showConfirm } from './dialog.js';
 import {
     fetchStaffList, addStaffMember, updateStaffMember, deleteStaffMember,
     fetchAllDailyRecords, filterRecordsInRange, summarizeRecords, formatDateLabel,
-    getDailyRecord, saveDailyRecord
+    getDailyRecord, saveDailyRecord, updateStaffPhoto
 } from './staff-shared.js';
+// AI UPDATE [2026-09-15] session 3: Staff profile photo — reuses the
+// EXISTING Cloudinary unsigned-upload helper (same module js/admin-menu.js
+// uses for category/product images). No second Cloudinary config, no new
+// upload provider.
+import { uploadMenuImage, extractCloudinaryPublicId } from './cloudinary-upload.js';
 
 // ── Module state ────────────────────────────────────────────────────────────
 let _built     = false;
@@ -37,6 +42,7 @@ let _detailMode        = 'all'; // 'all' | 'date' | 'range'
 let _detailDateSel     = '';
 let _detailFrom        = '';
 let _detailTo          = '';
+let _photoUploadBusy   = false; // guards against double-tap / double-select while an upload is in flight
 
 // ── Public exports (called by admin.js) ────────────────────────────────────
 export function initStaffManagement() {
@@ -113,7 +119,9 @@ function _renderList() {
 
     listEl.innerHTML = list.map(s => `
         <div class="bill-card cust-bill-card" data-id="${esc(s.id)}">
-            <div class="cust-av">${esc(_avatarLetter(s.name))}</div>
+            <div class="cust-av">${s.profileImageUrl
+                ? `<img src="${esc(s.profileImageUrl)}" alt="">`
+                : esc(_avatarLetter(s.name))}</div>
             <div class="bill-card-left" style="flex:1;min-width:0;margin-left:2px;">
                 <div class="bill-card-name">${esc(s.name || 'Unnamed')}</div>
                 <div class="bill-card-time">${esc(s.workType || '')}</div>
@@ -266,6 +274,18 @@ function _detailShellHtml(staff) {
                     <button class="modal-close-x" id="stDetailCloseBtn">✕</button>
                 </div>
 
+                <div class="staff-detail-photo-row">
+                    <div class="staff-detail-photo" id="stDetailPhotoBox">
+                        ${staff.profileImageUrl
+                            ? `<img id="stDetailPhotoImg" src="${esc(staff.profileImageUrl)}" alt="">`
+                            : `<span class="staff-detail-photo-initial">${esc(_avatarLetter(staff.name))}</span>`}
+                    </div>
+                    <button class="img-upload-btn" id="stDetailPhotoBtn" type="button">
+                        📤 ${staff.profileImageUrl ? 'Change Photo' : 'Upload Photo'}
+                    </button>
+                    <input type="file" id="stDetailPhotoInput" accept="image/*" hidden>
+                </div>
+
                 <div class="staff-detail-profile">
                     <div class="staff-detail-profile-field">
                         <span class="stat-label">Work Type</span>
@@ -316,6 +336,15 @@ function _wireDetailShell() {
     document.getElementById('stDetailEditBtn').addEventListener('click', () => _openStaffForm(_detailStaff.id));
     document.getElementById('stDetailDeleteBtn').addEventListener('click', () => _confirmDeleteStaff(_detailStaff.id));
 
+    const photoBtn   = document.getElementById('stDetailPhotoBtn');
+    const photoInput = document.getElementById('stDetailPhotoInput');
+    photoBtn.addEventListener('click', () => { if (!_photoUploadBusy) photoInput.click(); });
+    photoInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        e.target.value = ''; // allow re-selecting the same file later
+        if (file) _uploadStaffPhoto(file);
+    });
+
     const dateSel  = document.getElementById('stDetailDateSel');
     const fromSel  = document.getElementById('stDetailFrom');
     const toSel    = document.getElementById('stDetailTo');
@@ -355,6 +384,91 @@ function _updateDetailHeader() {
     const wt = document.getElementById('stDetailWorkType');
     if (h)  h.textContent  = _detailStaff.name || 'Unnamed';
     if (wt) wt.textContent = _detailStaff.workType || '—';
+}
+
+// ── Staff profile photo — upload/change via the EXISTING Cloudinary unsigned
+// upload system (js/cloudinary-upload.js — the same helper js/admin-menu.js
+// uses for category/product images). Persisted immediately on success via
+// staff-shared.js's updateStaffPhoto(), independent of the Add/Edit Staff
+// form — this never touches name/workType/dailyRecords. ──
+async function _uploadStaffPhoto(file) {
+    if (!_detailStaff || _photoUploadBusy) return;
+    _photoUploadBusy = true;
+
+    const box = document.getElementById('stDetailPhotoBox');
+    const btn = document.getElementById('stDetailPhotoBtn');
+    if (btn) btn.disabled = true;
+    const spinner = document.createElement('div');
+    spinner.className = 'img-spinner';
+    box?.appendChild(spinner);
+
+    try {
+        const blob         = await _toWebP(file);
+        const oldPublicId  = _detailStaff.profileImagePublicId || extractCloudinaryPublicId(_detailStaff.profileImageUrl) || null;
+        const result       = await uploadMenuImage(blob, oldPublicId);
+
+        await updateStaffPhoto(_detailStaff.id, { url: result.url, publicId: result.publicId });
+
+        // Update in-memory state so the open Detail overlay AND the card
+        // grid behind it both reflect the new photo immediately, without a
+        // full network refetch.
+        _detailStaff.profileImageUrl       = result.url;
+        _detailStaff.profileImagePublicId  = result.publicId;
+        const listEntry = _staffList.find(s => s.id === _detailStaff.id);
+        if (listEntry) {
+            listEntry.profileImageUrl      = result.url;
+            listEntry.profileImagePublicId = result.publicId;
+        }
+        _refreshDetailPhotoUI();
+        _renderList();
+    } catch (e) {
+        console.error('[staff-admin] staff photo upload failed:', e);
+        await showAlert('Photo upload nahi hua. Internet check karo.', 'error', 'Upload Failed');
+    } finally {
+        _photoUploadBusy = false;
+        if (document.getElementById('stDetailPhotoBtn')) document.getElementById('stDetailPhotoBtn').disabled = false;
+        document.getElementById('stDetailPhotoBox')?.querySelector('.img-spinner')?.remove();
+    }
+}
+
+function _refreshDetailPhotoUI() {
+    const box = document.getElementById('stDetailPhotoBox');
+    const btn = document.getElementById('stDetailPhotoBtn');
+    if (box) {
+        box.innerHTML = _detailStaff.profileImageUrl
+            ? `<img id="stDetailPhotoImg" src="${esc(_detailStaff.profileImageUrl)}" alt="">`
+            : `<span class="staff-detail-photo-initial">${esc(_avatarLetter(_detailStaff.name))}</span>`;
+    }
+    if (btn) btn.textContent = `📤 ${_detailStaff.profileImageUrl ? 'Change Photo' : 'Upload Photo'}`;
+}
+
+// Client-side downscale/convert to WebP before upload — mirrors the private
+// helper of the same name in js/admin-menu.js (kept as a local copy since
+// that one isn't exported; behavior is identical). Falls back to the
+// original file untouched if canvas/WebP isn't available for any reason.
+function _toWebP(file) {
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(file), 10000);
+        const cleanup = (r) => { clearTimeout(timer); resolve(r); };
+        try {
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            img.onload = () => {
+                URL.revokeObjectURL(url);
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth || 1;
+                    canvas.height = img.naturalHeight || 1;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) { cleanup(file); return; }
+                    ctx.drawImage(img, 0, 0);
+                    canvas.toBlob((blob) => cleanup(blob && blob.size > 0 ? blob : file), 'image/webp', 0.85);
+                } catch (_) { cleanup(file); }
+            };
+            img.onerror = () => { URL.revokeObjectURL(url); cleanup(file); };
+            img.src = url;
+        } catch (_) { cleanup(file); }
+    });
 }
 
 function _renderDetailStats() {

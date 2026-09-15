@@ -11,9 +11,18 @@
 //
 // Firestore shape (documented in ARCHITECTURE_LOCK.md §5):
 //   staff/{staffId}
-//     { name, workType, active, joinedAt, createdAt, updatedAt, deletedAt? }
+//     { name, workType, active, joinedAt, createdAt, updatedAt, deletedAt?,
+//       profileImageUrl?, profileImagePublicId? }
 //   staff/{staffId}/dailyRecords/{YYYY-MM-DD}
 //     { date, holiday, advance, note, updatedAt }
+//
+// AI UPDATE [2026-09-15] session 3: Staff profile photo support.
+// profileImageUrl / profileImagePublicId live on the staff/{staffId} PROFILE
+// document only — never inside dailyRecords/{date}. This is permanent
+// staff-profile data (like name/workType), not daily history, so changing a
+// staff member's photo can never affect any daily Holiday/Advance record.
+// Images are uploaded through the EXISTING Cloudinary unsigned-upload system
+// (js/cloudinary-upload.js) — no new upload provider, no new config.
 //
 // ONE STAFF MEMBER + ONE DATE = ONE DAILY RECORD (dailyRecords doc ID is the
 // date key itself, so saveDailyRecord() can never create a second record for
@@ -117,6 +126,22 @@ export async function updateStaffMember(staffId, { name, workType }) {
     await updateDoc(doc(db, STAFF_COL, staffId), {
         name: (name || '').trim(),
         workType: (workType || '').trim(),
+        updatedAt: serverTimestamp(),
+    });
+}
+
+// Set/replace a staff member's profile photo. Kept as its own function
+// (separate from updateStaffMember) so a photo change is a small, isolated
+// write that never touches name/workType, and — just as importantly — an
+// unrelated name/workType edit via updateStaffMember() never touches the
+// photo fields either, since Firestore updateDoc() only writes the keys it
+// is given. The Cloudinary upload itself must already have succeeded before
+// this is called; this function only persists the resulting reference.
+export async function updateStaffPhoto(staffId, { url, publicId }) {
+    await waitForStaffAuth();
+    await updateDoc(doc(db, STAFF_COL, staffId), {
+        profileImageUrl: url || null,
+        profileImagePublicId: publicId || null,
         updatedAt: serverTimestamp(),
     });
 }
