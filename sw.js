@@ -65,10 +65,14 @@
 // AI UPDATE [2026-08-05]: Bumped v42 → v43 — admin-menu.js + customer.html updated (single-price products, optional variant names); js/menu.js + js/menu-management.js variant-name grouping fixes.
 // AI UPDATE [2026-09-14]: v44→v45 to bust cached js/cart.js, js/tables.js and
 // css/style.css after adding per-item KOT timers (see AI_HANDOFF.md).
-const CACHE_NAME = 'pos-static-v45'; const STATIC_ASSETS = [
+// AI UPDATE [2026-09-15]: v45→v46 — new Staff Management feature. Added
+// staff.html, js/staff-shared.js, js/staff-pos.js and updated index.html
+// (new "Staff Management" button) to the pre-cache list.
+const CACHE_NAME = 'pos-static-v46'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
+    '/staff.html',
     '/css/style.css',
     '/js/firebase-config.js',
     '/js/dialog.js',
@@ -79,6 +83,8 @@ const CACHE_NAME = 'pos-static-v45'; const STATIC_ASSETS = [
     '/js/admin.js',
     '/js/expense.js',
     '/js/incoming-orders.js',
+    '/js/staff-shared.js',
+    '/js/staff-pos.js',
     '/manifest.json',
     '/sounds/pop.sfx.mp3',
     '/sounds/cash.sfx.mp3'

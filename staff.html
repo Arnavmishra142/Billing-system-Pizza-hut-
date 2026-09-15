@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Staff Management - New Pizza Hut</title>
+    <!-- AI UPDATE [2026-09-15]: NEW FILE — POS / Manager side of the Staff
+         Management feature. Standalone page (same pattern as expense.html),
+         linked from a new separate button on the POS home screen
+         (index.html). Reads/writes the SAME Firestore staff/{id} +
+         staff/{id}/dailyRecords/{date} documents as the Admin Panel's Staff
+         tab via the shared js/staff-shared.js module — single source of
+         truth, no separate POS-only data. -->
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; }
+        body { background: #0b0c10; color: #e3e6eb; height: 100dvh; overflow: hidden; display: flex; flex-direction: column; }
+
+        .header {
+            background: #12141a; border-bottom: 1px solid #262a33;
+            padding: 14px 16px; display: flex; align-items: center; gap: 14px; flex-shrink: 0;
+        }
+        .back-btn {
+            background: #ef4444; color: #fff; border: none; padding: 9px 15px;
+            border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 0.92rem;
+        }
+        .back-btn:active { transform: scale(0.95); }
+        .header h2 { font-size: 1.15rem; font-weight: 800; }
+
+        .date-bar {
+            display: flex; align-items: center; justify-content: center; gap: 14px;
+            padding: 14px 16px; flex-shrink: 0;
+        }
+        .date-nav-btn {
+            width: 38px; height: 38px; border-radius: 50%; border: 1px solid #30363d;
+            background: #161b22; color: #e6edf3; font-size: 1.1rem; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .date-nav-btn:active { transform: scale(0.9); }
+        .date-nav-btn:disabled { opacity: 0.35; cursor: default; }
+        .date-label { font-size: 1.05rem; font-weight: 800; color: #58a6ff; min-width: 150px; text-align: center; }
+        .date-today-pill {
+            font-size: 0.72rem; font-weight: 700; color: #3fb950; background: rgba(63,185,80,0.12);
+            border: 1px solid rgba(63,185,80,0.35); border-radius: 20px; padding: 3px 10px; margin-left: 2px;
+        }
+
+        .container { flex-grow: 1; overflow-y: auto; padding: 0 16px 24px; max-width: 640px; margin: 0 auto; width: 100%; }
+
+        /* ── Staff list (screen 1) ── */
+        .staff-row {
+            display: flex; align-items: center; gap: 14px; background: #161b22;
+            border: 1px solid #30363d; border-radius: 12px; padding: 14px; margin-bottom: 10px;
+            cursor: pointer; -webkit-tap-highlight-color: transparent; transition: border-color 0.15s;
+        }
+        .staff-row:active { transform: scale(0.985); }
+        .staff-row:hover { border-color: #388bfd; }
+        .staff-av {
+            width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+            background: linear-gradient(135deg, #1f6feb, #388bfd); color: #fff;
+            display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.15rem;
+        }
+        .staff-row-info { flex: 1; min-width: 0; }
+        .staff-row-name { font-weight: 700; font-size: 1rem; color: #e6edf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .staff-row-type { font-size: 0.82rem; color: #8b949e; margin-top: 2px; }
+        .staff-row-status { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+        .status-pill { font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 20px; white-space: nowrap; }
+        .status-pill.off  { background: rgba(139,148,158,0.12); color: #8b949e; border: 1px solid #30363d; }
+        .status-pill.on   { background: rgba(240,136,62,0.15); color: #f0883e; border: 1px solid rgba(240,136,62,0.4); }
+        .status-advance   { font-size: 0.82rem; font-weight: 700; color: #3fb950; }
+
+        .empty-state, .loading-state { text-align: center; color: #8b949e; padding: 40px 16px; font-size: 0.95rem; }
+
+        /* ── Staff daily record (screen 2) ── */
+        #screenDetail { display: none; }
+        #screenDetail.active { display: block; }
+        #screenList.hidden { display: none; }
+
+        .detail-name-card {
+            background: #161b22; border: 1px solid #30363d; border-radius: 14px;
+            padding: 18px; margin: 4px 0 18px; text-align: center;
+        }
+        .detail-name-card .name { font-size: 1.25rem; font-weight: 800; color: #e6edf3; }
+        .detail-name-card .type { font-size: 0.85rem; color: #8b949e; margin-top: 2px; }
+
+        .field-card { background: #161b22; border: 1px solid #30363d; border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+        .field-label { font-size: 0.78rem; font-weight: 700; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; display: block; }
+
+        .holiday-toggle-row { display: flex; gap: 10px; }
+        .holiday-btn {
+            flex: 1; padding: 12px; border-radius: 10px; border: 1.5px solid #30363d;
+            background: #0d1117; color: #8b949e; font-weight: 800; font-size: 0.95rem; cursor: pointer;
+        }
+        .holiday-btn.active-off { background: #21262d; border-color: #3fb950; color: #3fb950; }
+        .holiday-btn.active-on  { background: rgba(240,136,62,0.15); border-color: #f0883e; color: #f0883e; }
+
+        .field-card input[type="number"],
+        .field-card input[type="text"] {
+            width: 100%; padding: 12px 14px; background: #0d1117; border: 1.5px solid #30363d;
+            border-radius: 10px; color: #e6edf3; font-size: 1rem; outline: none;
+        }
+        .field-card input:focus { border-color: #58a6ff; }
+
+        .save-btn {
+            width: 100%; padding: 15px; background: #238636; color: #fff; border: none;
+            border-radius: 10px; font-size: 1.05rem; font-weight: 800; cursor: pointer; margin-top: 4px;
+        }
+        .save-btn:active { transform: scale(0.98); }
+        .save-btn:disabled { opacity: 0.6; }
+        .detail-back-btn {
+            width: 100%; padding: 12px; background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+            border-radius: 10px; font-size: 0.95rem; font-weight: 700; cursor: pointer; margin-bottom: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <button class="back-btn" onclick="window.location.href='index.html'">⬅ Back</button>
+        <h2>👥 Staff Management</h2>
+    </div>
+
+    <div class="date-bar">
+        <button class="date-nav-btn" id="prevDayBtn" title="Previous day">◀</button>
+        <span class="date-label" id="dateLabel">…</span>
+        <button class="date-nav-btn" id="nextDayBtn" title="Next day">▶</button>
+    </div>
+
+    <div class="container">
+        <!-- ══ SCREEN 1: STAFF LIST ══ -->
+        <div id="screenList">
+            <div id="staffListArea"><div class="loading-state">Loading staff… ⏳</div></div>
+        </div>
+
+        <!-- ══ SCREEN 2: DAILY RECORD ══ -->
+        <div id="screenDetail">
+            <button class="detail-back-btn" id="detailBackBtn">← Back to Staff List</button>
+
+            <div class="detail-name-card">
+                <div class="name" id="detailName">—</div>
+                <div class="type" id="detailType">—</div>
+                <div class="type" id="detailDate">—</div>
+            </div>
+
+            <div class="field-card">
+                <span class="field-label">Holiday</span>
+                <div class="holiday-toggle-row">
+                    <button class="holiday-btn" id="holidayOffBtn" type="button">OFF</button>
+                    <button class="holiday-btn" id="holidayOnBtn" type="button">ON</button>
+                </div>
+            </div>
+
+            <div class="field-card">
+                <span class="field-label">Advance (₹)</span>
+                <input type="number" id="advanceInput" placeholder="0" inputmode="numeric" autocomplete="off">
+            </div>
+
+            <div class="field-card">
+                <span class="field-label">Note (optional)</span>
+                <input type="text" id="noteInput" placeholder="e.g. Personal emergency" autocomplete="off">
+            </div>
+
+            <button class="save-btn" id="saveRecordBtn">💾 Save</button>
+        </div>
+    </div>
+
+    <script type="module" src="js/staff-pos.js"></script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-13 (Admin Panel — Customer Filter + Sort panel)
+> Last updated: 2026-09-15 (Staff Management — POS + Admin Panel, see bottom of file)
 
 ---
 
@@ -5311,3 +5311,185 @@ Static/logic verification in this environment (no live browser/Firebase availabl
   reading `itemMeta.<id>.kotAt` back into the local cart instead of using a local
   `Date.now()` stamp — a larger change, out of scope here since the task only asked for a
   POS-side display and explicitly said not to touch the frozen overall-timer/KOT systems.
+
+---
+
+## [AI UPDATE 2026-09-15] — Staff Management (POS + Admin Panel)
+
+### What Was Built
+
+A complete Staff Management feature with two access points that share one Firestore source of truth:
+
+1. **POS / Manager screen** — a new, separate **"Staff Management"** button on the POS
+   home grid (`index.html`), opening a new standalone page `staff.html`. It is
+   date-based: it shows today's date by default (with simple ◀ / ▶ day navigation, capped
+   so it can never move into the future), lists every staff member added from the Admin
+   Panel, and lets the manager tap a staff member to view/edit that **specific date's**
+   daily record — Holiday ON/OFF, Advance (₹), and an optional Note.
+2. **Admin Panel** — a new **"Staff"** tab in the bottom nav (`admin/index.html`) backed
+   by `js/staff-admin.js`. Admin can add/edit/delete staff, open a staff member's full
+   profile + complete daily-record history, filter that history by a particular date or
+   by a From/To date range, and see All-Time and selected-range totals (Total Advance,
+   Holiday Days).
+
+**Single source of truth:** both sides import every Firestore read/write from one new
+shared module, `js/staff-shared.js` — there is no `adminStaff`/`posStaff` split. A daily
+record saved from the POS immediately shows up in the Admin Panel's history for that
+staff member, and vice versa (both simply call the same `getDailyRecord`/
+`saveDailyRecord` functions against the same documents).
+
+### Firestore Data Structure (new — see `ARCHITECTURE_LOCK.md` §5 for full field list)
+
+```
+staff/{staffId}
+    { name, workType, active, joinedAt, createdAt, updatedAt, deletedAt? }
+
+staff/{staffId}/dailyRecords/{YYYY-MM-DD}
+    { date, holiday, advance, note, updatedAt }
+```
+
+- **Date-wise storage:** the daily record's document ID *is* the date key
+  (local calendar date, not UTC), so "one staff + one date = one daily record" is
+  enforced structurally — saving 15 Sep can never overwrite or create a duplicate for
+  14 Sep or 16 Sep. `saveDailyRecord()` uses `setDoc(..., {merge:true})` against
+  `staff/{id}/dailyRecords/{date}`.
+- **New day starts fresh:** a date with no saved record simply has no document. The UI
+  (both POS and Admin) treats a missing record as defaults (Holiday OFF, Advance 0,
+  Note empty) and never auto-copies the previous day's values, and never pre-creates
+  empty documents for dates that were never touched.
+- **Holiday handling:** boolean `holiday` field on the daily record, toggled via two
+  buttons (OFF/ON) in the POS detail screen; independent per date by construction.
+- **Advance handling:** numeric `advance` field (₹), defaults to 0 if left blank.
+- **Advance note:** optional `note` string field on the same daily record document —
+  never a separate collection/document.
+- **Date-range history/filtering + Total advance + Holiday count (Admin only):**
+  `js/staff-shared.js` exposes `fetchAllDailyRecords(staffId)` (full history, one
+  `getDocs` per staff — small dataset at restaurant scale, so no composite index is
+  needed), `filterRecordsInRange(records, from, to)` (pure client-side string-range
+  filter — date keys are zero-padded `YYYY-MM-DD`, so lexical compare == chronological
+  compare), and `summarizeRecords(records)` (returns `{holidayDays, totalAdvance,
+  count}`). The Admin detail overlay uses these for both the "All-Time" stat cards and
+  the "Selected Range" summary box, so the two totals can never drift out of sync with
+  the underlying daily documents — they're computed from the same array, not stored
+  redundantly.
+
+### Staff Deletion — Soft Delete (deliberate design decision)
+
+The task spec explicitly warned against destroying historical records on delete. Per
+the existing `active` soft-hide convention already used elsewhere in this app (menu
+items/products), `deleteStaffMember(staffId)` sets `active:false` + `deletedAt` on the
+staff profile document. The profile and its full `dailyRecords` subcollection are left
+completely intact in Firestore — only `fetchStaffList()`'s default filter
+(`includeInactive:false`) hides the staff member from both the POS and Admin lists.
+Editing a staff member's name/work type is a plain `updateDoc` on the same document ID,
+so historical daily records (which key off `staffId`, never off name) are never
+disturbed by a rename.
+
+### Authentication / Authorization
+
+Reused the existing anonymous-auth bootstrap pattern (`signInAnonymously` +
+`onAuthStateChanged` queue) already used by `expense.js`/`customers.js`/
+`admin-menu.js` — no new auth system. Firestore rules (`firestore.rules`) restrict both
+`staff/{staffId}` and its `dailyRecords` subcollection to `isOperator()` only — the
+exact same pattern already used for `daily_expenses`. Customers cannot read staff
+names, Holiday status, Advances, or Notes at any layer (no customer-panel code path
+references the `staff` collection at all).
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `js/staff-shared.js` | Single Firestore data layer (CRUD + date helpers + aggregation) used by both POS and Admin |
+| `staff.html` | POS / Manager standalone page (dark theme, date bar + staff list + daily-record detail screen) |
+| `js/staff-pos.js` | POS page logic — imports only from `staff-shared.js` |
+| `js/staff-admin.js` | Admin Panel "Staff" tab — list, Add/Edit modal, Detail/History overlay with date & range filters |
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `index.html` | Added one new, separate "Staff Management" button to the POS home grid (linking to `staff.html`). No existing buttons touched/reordered/redesigned. |
+| `admin/index.html` | Added `#staffSection`/`#staffCardGrid` container + a new "Staff" bottom-nav button. All content inside the section is rendered by `js/staff-admin.js` (same pattern as the existing `#menuCardGrid`/`js/admin-menu.js`), so no other markup was added here. |
+| `js/admin.js` | Imported `initStaffManagement` from `js/staff-admin.js`; added `if (tabName === 'staff') initStaffManagement();` to `switchTab()`. No other tab logic touched. Bumped its own cache-busting query string `?v=22 → ?v=23` in `admin/index.html`'s script tag. |
+| `css/admin.css` | Appended a small new "STAFF MANAGEMENT" section (profile row, range-summary box, history row, small status pill) — everything else in the Admin Staff UI reuses existing classes (`bill-card`, `cust-av`, `stat-card`, `modal-*`, `form-group`, `filter-pill`, `date-pill`, `btn*`) unchanged. |
+| `firestore.rules` | Added `match /staff/{staffId} { ... match /dailyRecords/{dateId} { ... } }` block, `isOperator()`-only, mirroring `daily_expenses`. No existing rule changed. |
+| `sw.js` | Bumped `pos-static-v45 → pos-static-v46`; added `/staff.html`, `/js/staff-shared.js`, `/js/staff-pos.js` to `STATIC_ASSETS`. |
+| `admin/sw.js` | Bumped `admin-pos-v10 → admin-pos-v11` (network-first fetch strategy means `js/staff-admin.js`/`js/staff-shared.js` don't need to be added to `PRECACHE` — same as `js/admin-menu.js`/`js/customers.js`, which also aren't precached today). |
+| `ARCHITECTURE_LOCK.md` | Added `staff/{staffId}` and `staff/{staffId}/dailyRecords/{date}` to §5 Database Contract, and `js/staff-shared.js` + `js/staff-admin.js` public APIs to §6 Public Interfaces. |
+
+### Explicitly NOT Implemented (per task scope)
+
+- ✗ **Expenses → Advance** — the staff Advance field is a plain field on the staff daily
+  record only. It is not written to `expenses`/`daily_expenses`, does not appear in the
+  Admin Expenses tab, and does not affect any expense total.
+- ✗ **Expenses → Credit/Udhari** — not touched, not referenced.
+- ✗ **Customer Credit** — not touched.
+- ✗ Any redesign of existing POS buttons/screens, Admin sections, billing, cart, tables,
+  customer handling, online orders, incoming/running orders, coupons, or sales history —
+  none of that code was read-write touched beyond the two additive lines in
+  `js/admin.js`'s `switchTab()` and the one new button in `index.html`.
+
+### Testing Performed
+
+- `node --check` passed on all three new JS files (`staff-shared.js`, `staff-pos.js`,
+  `staff-admin.js`) — no syntax errors.
+- Verified `<div>` open/close tag counts balance in `staff.html`, `index.html`, and
+  `admin/index.html` after edits.
+- Manually traced the task's example scenarios against the code:
+  - Dilkusha: 15 Sep (Holiday OFF, ₹500 advance) / 14 Sep (Holiday ON, ₹0) / 13 Sep
+    (Holiday OFF, ₹300) — confirmed each is a distinct `dailyRecords` doc keyed by its
+    own date string, and `saveDailyRecord` for one date's `setDoc(merge:true)` call
+    cannot touch a sibling date's document.
+  - Confirmed `fetchStaffList()`'s `active !== false` filter means a freshly
+    `addStaffMember()`'d staff member (which sets `active:true`) appears in both the POS
+    list and the Admin list immediately, with no separate "publish" step.
+  - Confirmed editing a staff member's Work Type (`updateStaffMember`) only touches the
+    `staff/{id}` profile document — never any `dailyRecords/*` document — so historical
+    records remain associated with the same staff member/ID across a rename.
+  - Confirmed `deleteStaffMember()` only sets two fields (`active`, `deletedAt`) on the
+    profile document; it issues no `deleteDoc` call anywhere, so customers/orders/sales/
+    billing/expenses/coupons/online orders are structurally unreachable from this code
+    path.
+
+**Still to be tested against a live Firebase project / real devices (could not run a
+live browser or deploy Firestore rules in this environment):**
+1. Deploy `firestore.rules` and confirm `isOperator()` actually grants read/write to a
+   real signed-in operator session and denies an anonymous customer-panel session, per
+   the existing rules test process for this project.
+2. Live cross-panel consistency check: save a daily record from `staff.html` on a real
+   device, then open the Admin "Staff" tab on another device/tab and confirm the same
+   record appears (and vice versa) — this is guaranteed by construction (single shared
+   module, single Firestore path) but has not been observed running against a live
+   Firestore project in this session.
+3. Visual/tablet check of `staff.html` and the Admin Staff tab's Detail overlay on an
+   actual tablet screen size, to confirm no clipping/overlap (built to match existing
+   dark-theme conventions and existing responsive CSS classes, but not visually
+   rendered in this environment).
+4. Confirm the service worker actually serves `pos-static-v46` / `admin-pos-v11` (not a
+   stale prior version) after deploy, per the existing network-first + versioned-cache
+   pattern used throughout this app.
+
+## Important information for a future AI agent
+
+- **`js/staff-shared.js` is the only file allowed to read/write the `staff` collection.**
+  If you need to add a new Staff Management capability, add a function there and import
+  it from both `js/staff-pos.js` and `js/staff-admin.js` as needed — do not query
+  `staff/*` directly from either UI module, or you will reintroduce the
+  "adminStaff/posStaff split" the original task explicitly forbade.
+- Daily record document IDs are local-calendar `YYYY-MM-DD` strings (see `dateKey()` in
+  `js/staff-shared.js`) — deliberately *not* UTC, so a manager working near midnight
+  lands on the day they mean. If a future change ever needs UTC-based reporting
+  (e.g. matching a server cron job), do the conversion at the display/report layer, not
+  by changing the document ID format, since the ID format is depended on by
+  `filterRecordsInRange()`'s lexical string comparison.
+- Staff deletion is soft (`active:false`) by design, not a `deleteDoc`. If a future
+  session is asked to add a "permanently erase staff + all history" capability, that is
+  a new, separate, explicitly-scoped feature — do not change `deleteStaffMember()`'s
+  existing behavior to do this by default, since the current Admin/POS lists and this
+  document both assume deleted-but-recoverable history.
+- The Advance field on a staff daily record is intentionally NOT wired into
+  `expenses`/`daily_expenses` yet. When "Expenses → Advance" is implemented in a future
+  session (explicitly out of scope for this one), decide then whether it reads from
+  `staff/{id}/dailyRecords/{date}.advance` as a source, or maintains its own entry — do
+  not assume the two need to be merged into one write path without re-reading this
+  section and `ARCHITECTURE_LOCK.md` §5 first.
