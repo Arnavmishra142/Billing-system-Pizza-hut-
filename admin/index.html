@@ -216,10 +216,22 @@
 
         </div><!-- /expenseSection -->
 
+        <!-- ══ STAFF SECTION ══ -->
+        <!-- AI UPDATE [2026-09-15]: NEW — Staff Management. Section is fully
+             managed by js/staff-admin.js, which renders into #staffCardGrid
+             (list + Add/Edit + Detail/History overlays), mirroring the
+             #menuCardGrid / js/admin-menu.js pattern above. Reads/writes the
+             SAME Firestore staff/{id} docs as the POS staff.html page via the
+             shared js/staff-shared.js module. -->
+        <div id="staffSection" class="section">
+            <div id="staffCardGrid"></div>
+        </div><!-- /staffSection -->
+
     </main>
 
     <!-- BOTTOM NAV -->
     <!-- AI UPDATE [2026-07-29] session 15: Added Customers tab -->
+    <!-- AI UPDATE [2026-09-15]: Added Staff tab -->
     <nav class="bottom-nav">
         <button class="bnav-btn active" id="bnav-sales" onclick="switchTab('sales', this)">
             <span class="bnav-icon">📊</span>
@@ -236,6 +248,10 @@
         <button class="bnav-btn" id="bnav-expense" onclick="switchTab('expense', this)">
             <span class="bnav-icon">📉</span>
             <span class="bnav-label">Expenses</span>
+        </button>
+        <button class="bnav-btn" id="bnav-staff" onclick="switchTab('staff', this)">
+            <span class="bnav-icon">🧑‍🍳</span>
+            <span class="bnav-label">Staff</span>
         </button>
     </nav>
 
@@ -503,7 +519,7 @@
     </div>
 </div>
 
-<script type="module" src="../js/admin.js?v=22"></script>
+<script type="module" src="../js/admin.js?v=23"></script>
 <script type="module" src="../js/customers.js?v=3"></script>
 
 <!-- ── SMART AI MANAGER ── -->

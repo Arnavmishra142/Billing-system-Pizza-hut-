@@ -16,7 +16,12 @@
 // (saveItemBtn / toggleStock / deleteMenuItem now wait for auth.currentUser).
 // AI UPDATE [2026-09-13]: v9→v10 — bust cached admin/index.html, css/admin.css
 // and js/customers.js after adding the Customer Filter + Sort panel.
-const CACHE = 'admin-pos-v10';
+// AI UPDATE [2026-09-15]: v10→v11 — bust cached admin/index.html, css/admin.css
+// and js/admin.js after adding the Staff Management feature (new "Staff" tab,
+// js/staff-admin.js + js/staff-shared.js — not precached here, same as
+// js/admin-menu.js/js/customers.js above, since network-first always fetches
+// fresh module code first anyway).
+const CACHE = 'admin-pos-v11';
 const PRECACHE = [
     '/admin/index.html',
     '/css/admin.css',

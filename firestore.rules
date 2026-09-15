@@ -204,6 +204,20 @@ service cloud.firestore {
     match /expenses/{docId}       { allow read, write: if isOperator(); }
     match /daily_expenses/{docId} { allow read, write: if isOperator(); }
 
+    // ── staff / staff daily records — AI UPDATE [2026-09-15] ───────────────────
+    // Staff Management feature (POS staff.html + Admin "Staff" tab, both via
+    // js/staff-shared.js — single source of truth, no adminStaff/posStaff
+    // split). Staff profiles + Holiday/Advance history are private business
+    // data: same isOperator()-only pattern as daily_expenses above. Customers
+    // must never be able to read staff names, holiday status, or advances.
+    match /staff/{staffId} {
+      allow read, write: if isOperator();
+
+      match /dailyRecords/{dateId} {
+        allow read, write: if isOperator();
+      }
+    }
+
     // ── customer_order_history ────────────────────────────────────────────────
     // Written by the billing panel (operator) when Bill & Settle / Save & Exit
     // completes an order that originated from the Customer Panel.

@@ -365,6 +365,47 @@ When this document does not exist, Customer Panel defaults to **ON** (backward c
 }
 ```
 
+#### `staff/{staffId}` — Staff profiles (added 2026-09-15)
+Single source of truth for the Staff Management feature. Read/written by
+BOTH the POS Staff Management page (`staff.html` + `js/staff-pos.js`) and
+the Admin Panel "Staff" tab (`js/staff-admin.js`), exclusively through the
+shared data layer `js/staff-shared.js`. There is no separate
+`adminStaff`/`posStaff` collection.
+```
+{
+  name:      string
+  workType:  string          // e.g. "Waiter", "Chef", "Manager"
+  active:    boolean         // false = soft-deleted (hidden from POS/Admin lists)
+  joinedAt:  Timestamp
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  deletedAt: Timestamp       // present only if active === false
+}
+```
+Deletion is a SOFT delete (`active: false`) — the profile document and its
+full `dailyRecords` history are never physically removed, so historical
+Holiday/Advance business data survives staff turnover (per explicit task
+requirement — do not destroy history on delete).
+
+#### `staff/{staffId}/dailyRecords/{YYYY-MM-DD}` — One record per staff per date (added 2026-09-15)
+Doc ID IS the local calendar date key, which guarantees "one staff + one
+date = one daily record": saving a date can never create a duplicate for
+that date and can never modify any other date's document.
+```
+{
+  date:      string          // "2026-09-15" (redundant copy of the doc ID, for query convenience)
+  holiday:   boolean
+  advance:   number          // ₹ amount, 0 if none
+  note:      string          // optional advance note, "" if none
+  updatedAt: Timestamp
+}
+```
+Only dates that were actually saved from the UI have a document — no
+document is pre-created for every date. Security: `firestore.rules`
+restricts both `staff/{staffId}` and its `dailyRecords` subcollection to
+`isOperator()` only (same pattern as `daily_expenses` above) — customers
+can never read staff data.
+
 ---
 
 ## 6. Public Interfaces
@@ -386,6 +427,33 @@ export function initMenuManagement()    // Called by admin.js when Menu tab is o
 export function destroyMenuManagement() // Called by admin.js when Menu tab is closed
 ```
 These are called from `js/admin.js`. Changing their signatures breaks the admin panel.
+
+### `js/staff-shared.js` — Staff Management shared data layer (added 2026-09-15)
+**This is the single source of truth for staff data.** Both `js/staff-pos.js`
+(POS `staff.html`) and `js/staff-admin.js` (Admin "Staff" tab) import
+exclusively from this file for all Firestore reads/writes — neither module
+may talk to `staff/*` directly. Do not create a second staff data module.
+```js
+export function dateKey(d)                                  // Date -> "YYYY-MM-DD" (local, not UTC)
+export function formatDateLabel(key)                        // "2026-09-15" -> "15 Sep 2026"
+export function addDaysToKey(key, delta)
+export function fetchStaffList({ includeInactive })
+export function getStaffMember(staffId)
+export function addStaffMember({ name, workType })
+export function updateStaffMember(staffId, { name, workType })
+export function deleteStaffMember(staffId)                  // soft delete (active:false)
+export function getDailyRecord(staffId, key)
+export function saveDailyRecord(staffId, key, { holiday, advance, note })
+export function fetchAllDailyRecords(staffId)
+export function filterRecordsInRange(records, fromKey, toKey)
+export function summarizeRecords(records)                   // { holidayDays, totalAdvance, count }
+```
+
+### `js/staff-admin.js` — Staff Management (Admin Panel) public API
+```js
+export function initStaffManagement()    // Called by admin.js when Staff tab is opened
+export function destroyStaffManagement() // No-op today (no live listeners); kept for interface parity
+```
 
 ### `js/cart.js` — Key internal functions (called cross-module)
 ```js

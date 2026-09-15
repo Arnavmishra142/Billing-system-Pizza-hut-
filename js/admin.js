@@ -11,6 +11,8 @@ import { uploadMenuImage, deleteMenuImage, extractCloudinaryPublicId } from './c
 // AI UPDATE [2026-08-03]: New hierarchical menu management module.
 // Replaces the flat loadMenuData() / renderMenuCards() / editMenuItem() flow.
 import { initAdminMenu, destroyAdminMenu } from './admin-menu.js';
+// AI UPDATE [2026-09-15]: New Staff Management admin module (Staff tab).
+import { initStaffManagement } from './staff-admin.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
     getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot,
@@ -147,6 +149,9 @@ window.switchTab = function(tabName, navBtn) {
     // the Firestore IndexedDB cache (which already reflects the increment() write
     // from syncCustomerOrderCompletion via persistentMultipleTabManager).
     if (tabName === 'customers') refreshCustomerManagement();
+    // AI UPDATE [2026-09-15]: Staff Management tab — always re-fetches the
+    // staff list on open (small dataset), same as the Sales tab above.
+    if (tabName === 'staff') initStaffManagement();
 };
 
 // ==========================================
