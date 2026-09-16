@@ -135,6 +135,40 @@ const LOYALTY_MIN_REDEEM = 200;
 // coupon section itself becomes usable at all (strict >, see note above).
 const COUPON_SECTION_MIN_SUBTOTAL = 200;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AI UPDATE [2026-09-16]: EDIT HISTORY — order-edit-mode helpers
+//
+// "Edit History" (admin/index.html Sales tab → js/order-edit.js) reopens an
+// already-completed sales_history record in this SAME POS cart under a
+// synthetic, per-order table name ("EditOrder_<saleId>") so the existing
+// cart UI, KOT, and coupon logic all work completely unmodified. The ONLY
+// thing that changes is what happens at Bill & Settle / Save & Exit time:
+// instead of creating a brand-new sales_history / customer_order_history
+// record, the existing ones (same document ID) are updated in place, and
+// customer lifetime-spend is adjusted by the DELTA rather than re-added in
+// full — see the edit-mode branches inside the Bill & Settle / Save & Exit
+// handlers and inside syncCustomerOrderCompletion() / syncManualCustomerProfile()
+// below. This is additive only — every existing (non-edit) code path is
+// byte-for-byte unchanged when no edit-mode flag is present for the slot.
+//
+// Flag shape (localStorage, key: editingOrder_<table>_<slot>):
+//   { orderId: string, originalTotal: number }
+// Written by js/order-edit.js when it loads a sales_history record into the
+// cart; read here; cleared here once the edit is actually settled/saved.
+// ═══════════════════════════════════════════════════════════════════════════
+function _editModeKey(tableName, customerSlot) {
+    return `editingOrder_${tableName}_${customerSlot}`;
+}
+function _getEditMode(tableName, customerSlot) {
+    try {
+        const raw = localStorage.getItem(_editModeKey(tableName, customerSlot));
+        return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+}
+function _clearEditMode(tableName, customerSlot) {
+    localStorage.removeItem(_editModeKey(tableName, customerSlot));
+}
+
 async function _maybeIssueLoyaltyCoupon(phone, name) {
     if (!phone) return;
     try {
@@ -229,7 +263,17 @@ async function _lookupManualCustomerByPhone(rawTenDigitPhone) {
 // No-op if no phone was given (walk-in with no details, or name-only — see
 // requirement 5: a name alone is printed on the bill but does not create or
 // touch any customer profile, since phone is this app's customer key).
-async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tableName, completionReason, cartSnapshot) {
+// AI UPDATE [2026-09-16]: Added optional trailing orderIdOverride/editContext
+// params for the Edit History feature. orderIdOverride, when passed, makes
+// this function reuse an EXISTING customer_order_history doc ID (the shared
+// order ID also used as the sales_history doc ID) instead of minting a new
+// ORDER_<timestamp> — this is what links the two records and lets an edit
+// update the same history entry instead of creating a duplicate. editContext
+// = { previousTotal } signals an edit: lifetimeSpend is adjusted by the
+// DELTA (new total − previous total) instead of the full total, and
+// totalOrders is NOT incremented again. Both params are no-ops (existing
+// behavior, fully unchanged) when omitted — i.e. every normal, non-edit bill.
+async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tableName, completionReason, cartSnapshot, orderIdOverride = null, editContext = null) {
     if (!rawPhone) return;
     const phone = rawPhone.startsWith('+91') ? rawPhone : `+91${rawPhone}`;
 
@@ -268,7 +312,9 @@ async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tabl
         }
 
         if (cartSnapshot.length > 0) {
-            const historyId = `ORDER_${Date.now()}`;
+            // AI UPDATE [2026-09-16]: reuse the shared order ID on an edit (setDoc+
+            // merge on the SAME doc = update-in-place, never a duplicate history entry).
+            const historyId = orderIdOverride || `ORDER_${Date.now()}`;
             await setDoc(
                 doc(db, 'customer_order_history', resolvedUid, 'orders', historyId),
                 {
@@ -293,16 +339,20 @@ async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tabl
                     completedAt:      serverTimestamp(),
                     completionReason, // 'bill_settle' | 'save_exit'
                     orderedAt:        new Date().toISOString(),
-                }
+                    // AI UPDATE [2026-09-16] Edit History audit trail (absent on first save).
+                    ...(editContext ? { isEdited: true, editedAt: serverTimestamp() } : {}),
+                },
+                { merge: true }
             );
         }
 
-        // Same atomic stats update every QR completion already uses.
-        await updateDoc(ref, {
-            totalOrders:   increment(1),
-            lifetimeSpend: increment(+total.toFixed(2)),
-            lastOrderAt:   serverTimestamp(),
-        });
+        // AI UPDATE [2026-09-16]: on an edit, add only the DELTA to lifetimeSpend and
+        // do NOT increment totalOrders again — this order was already counted once,
+        // when it was first completed. Non-edit path is byte-for-byte unchanged.
+        const _statsUpdate = editContext
+            ? { lifetimeSpend: increment(+(total - editContext.previousTotal).toFixed(2)), lastOrderAt: serverTimestamp() }
+            : { totalOrders: increment(1), lifetimeSpend: increment(+total.toFixed(2)), lastOrderAt: serverTimestamp() };
+        await updateDoc(ref, _statsUpdate);
 
         // A manual customer who crosses the loyalty milestone earns the same
         // reward a QR customer would — reuses the existing check as-is.
@@ -364,7 +414,11 @@ async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tabl
 // Added optional billNumber parameter (passed from Bill & Settle shortOrderId).
 // After writing history, also updates customers/{phone} stats atomically using
 // increment() so the admin CRM can read pre-computed totals without re-scanning history.
-async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot, total, completionReason, billNumber = null) {
+// AI UPDATE [2026-09-16]: Added optional trailing orderIdOverride/editContext
+// params for the Edit History feature — same purpose/behavior as the matching
+// params on syncManualCustomerProfile() above (see that comment). No-ops when
+// omitted, so every normal completion is completely unaffected.
+async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot, total, completionReason, billNumber = null, orderIdOverride = null, editContext = null) {
     // AI UPDATE [2026-09-13]: slot-scoped key suffix — see header comment above.
     const _slotSuffix = `${tableName}_${customerSlot}`;
 
@@ -422,6 +476,14 @@ async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot
             const cust    = _firstDoc.data().customer || {};
             customerName  = cust.name  || '';
             customerPhone = cust.phone || '';
+        } else {
+            // AI UPDATE [2026-09-16] Edit History: reopening a previously-completed
+            // QR order has no fresh pending_table_orders doc to read identity from
+            // (it was already marked 'completed' the first time). Fall back to the
+            // same customerName_/customerPhone_ badge keys the cart UI already reads
+            // — js/order-edit.js sets these when it loads the order for editing.
+            customerName  = localStorage.getItem(`customerName_${_slotSuffix}`)  || '';
+            customerPhone = localStorage.getItem(`customerPhone_${_slotSuffix}`) || '';
         }
 
         // Mark ONLY the imported orders as 'completed'.
@@ -444,7 +506,9 @@ async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot
 
         // ── Step 2: Write a permanent record to the customer's order history ───
         if (cartSnapshot.length > 0) {
-            const historyId = `ORDER_${Date.now()}`;
+            // AI UPDATE [2026-09-16]: reuse the shared order ID on an edit — see
+            // syncManualCustomerProfile() header comment above for why.
+            const historyId = orderIdOverride || `ORDER_${Date.now()}`;
             await setDoc(
                 doc(db, 'customer_order_history', customerUid, 'orders', historyId),
                 {
@@ -470,7 +534,10 @@ async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot
                     completedAt:      serverTimestamp(),
                     completionReason,          // 'bill_settle' | 'save_exit'
                     orderedAt:        new Date().toISOString(),
-                }
+                    // AI UPDATE [2026-09-16] Edit History audit trail (absent on first save).
+                    ...(editContext ? { isEdited: true, editedAt: serverTimestamp() } : {}),
+                },
+                { merge: true }
             );
 
             // ── Step 2b: Update pre-computed stats on the customer profile ───────
@@ -478,12 +545,14 @@ async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot
             // The customers/{phone} profile is guaranteed to exist at this point
             // because the customer must have registered before placing an order.
             // Non-blocking — billing is already complete by this step.
+            // AI UPDATE [2026-09-16]: on an edit, add only the DELTA to lifetimeSpend
+            // and do NOT increment totalOrders again (already counted once). Non-edit
+            // path below is byte-for-byte unchanged.
             if (customerPhone) {
-                updateDoc(doc(db, 'customers', customerPhone), {
-                    totalOrders:   increment(1),
-                    lifetimeSpend: increment(+total.toFixed(2)),
-                    lastOrderAt:   serverTimestamp(),
-                })
+                const _statsUpdate = editContext
+                    ? { lifetimeSpend: increment(+(total - editContext.previousTotal).toFixed(2)), lastOrderAt: serverTimestamp() }
+                    : { totalOrders: increment(1), lifetimeSpend: increment(+total.toFixed(2)), lastOrderAt: serverTimestamp() };
+                updateDoc(doc(db, 'customers', customerPhone), _statsUpdate)
                     .then(() => _maybeIssueLoyaltyCoupon(customerPhone, customerName))
                     .catch(e => console.warn('[OrderSync] Profile stats update failed (non-fatal):', e.message));
             }
@@ -1908,6 +1977,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const discount  = _couponToRedeem ? Math.min(_couponToRedeem.amount, rawTotal) : 0;
             const total     = +(rawTotal - discount).toFixed(2);
 
+            // AI UPDATE [2026-09-16] EDIT HISTORY: if this slot was loaded via
+            // "Edit History" (js/order-edit.js), _editMode is non-null and carries
+            // the ORIGINAL sales_history/customer_order_history doc ID + total. See
+            // the header comment on _getEditMode() above for the full explanation.
+            const _editMode = _getEditMode(tableName, customerName);
+
             // ── Snapshot cart before clearing ─────────────────────────────────
             const cartSnapshot = currentCart.slice();
 
@@ -1976,26 +2051,65 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => { if (backToTablesBtn) backToTablesBtn.click(); }, 300);
 
             // ── Save sale to Firestore (fire & forget) ────────────────────────
-            const billId = `SALE_${Date.now()}`;
-            setDoc(doc(db, "sales_history", billId), {
-                table: tableName,
-                customer: customerName,
-                items: cartSnapshot,
-                total: total,
-                // AI UPDATE [2026-09-12]: coupon audit trail on the sale record.
-                couponCode:     discount > 0 ? _couponToRedeem.code : null,
-                couponDiscount: discount,
-                // [AI UPDATE 2026-09-14] Optional manual-customer details entered
-                // in the popup, for traceability on the bill record itself.
-                // Purely additive — does not replace the existing `customer` slot field.
-                manualCustomerName:  _manualCustomer.name  || null,
-                manualCustomerPhone: _manualCustomer.phone ? `+91${_manualCustomer.phone}` : null,
-                timestamp: new Date().toISOString()
-            }).catch(err => console.error("Bill save failed:", err));
+            // AI UPDATE [2026-09-16] EDIT HISTORY: reuse the ORIGINAL doc ID when
+            // editing (links sales_history + customer_order_history together, and
+            // makes this an update-in-place instead of a duplicate new bill).
+            const billId = _editMode ? _editMode.orderId : `SALE_${Date.now()}`;
+            // Online-customer identity for this slot, if any (badge keys already
+            // set by either a live "Open in POS" import or js/order-edit.js
+            // restoring them for an edit) — stored on the sale record so a FUTURE
+            // Edit History pass on this same bill can restore it without asking
+            // for a phone number again. Purely additive; absent = anonymous/manual.
+            const _onlineUid   = localStorage.getItem(`activeCustomerUid_${tableName}_${customerName}`) || null;
+            const _onlineName  = localStorage.getItem(getCustomerNameKey())  || null;
+            const _onlinePhone = localStorage.getItem(getCustomerPhoneKey()) || null;
+
+            if (_editMode) {
+                // ── Update the EXISTING sale in place — never a new document ───
+                updateDoc(doc(db, "sales_history", billId), {
+                    items: cartSnapshot,
+                    total: total,
+                    couponCode:     discount > 0 ? _couponToRedeem.code : null,
+                    couponDiscount: discount,
+                    isEdited:      true,
+                    editedAt:      serverTimestamp(),
+                    originalTotal: _editMode.originalTotal, // set once, never overwritten on later edits
+                    lastEditReason: 'bill_settle',
+                }).catch(err => console.error("Bill update (Edit History) failed:", err));
+            } else {
+                setDoc(doc(db, "sales_history", billId), {
+                    orderId: billId, // AI UPDATE [2026-09-16]: shared ID — see EDIT HISTORY header comment above.
+                    table: tableName,
+                    customer: customerName,
+                    items: cartSnapshot,
+                    total: total,
+                    // AI UPDATE [2026-09-12]: coupon audit trail on the sale record.
+                    couponCode:     discount > 0 ? _couponToRedeem.code : null,
+                    couponDiscount: discount,
+                    // [AI UPDATE 2026-09-14] Optional manual-customer details entered
+                    // in the popup, for traceability on the bill record itself.
+                    // Purely additive — does not replace the existing `customer` slot field.
+                    manualCustomerName:  _manualCustomer.name  || null,
+                    manualCustomerPhone: _manualCustomer.phone ? `+91${_manualCustomer.phone}` : null,
+                    // AI UPDATE [2026-09-16]: online (QR) customer identity, so a future
+                    // Edit History pass can restore it — see notes above.
+                    onlineCustomerUid:   _onlineUid,
+                    onlineCustomerName:  _onlineName,
+                    onlineCustomerPhone: _onlinePhone,
+                    timestamp: new Date().toISOString()
+                }).catch(err => console.error("Bill save failed:", err));
+            }
 
             if (window.saveToGhostHistory) {
                 let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
-                window.saveToGhostHistory(orderId, total, cartSnapshot);
+                // AI UPDATE [2026-09-16] round 2: pass billId + customer identity so
+                // the on-device 24h History drawer / details.html can show who this
+                // bill belongs to and offer an Edit button for it (see js/order-edit.js).
+                window.saveToGhostHistory(orderId, total, cartSnapshot, {
+                    billId,
+                    customerName:  _onlineName  || _manualCustomer.name || null,
+                    customerPhone: _onlinePhone || (_manualCustomer.phone ? `+91${_manualCustomer.phone}` : null),
+                });
             }
 
             // AI UPDATE [2026-09-12]: Mark the redeemed coupon as used (fire & forget).
@@ -2018,15 +2132,28 @@ document.addEventListener('DOMContentLoaded', () => {
             // AI UPDATE [2026-07-29] session 18: pass shortOrderId as billNumber
             // AI UPDATE [2026-09-13]: pass customerSlot (customerName here holds the
             // C1/C2/... slot id) — see syncCustomerOrderCompletion() header comment.
-            syncCustomerOrderCompletion(tableName, customerName, cartSnapshot, total, 'bill_settle', shortOrderId);
+            // AI UPDATE [2026-09-16]: pass billId + editContext for Edit History —
+            // see syncCustomerOrderCompletion() header comment. Both are undefined/
+            // null on a normal (non-edit) bill, so behavior there is unchanged.
+            syncCustomerOrderCompletion(
+                tableName, customerName, cartSnapshot, total, 'bill_settle', shortOrderId,
+                billId, _editMode ? { previousTotal: _editMode.originalTotal } : null
+            );
 
             // [AI UPDATE 2026-09-14] Manual POS customer identification — only
             // runs if the staff actually entered a phone in the popup above.
             // No-op (and impossible to reach) for QR orders, which never show
             // the popup in the first place.
             if (_manualCustomer.phone) {
-                syncManualCustomerProfile(_manualCustomer.name, _manualCustomer.phone, total, shortOrderId, tableName, 'bill_settle', cartSnapshot);
+                syncManualCustomerProfile(
+                    _manualCustomer.name, _manualCustomer.phone, total, shortOrderId, tableName, 'bill_settle', cartSnapshot,
+                    billId, _editMode ? { previousTotal: _editMode.originalTotal } : null
+                );
             }
+
+            // AI UPDATE [2026-09-16]: edit finished — clear the flag so this
+            // synthetic edit table/slot never carries it into a future session.
+            if (_editMode) _clearEditMode(tableName, customerName);
 
             // ── Release customer table lock in background (non-blocking) ──────
             releaseTableLockInBackground(tableName, 'bill_settle');
@@ -2085,6 +2212,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const total    = +(rawTotal - discount).toFixed(2);
             const shortOrderId = String(Date.now()).slice(-5);
 
+            // AI UPDATE [2026-09-16] EDIT HISTORY — see the matching note in the
+            // Bill & Settle handler above / _getEditMode() header comment.
+            const _editMode = _getEditMode(tableName, customerName);
+            const billId    = _editMode ? _editMode.orderId : `SALE_${Date.now()}`;
+            const _onlineUid   = localStorage.getItem(`activeCustomerUid_${tableName}_${customerName}`) || null;
+            const _onlineName  = localStorage.getItem(getCustomerNameKey())  || null;
+            const _onlinePhone = localStorage.getItem(getCustomerPhoneKey()) || null;
+
             // ── Clear cart and navigate back immediately ───────────────────────
             saveLocalCart([]);
             currentCart = [];
@@ -2093,24 +2228,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // ── Save to Firestore in background only if there were items ──────
             if (cartSnapshot.length > 0) {
-                setDoc(doc(db, "sales_history", `SALE_${Date.now()}`), {
-                    table: tableName,
-                    customer: customerName,
-                    items: cartSnapshot,
-                    total: total,
-                    // AI UPDATE [2026-09-12]: coupon audit trail on the sale record.
-                    couponCode:     discount > 0 ? _couponToRedeem.code : null,
-                    couponDiscount: discount,
-                    // [AI UPDATE 2026-09-14] Optional manual-customer details — see
-                    // Bill & Settle above for the matching field.
-                    manualCustomerName:  _manualCustomer.name  || null,
-                    manualCustomerPhone: _manualCustomer.phone ? `+91${_manualCustomer.phone}` : null,
-                    timestamp: new Date().toISOString()
-                }).catch(err => console.error("Save & Exit Firestore failed:", err));
+                if (_editMode) {
+                    // ── Update the EXISTING sale in place — never a new document ──
+                    updateDoc(doc(db, "sales_history", billId), {
+                        items: cartSnapshot,
+                        total: total,
+                        couponCode:     discount > 0 ? _couponToRedeem.code : null,
+                        couponDiscount: discount,
+                        isEdited:      true,
+                        editedAt:      serverTimestamp(),
+                        originalTotal: _editMode.originalTotal,
+                        lastEditReason: 'save_exit',
+                    }).catch(err => console.error("Save & Exit update (Edit History) failed:", err));
+                } else {
+                    setDoc(doc(db, "sales_history", billId), {
+                        orderId: billId, // AI UPDATE [2026-09-16]: shared ID — see EDIT HISTORY header comment.
+                        table: tableName,
+                        customer: customerName,
+                        items: cartSnapshot,
+                        total: total,
+                        // AI UPDATE [2026-09-12]: coupon audit trail on the sale record.
+                        couponCode:     discount > 0 ? _couponToRedeem.code : null,
+                        couponDiscount: discount,
+                        // [AI UPDATE 2026-09-14] Optional manual-customer details — see
+                        // Bill & Settle above for the matching field.
+                        manualCustomerName:  _manualCustomer.name  || null,
+                        manualCustomerPhone: _manualCustomer.phone ? `+91${_manualCustomer.phone}` : null,
+                        onlineCustomerUid:   _onlineUid,
+                        onlineCustomerName:  _onlineName,
+                        onlineCustomerPhone: _onlinePhone,
+                        timestamp: new Date().toISOString()
+                    }).catch(err => console.error("Save & Exit Firestore failed:", err));
+                }
 
                 if (window.saveToGhostHistory) {
                     let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
-                    window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot);
+                    // AI UPDATE [2026-09-16] round 2: see the matching Bill & Settle note above.
+                    window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot, {
+                        billId,
+                        customerName:  _onlineName  || _manualCustomer.name || null,
+                        customerPhone: _onlinePhone || (_manualCustomer.phone ? `+91${_manualCustomer.phone}` : null),
+                    });
                 }
 
                 // AI UPDATE [2026-09-12]: Mark the redeemed coupon as used (fire & forget).
@@ -2133,13 +2291,24 @@ document.addEventListener('DOMContentLoaded', () => {
             if (cartSnapshot.length > 0) {
                 // AI UPDATE [2026-09-13]: pass customerSlot (customerName here holds
                 // the C1/C2/... slot id) — see syncCustomerOrderCompletion().
-                syncCustomerOrderCompletion(tableName, customerName, cartSnapshot, total, 'save_exit');
+                // AI UPDATE [2026-09-16]: pass billId + editContext for Edit History
+                // — both null/undefined on a normal (non-edit) save, so unchanged there.
+                syncCustomerOrderCompletion(
+                    tableName, customerName, cartSnapshot, total, 'save_exit', null,
+                    billId, _editMode ? { previousTotal: _editMode.originalTotal } : null
+                );
 
                 // [AI UPDATE 2026-09-14] Manual POS customer identification —
                 // only runs if the staff entered a phone in the popup above.
                 if (_manualCustomer.phone) {
-                    syncManualCustomerProfile(_manualCustomer.name, _manualCustomer.phone, total, shortOrderId, tableName, 'save_exit', cartSnapshot);
+                    syncManualCustomerProfile(
+                        _manualCustomer.name, _manualCustomer.phone, total, shortOrderId, tableName, 'save_exit', cartSnapshot,
+                        billId, _editMode ? { previousTotal: _editMode.originalTotal } : null
+                    );
                 }
+
+                // AI UPDATE [2026-09-16]: edit finished — clear the flag.
+                if (_editMode) _clearEditMode(tableName, customerName);
             } else {
                 // Cart is empty — if an order was imported via "Open in POS" but
                 // the operator removed every item before saving, auto-cancel it.
@@ -2148,6 +2317,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // AI UPDATE [2026-07-29] session 23: missing edge-case fix.
                 // AI UPDATE [2026-09-13]: pass customerSlot — see cancelImportedOrdersOnEmptyCart().
                 cancelImportedOrdersOnEmptyCart(tableName, customerName);
+                // AI UPDATE [2026-09-16]: an edit session emptied out entirely — clear
+                // the edit-mode flag too so it never lingers (the original order's
+                // sales_history record is left untouched, since nothing was saved).
+                if (_editMode) _clearEditMode(tableName, customerName);
             }
 
             // ── Release customer table lock in background (non-blocking) ──────
@@ -2199,6 +2372,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // AI UPDATE [2026-09-13]: pass customerSlot — see cancelOrderInPOS().
             cancelOrderInPOS(tableName, customerSlot);
             releaseTableLockInBackground(tableName, 'cancel_order');
+
+            // AI UPDATE [2026-09-16] EDIT HISTORY: cancelling an edit session leaves
+            // the original sales_history record completely untouched (nothing was
+            // ever written) — just clear the leftover flag so it doesn't linger.
+            _clearEditMode(tableName, customerSlot);
         });
     }
 });

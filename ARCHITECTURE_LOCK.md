@@ -103,6 +103,7 @@ The following systems are **production-stable**. Future AI agents **MUST NOT** m
 | **Customer Synchronization** | `customer.html`, `customers/` collection | 🔒 FROZEN |
 | **Customer Password Auth** | `customer.html` auth screens, `order-panel-updates/js/auth.js` | 🔒 FROZEN |
 | **Username Registry** | `usernames/{username}` collection | 🔒 FROZEN |
+| **Order Edit History** | `js/order-edit.js`, edit-mode branches in `js/cart.js` (Bill & Settle / Save & Exit) | 🆕 NEW (2026-09-16 session 4) — not yet frozen, but reuses/extends the frozen Billing Workflow and Customer Order History Synchronization systems above; see AI_HANDOFF.md for full design |
 
 **Rule:** If you are unsure whether a system is frozen, treat it as frozen and ask the user instead.
 
@@ -323,13 +324,37 @@ When this document does not exist, Customer Panel defaults to **ON** (backward c
   billedAt:     Timestamp
   paymentMode:  string       // e.g. "cash", "upi"
   // Additional billing fields written by js/cart.js
+  // ── Edit History fields (added 2026-09-16 session 4, all additive/optional) ──
+  orderId:              string    // == this doc's own ID (e.g. "SALE_<ts>"). The
+                                   // SAME value is used as the doc ID for this
+                                   // order's customer_order_history entry (see
+                                   // below) — this is what links the two records
+                                   // so an edit can update both instead of
+                                   // creating duplicates. Absent on pre-session-4 docs.
+  onlineCustomerUid:    string|null   // QR/online customer's Firebase UID, if any
+  onlineCustomerName:   string|null
+  onlineCustomerPhone:  string|null
+  isEdited:             boolean   // present only once the order has been edited
+  editedAt:             Timestamp // present only once edited
+  originalTotal:        number    // total BEFORE the first edit; never overwritten
+                                   // by subsequent edits
+  lastEditReason:       string    // "bill_settle" | "save_exit" — which flow made
+                                   // the most recent edit
 }
 ```
+**Backward-compatibility note:** all Edit History fields are absent on every
+sales_history doc created before 2026-09-16 session 4. Treat absence exactly
+like any other optional field elsewhere in this document — it means "never
+edited" / "no online customer", never an error state.
 
 #### `customer_order_history/{uid}/orders/{orderId}` — History (written by Billing, read by Customer)
 ```
 {
-  orderId:          string   // "ORDER_{timestamp}"
+  orderId:          string   // "ORDER_{timestamp}" — OR, as of 2026-09-16
+                              // session 4, the SAME value as the corresponding
+                              // sales_history doc's own ID (e.g. "SALE_<ts>"),
+                              // for orders created since then. Either way, this
+                              // doc's own ID always equals this `orderId` field.
   tableId:          string   // "Table 3"
   customerName:     string
   customerPhone:    string   // "+91XXXXXXXXXX"
@@ -343,8 +368,19 @@ When this document does not exist, Customer Panel defaults to **ON** (backward c
   completedAt:      Timestamp
   completionReason: string   // "bill_settle" | "save_exit"
   orderedAt:        string   // ISO 8601 string
+  // ── Edit History fields (added 2026-09-16 session 4, additive/optional) ──
+  isEdited:         boolean  // present only once this order has been edited
+  editedAt:         Timestamp
 }
 ```
+**Edit History note (2026-09-16 session 4):** editing a completed order via
+the Admin Sales tab "Edit History" button now performs a `setDoc(..., {merge:
+true})` on THIS SAME document (same UID + same order ID) rather than creating
+a new one — see `js/cart.js` `syncCustomerOrderCompletion()` /
+`syncManualCustomerProfile()` and the new `js/order-edit.js`. No change was
+needed in `teamdovolve-hue/Order-` for this: the Customer Panel's existing
+`onSnapshot` listener on this subcollection already reflects an update to an
+existing document the same way it reflects a new one.
 
 #### `daily_expenses/{docId}` — Expense tracking
 ```

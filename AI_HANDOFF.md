@@ -5886,3 +5886,285 @@ or Cloudinary account reachable in this environment):
   upload the photos for all staff members from the Admin Panel" in the
   original task spec.
 
+---
+
+## [AI UPDATE 2026-09-16 session 4] — Order History Editing ("Edit History") + Customer History Sync
+
+### Objective
+Let an operator reopen an already-completed/settled order (from the Admin
+"Sales" tab, which is this app's "Order History" screen — there is no
+separate/renamed screen), add or change items, and re-settle it as an
+UPDATE to the same order — never a second, duplicate order — while keeping
+`sales_history`, `customer_order_history`, Admin Customer History, and the
+Customer Panel's own order history all pointing at the same single record.
+No customer-facing (`teamdovolve-hue/Order-`) changes were required.
+
+### Audit performed before coding
+Read `ARCHITECTURE_LOCK.md` and this file in full first, then audited:
+- `js/cart.js` — Bill & Settle / Save & Exit handlers, `syncCustomerOrderCompletion()`,
+  `syncManualCustomerProfile()`, cart storage key format (`cart_<table>_<slot>`).
+- `js/admin.js` — the Sales tab (`loadSalesData`/`renderBillCards`), which is
+  the only existing "Order History" surface in this app (there is no other
+  order-detail screen to add the button to).
+- `js/customers.js` — Admin Customer History (per-customer order list).
+- `js/tables.js` — how the POS screen is actually opened (`openPOS()`,
+  the exposed `window._posOpenTable()` hook, `cart_<table>_<slot>` key format).
+- `firestore.rules` — confirmed `sales_history` and
+  `customer_order_history/{uid}/orders/{orderId}` already allow the
+  `getDoc`/`updateDoc`/`setDoc-merge` calls this feature needed for an
+  authenticated operator session. **No rules changes were made.**
+
+### Critical finding that shaped the whole design
+`sales_history` (revenue record) and `customer_order_history` (QR-path via
+`syncCustomerOrderCompletion()`, manual-path via `syncManualCustomerProfile()`)
+were three independently-generated `Date.now()`-based document IDs for ONE
+logical order, with **no shared field linking them**. Any "edit and re-save"
+implementation that reused the existing create-a-new-record code paths
+unmodified would have (a) created a second, duplicate order/history record,
+and (b) double-counted `totalOrders`/`lifetimeSpend` on `customers/{phone}`
+via their unconditional `increment()` calls. Both had to be fixed for this
+feature to be safe — see "What was added" below.
+
+### What was added (all additive — no existing field renamed/removed)
+
+**`sales_history/{docId}` — new fields**, all optional/backward-compatible
+(see `ARCHITECTURE_LOCK.md` §5 for the full annotated shape):
+- `orderId` — set to the doc's own ID at creation. This is the field that
+  now LINKS `sales_history` and `customer_order_history` — see below.
+- `onlineCustomerUid` / `onlineCustomerName` / `onlineCustomerPhone` — QR/
+  online customer identity, captured from the same `activeCustomerUid_<table>_<slot>`
+  / `customerName_<table>_<slot>` / `customerPhone_<table>_<slot>` localStorage
+  keys the cart UI already reads. **This field did not exist before** —
+  previously a QR order's identity lived ONLY in `customer_order_history`
+  keyed by UID, with no way to look it up starting from a `sales_history` doc.
+  Required so "Edit History" can restore a QR customer's identity without
+  re-asking for a phone number.
+- `isEdited`, `editedAt`, `originalTotal` (set once, never overwritten by
+  later edits), `lastEditReason` — edit audit trail.
+
+**`customer_order_history/{uid}/orders/{orderId}` — changed ID strategy**:
+the doc ID (and its `orderId` field) is now the SAME value as the
+corresponding `sales_history` doc's own ID, instead of an independently
+generated `ORDER_{timestamp}`. This is the actual fix for "no shared key" —
+`syncCustomerOrderCompletion()` and `syncManualCustomerProfile()` now accept
+this ID as a parameter instead of generating their own. Added `isEdited`/
+`editedAt` fields, same audit-trail purpose as above.
+
+### How "Edit History" actually reopens an order in the POS
+The Billing/Admin dashboard (`admin/index.html`) and the POS
+(`index.html`) are **two separate HTML documents/pages**, not one SPA — so
+a click in the Admin Sales tab cannot directly call into the POS's
+in-memory cart state. New file **`js/order-edit.js`** bridges them via
+localStorage (same-origin, visible to both pages):
+1. Admin page: `window.editHistoryOrder(saleId)` stores
+   `localStorage.pendingOrderEdit = { saleId }` and navigates to
+   `../index.html`.
+2. POS page load: this module checks for that flag, consumes it
+   immediately (so a refresh never re-triggers it), waits for
+   `onAuthStateChanged`, then `getDoc`s the `sales_history` record and:
+   - Builds a synthetic, per-order table name `EditOrder-<saleId-with-dashes>`
+     (unique per order; underscores in `saleId` are replaced with dashes so
+     the resulting `cart_<table>_<slot>` key still splits into exactly 3
+     `_`-separated parts, matching every existing assumption elsewhere,
+     e.g. `js/tables.js` `renderRunningOrders()`).
+   - Writes the order's `items` array directly into the
+     `cart_<editTable>_C1` localStorage key (the EXACT format/shape
+     `js/cart.js`'s own `getCartKey()`/`getLocalCart()` already use — no
+     changes needed there).
+   - Restores customer identity WITHOUT re-prompting: for a QR order, sets
+     `activeCustomerUid_<editTable>_C1` / `customerName_...` /
+     `customerPhone_...` (mirrors what a live "Open in POS" import already
+     writes); for a manually-captured customer, pre-resolves
+     `manualCustomerIdentity_<editTable>_C1` so the "enter customer
+     details" popup never appears; for a fully anonymous/walk-in order,
+     restores nothing (editing behaves exactly like any new manual bill —
+     the identity popup can still appear/be skipped, same as always).
+   - Sets `editingOrder_<editTable>_C1 = { orderId, originalTotal }` — the
+     flag `js/cart.js` checks for (see next section).
+   - Calls the already-exposed `window._posOpenTable(editTable, 'C1')`
+     (from `js/tables.js`) to open the existing cart screen. **No new POS
+     UI was built** — the operator sees the exact same cart/billing screen
+     every other order type already uses.
+
+### Edit-mode branches added to `js/cart.js` (additive only)
+- New helpers `_editModeKey()` / `_getEditMode()` / `_clearEditMode()`.
+- Bill & Settle and Save & Exit handlers: read `_getEditMode(tableName, slot)`
+  at the top. If present:
+  - `billId` = the ORIGINAL order's ID (not a new `SALE_<ts>`).
+  - The `sales_history` write becomes `updateDoc` (items/total/coupon/edit
+    audit fields only) instead of `setDoc` of a brand-new document.
+  - `syncCustomerOrderCompletion()` / `syncManualCustomerProfile()` are
+    called with that same `billId` as `orderIdOverride`, and
+    `{ previousTotal: originalTotal }` as `editContext` — inside those
+    functions this makes the `customer_order_history` write a
+    `setDoc(..., {merge:true})` on the SAME doc ID, and changes the
+    `customers/{phone}` stats update to `lifetimeSpend: increment(delta)`
+    with **no** `totalOrders` increment.
+  - The edit-mode flag is cleared once the save actually happens (both
+    success paths), and also on Cancel Order and on an edit session that's
+    emptied out entirely via Save & Exit (nothing is written in that case —
+    the original record is left completely untouched).
+- Every one of these branches is `if (editMode) { ... } else { <existing
+  code, byte-for-byte unchanged> }` — a normal (non-edit) bill takes exactly
+  the same code path as before this session.
+
+### `js/admin.js` (Sales tab bill cards)
+- Cards now show a customer line (`onlineCustomerName`/`Phone`, falling back
+  to `manualCustomerName`/`Phone`) when present — nothing shown for
+  anonymous/walk-in orders, per the "never show fake/empty customer data"
+  requirement.
+- Added an "✏️ Edit History" button (calls `window.editHistoryOrder(saleId)`
+  from `js/order-edit.js`) and an "(Edited)" badge for orders with
+  `isEdited: true`. Existing card markup/classes/`deleteSale()` button
+  untouched.
+
+### KOT behavior — verified, not modified
+Restored cart items carry their original `printedQty` (already saved as
+part of the `sales_history.items` snapshot). Pressing KOT during an edit
+session therefore automatically prints only the newly-added items (qty
+beyond `printedQty`) through the existing, unmodified KOT diffing logic in
+`js/cart.js` `printKOT()` — this "just worked" once items were restored
+with their real `printedQty`, no KOT-specific code was needed.
+
+### What was explicitly NOT changed
+- `firestore.rules` — zero changes; existing `isOperator()` rules on
+  `sales_history` and `customer_order_history/{uid}/orders/{orderId}`
+  already permit every read/write this feature needs.
+- `js/tables.js` — zero changes. The synthetic edit table name was chosen
+  specifically so every existing assumption there (grid rendering, running
+  orders, `_posOpenTable` signature) keeps working unmodified.
+- No partial-payment/settlement-amount tracking was added (flagged to the
+  user as an open question before this session started; user approved
+  proceeding without it). If a ₹250-paid order is edited to ₹370, the bill
+  reprint shows the new total, but there is no separate "amount already
+  collected" field anywhere in the schema — this is a pre-existing gap in
+  the app's payment model, not something this session introduced or hid.
+- Coupon logic, KOT print formatting, Parcel/Dine-in distinctions, staff
+  management, expenses — untouched.
+- No Customer Panel (`teamdovolve-hue/Order-`) code changes were needed —
+  see "Customer Panel Integration Status" below.
+
+### Customer Panel Integration Status
+**No changes required.** The Customer Panel's order-history listener
+(`js/history.js`/`order-status.js`, per `ARCHITECTURE_LOCK.md` §4) reads
+`customer_order_history/{uid}/orders` via `onSnapshot`/`getDocs` on
+whatever documents exist there. Since an edit now updates the SAME document
+ID rather than creating a new one, the Customer Panel reflects the edit
+automatically the next time that listener fires/re-reads — exactly like any
+other update to an existing document it was already built to handle.
+
+### Known non-blocking quirks
+- An edit session left open (POS navigated away from before Bill & Settle /
+  Save & Exit) will appear as a normal-looking occupied "table" card named
+  `EditOrder-SALE-<ts>` in the Home screen's Running Orders list — clicking
+  it correctly resumes the same edit session. This is a side effect of
+  reusing the existing table/cart machinery as-is (see "What was explicitly
+  NOT changed" above) rather than a bug; it was left in deliberately to
+  avoid touching `js/tables.js`.
+- Editing a QR order whose `pending_table_orders` doc(s) were long ago
+  deleted/expired still works, because customer identity for edits is
+  sourced from the NEW `onlineCustomerUid/Name/Phone` fields on
+  `sales_history` (via `js/order-edit.js`), not from re-querying
+  `pending_table_orders`.
+
+### Testing performed
+**None yet — this has not been run against a live Firestore/browser
+session.** The implementation was built and reasoned through file-by-file
+against the existing code paths (see audit above), and the exact key
+formats/shapes it reuses were confirmed by reading, not assumed. Before
+relying on this in production, a future agent or the user should manually
+verify, at minimum:
+1. Edit a manual-customer order, add an item, Bill & Settle → same
+   `sales_history` doc ID, `total` updated, `totalOrders` on
+   `customers/{phone}` NOT incremented again, `lifetimeSpend` increased by
+   only the delta.
+2. Edit a QR-customer order the same way → same `customer_order_history`
+   doc ID updates in place (check in the Customer Panel's Order History
+   tab), no duplicate entry appears.
+3. Edit an order, print KOT for the newly-added items only, confirm
+   original items are not reprinted.
+4. Edit an order, apply/verify a coupon, confirm it isn't marked "used"
+   twice and the discount audit trail looks right.
+5. Cancel an in-progress edit → confirm the original `sales_history`/
+   `customer_order_history` records are completely unchanged.
+6. Edit a genuinely anonymous/walk-in order with no `manualCustomerPhone`/
+   `onlineCustomerUid` at all → confirm it behaves like a normal manual
+   bill (identity popup appears/can be skipped) and doesn't crash.
+
+### Important information for a future AI agent
+- The single most important invariant this feature depends on:
+  **`sales_history/{orderId}` and `customer_order_history/{uid}/orders/{orderId}`
+  now always share the same `orderId` value for any order created from
+  2026-09-16 session 4 onward.** Do not reintroduce independent
+  `Date.now()`-based ID generation in either write path — that would
+  silently break Edit History's ability to update-in-place again.
+- Orders created BEFORE this session have no `orderId` field on
+  `sales_history` and an unrelated `ORDER_{timestamp}` ID on their
+  `customer_order_history` doc. "Edit History" on one of these old orders
+  will still work (it edits `sales_history` fine either way), but it CANNOT
+  locate/update the old, unlinked `customer_order_history` doc — it will
+  instead create a fresh one under the new shared-ID scheme. This is an
+  acceptable one-time backward-compatibility gap for pre-existing orders,
+  not a bug to silently "fix" via a migration script — do not write a
+  destructive migration against old orders without explicit user approval
+  (`ARCHITECTURE_LOCK.md` §7 rule 13).
+- If a future task adds partial-payment/settlement tracking (flagged but
+  explicitly deferred this session), thread it through the SAME edit-mode
+  branches added here (`_getEditMode()` check in Bill & Settle / Save &
+  Exit) rather than building a parallel mechanism.
+
+### [AI UPDATE 2026-09-16 session 4b] — Edit History round 2: the ACTUAL history screen
+
+**Correction to session 4 above.** The user clarified that the screen they
+actually use day-to-day for "order history" is NOT the Admin Sales tab — it's
+an entirely separate, on-device system:
+- `localStorage['pos_24h_history']` — a rolling 24-hour local cache, written
+  by `window.saveToGhostHistory()` (defined in `index.html`) every time an
+  order is Bill & Settled or Save & Exited.
+- Viewed via the History drawer inside `index.html` itself
+  (`window.openHistoryDrawer()` / `renderHistoryBills()`), and via
+  **`details.html`** — a standalone page (`details.html?id=<ghost-id>`) shown
+  in the user's screenshot, used for viewing/printing/sharing one bill.
+
+This system previously stored only `{ id, timeStr, timestamp, total, items }`
+— no customer info, and critically **no link to the Firestore
+`sales_history` doc ID** — so nothing built in session 4 (which only touched
+the Admin Sales tab) could appear here.
+
+**What was added this round (all additive):**
+- `window.saveToGhostHistory(orderNumber, totalAmount, cartItems, meta)` in
+  `index.html` — new optional 4th param `meta = { billId, customerName,
+  customerPhone }`, stored on the ghost-history entry. Old calls without
+  `meta` behave exactly as before.
+- Both call sites in `js/cart.js` (Bill & Settle, Save & Exit) now pass
+  `meta` with the real Firestore `billId` (the same shared ID from session
+  4) and the resolved online/manual customer name+phone.
+- `renderHistoryBills()` in `index.html`: shows the customer line when
+  present, and a "✏️ Edit" button when `bill.billId` exists (older,
+  pre-round-2 entries simply won't have the button — no fake data forced
+  onto them).
+- `details.html`: shows the same customer line, an "✏️ Edit" button next to
+  "Print Bill" when `bill.billId` exists, and now loads `js/order-edit.js`.
+- **`js/order-edit.js` was refactored** so `window.editHistoryOrder(saleId)`
+  works unconditionally from any page that loads it, instead of only from
+  "the Admin page" as session 4 assumed:
+  - If `window._posOpenTable` already exists (we're ON the POS page —
+    i.e. clicked from index.html's own History drawer), it loads the order
+    **directly, in place**, no redirect.
+  - Otherwise (Admin Sales tab or `details.html`) it falls back to the
+    original localStorage-handoff + navigate-to-`index.html` approach —
+    with the redirect path now resolved based on `window.location.pathname`
+    (`../index.html` from `/admin/...`, `index.html` from anywhere else),
+    since `details.html` sits at the repo root next to `index.html`, not
+    under `admin/`.
+
+**Everything from session 4 (shared `orderId`, edit-mode branches in Bill &
+Settle/Save & Exit, delta-based stats, Admin Sales tab button) is unchanged
+and still the mechanism that actually performs the update** — this round
+only adds a second/third *entry point* into that same `editHistoryOrder()`
+flow, from the screens the user actually uses.
+
+**Still not tested against a live session** — same caveat as session 4,
+now also covering: History-drawer Edit (same-page, no redirect), and
+`details.html` Edit (redirect from repo root, not from `/admin/`).
+
