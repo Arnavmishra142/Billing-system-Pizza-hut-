@@ -581,14 +581,23 @@
             document.getElementById('historyOverlay').classList.remove('open');
         }
 
-        window.saveToGhostHistory = function(orderNumber, totalAmount, cartItems) {
+        window.saveToGhostHistory = function(orderNumber, totalAmount, cartItems, meta = {}) {
+            // AI UPDATE [2026-09-16] EDIT HISTORY (round 2): now also stores the real
+            // Firestore sales_history doc ID (billId) + customer name/phone, if any,
+            // so this on-device 24h history can show "who" a bill belongs to and
+            // offer an Edit button (see details.html) that reopens the SAME order —
+            // not just a locally-cached label. meta is optional/backward-compatible;
+            // omitting it (as old callers did) behaves exactly as before.
             let history = getGhostHistory();
             const newBill = {
                 id: orderNumber || "ORD-" + Math.floor(Math.random() * 10000),
                 timeStr: new Date().toLocaleString('en-IN', { hour12: true }),
                 timestamp: Date.now(),
                 total: totalAmount,
-                items: cartItems || [] 
+                items: cartItems || [],
+                billId:        meta.billId        || null,
+                customerName:  meta.customerName  || null,
+                customerPhone: meta.customerPhone || null,
             };
             history.unshift(newBill); 
             localStorage.setItem('pos_24h_history', JSON.stringify(history));
@@ -611,14 +620,27 @@
 
             history.forEach(bill => {
                 const encodedId = encodeURIComponent(bill.id);
+                // AI UPDATE [2026-09-16] EDIT HISTORY (round 2): show customer name/phone
+                // when present, and an Edit button when this entry has a real Firestore
+                // billId (i.e. it was saved after this update — older entries simply
+                // won't show the button, same "don't force data that isn't there" rule
+                // used elsewhere in this feature).
+                const customerLine = bill.customerName
+                    ? `<p style="color:#58a6ff;"><strong>Customer:</strong> ${bill.customerName}${bill.customerPhone ? ' · ' + bill.customerPhone : ''}</p>`
+                    : '';
+                const editBtn = bill.billId
+                    ? `<button class="btn-view-details" style="flex:1;" onclick="window.editHistoryOrder && window.editHistoryOrder('${bill.billId}')">✏️ Edit</button>`
+                    : '';
                 list.innerHTML += `
                     <div class="history-card">
                         <p><strong>Order No:</strong> ${bill.id}</p>
+                        ${customerLine}
                         <p><strong>Time:</strong> ${bill.timeStr}</p>
                         <p><strong>Amount:</strong> ₹${bill.total}</p>
                         <div style="display: flex; gap: 8px; margin-top: 10px;">
                             <button class="btn-view-details" style="flex: 1;" onclick="window.location.href='details.html?id=${encodedId}'">👁️ Details</button>
                             <button class="btn-reprint" style="flex: 1;" onclick="reprintGhostBill('${bill.id}')">🖨️ Print</button>
+                            ${editBtn}
                             <button class="btn-delete-ghost" onclick="deleteGhostBill('${bill.id}')">🗑️</button>
                         </div>
                     </div>

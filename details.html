@@ -299,6 +299,8 @@
     </script>
     <!-- AI UPDATE [2026-07-30]: Load custom dialog system; sets window.BillingDialog for inline scripts. -->
     <script type="module" src="js/dialog.js"></script>
+    <!-- AI UPDATE [2026-09-16] round 2: Edit History feature (adds window.editHistoryOrder). -->
+    <script type="module" src="js/order-edit.js"></script>
 </head>
 <body>
 
@@ -481,6 +483,11 @@
                         <span class="label">Order No.</span>
                         <span class="value">${bill.id}</span>
                     </div>
+                    ${bill.customerName ? `
+                    <div class="meta-row">
+                        <span class="label">Customer</span>
+                        <span class="value">${_esc(bill.customerName)}${bill.customerPhone ? ' · ' + _esc(bill.customerPhone) : ''}</span>
+                    </div>` : ''}
                     <div class="meta-row">
                         <span class="label">Time</span>
                         <span class="value">${bill.timeStr}</span>
@@ -505,6 +512,7 @@
 
             <div class="action-row">
                 ${hasItems ? `<button class="btn-print" onclick="printBill(currentBill)">🖨️ Print Bill</button>` : ''}
+                ${bill.billId ? `<button class="btn-print" style="background:var(--blue, #0ea5e9);" onclick="window.editHistoryOrder && window.editHistoryOrder('${bill.billId}')">✏️ Edit</button>` : ''}
                 <button class="btn-back-home" onclick="history.back()">← Back</button>
             </div>
         `;

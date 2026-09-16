@@ -6113,3 +6113,58 @@ verify, at minimum:
   branches added here (`_getEditMode()` check in Bill & Settle / Save &
   Exit) rather than building a parallel mechanism.
 
+### [AI UPDATE 2026-09-16 session 4b] — Edit History round 2: the ACTUAL history screen
+
+**Correction to session 4 above.** The user clarified that the screen they
+actually use day-to-day for "order history" is NOT the Admin Sales tab — it's
+an entirely separate, on-device system:
+- `localStorage['pos_24h_history']` — a rolling 24-hour local cache, written
+  by `window.saveToGhostHistory()` (defined in `index.html`) every time an
+  order is Bill & Settled or Save & Exited.
+- Viewed via the History drawer inside `index.html` itself
+  (`window.openHistoryDrawer()` / `renderHistoryBills()`), and via
+  **`details.html`** — a standalone page (`details.html?id=<ghost-id>`) shown
+  in the user's screenshot, used for viewing/printing/sharing one bill.
+
+This system previously stored only `{ id, timeStr, timestamp, total, items }`
+— no customer info, and critically **no link to the Firestore
+`sales_history` doc ID** — so nothing built in session 4 (which only touched
+the Admin Sales tab) could appear here.
+
+**What was added this round (all additive):**
+- `window.saveToGhostHistory(orderNumber, totalAmount, cartItems, meta)` in
+  `index.html` — new optional 4th param `meta = { billId, customerName,
+  customerPhone }`, stored on the ghost-history entry. Old calls without
+  `meta` behave exactly as before.
+- Both call sites in `js/cart.js` (Bill & Settle, Save & Exit) now pass
+  `meta` with the real Firestore `billId` (the same shared ID from session
+  4) and the resolved online/manual customer name+phone.
+- `renderHistoryBills()` in `index.html`: shows the customer line when
+  present, and a "✏️ Edit" button when `bill.billId` exists (older,
+  pre-round-2 entries simply won't have the button — no fake data forced
+  onto them).
+- `details.html`: shows the same customer line, an "✏️ Edit" button next to
+  "Print Bill" when `bill.billId` exists, and now loads `js/order-edit.js`.
+- **`js/order-edit.js` was refactored** so `window.editHistoryOrder(saleId)`
+  works unconditionally from any page that loads it, instead of only from
+  "the Admin page" as session 4 assumed:
+  - If `window._posOpenTable` already exists (we're ON the POS page —
+    i.e. clicked from index.html's own History drawer), it loads the order
+    **directly, in place**, no redirect.
+  - Otherwise (Admin Sales tab or `details.html`) it falls back to the
+    original localStorage-handoff + navigate-to-`index.html` approach —
+    with the redirect path now resolved based on `window.location.pathname`
+    (`../index.html` from `/admin/...`, `index.html` from anywhere else),
+    since `details.html` sits at the repo root next to `index.html`, not
+    under `admin/`.
+
+**Everything from session 4 (shared `orderId`, edit-mode branches in Bill &
+Settle/Save & Exit, delta-based stats, Admin Sales tab button) is unchanged
+and still the mechanism that actually performs the update** — this round
+only adds a second/third *entry point* into that same `editHistoryOrder()`
+flow, from the screens the user actually uses.
+
+**Still not tested against a live session** — same caveat as session 4,
+now also covering: History-drawer Edit (same-page, no redirect), and
+`details.html` Edit (redirect from repo root, not from `/admin/`).
+
