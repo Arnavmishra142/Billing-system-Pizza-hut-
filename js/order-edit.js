@@ -1,30 +1,39 @@
 // AI UPDATE [2026-09-16]: NEW FILE — "Edit History" feature.
+// AI UPDATE [2026-09-16] round 2: window.editHistoryOrder() is now callable
+// from ANY page that loads this file — the Admin Sales tab (admin/index.html),
+// the standalone bill-details page (details.html), AND the History drawer
+// inside the POS page itself (index.html) — see the note above
+// window.editHistoryOrder below for why that last one needs different
+// handling than the first two.
 //
-// PROBLEM: the Admin Sales tab (admin/index.html, js/admin.js) and the POS
-// (index.html, js/cart.js + js/tables.js) are two SEPARATE pages of the same
-// static site. "Edit History" is clicked on a bill card in the Admin page,
-// but the order must be reopened in the POS page's cart. This module is the
-// bridge between them, using localStorage (same-origin, so visible across
-// both pages) to hand off which order to load.
+// PROBLEM: the Admin Sales tab (admin/index.html, js/admin.js) and
+// details.html are separate pages from the POS (index.html, js/cart.js +
+// js/tables.js). "Edit History"/"Edit" can be clicked from any of them, but
+// the order must always be reopened in the POS page's cart. This module is
+// the bridge, using localStorage (same-origin, visible across all pages of
+// this app) to hand off which order to load when a redirect is needed.
 //
-// FLOW:
-//   1. Admin page: operator taps "Edit History" on a sales_history bill card
-//      → window.editHistoryOrder(saleId) (defined here) stores a small
-//        { saleId } flag in localStorage and navigates to the POS page.
-//   2. POS page: on load, this module checks for that flag. If present, it
+// FLOW (from the Admin page or details.html — a different page than the POS):
+//   1. operator taps "Edit History"/"✏️ Edit" → window.editHistoryOrder(saleId)
+//      stores a small { saleId } flag in localStorage and navigates to index.html.
+//   2. POS page loads: this module checks for that flag. If present, it
 //      fetches the sales_history/{saleId} record, reconstructs the cart and
 //      customer identity into a synthetic, per-order table name
-//      ("EditOrder_<saleId>"), sets the editingOrder_<table>_<slot> flag that
+//      ("EditOrder-<saleId>"), sets the editingOrder_<table>_<slot> flag that
 //      js/cart.js's Bill & Settle / Save & Exit handlers check for (see the
 //      "EDIT HISTORY" comment block near the top of js/cart.js), and opens
 //      the existing POS cart screen via the already-exposed
 //      window._posOpenTable() hook (js/tables.js) — no new POS UI is built;
 //      the existing cart screen is reused exactly as-is.
 //
-// SCOPE: this file only ever runs on the Billing/Admin panel (never on the
-// customer-facing Order- app), so "Edit History" is inherently unreachable
-// by customers — satisfies the authorization requirement without any new
-// auth code.
+// FLOW (from the POS page's own History drawer — same page as the cart):
+//   No redirect needed or possible (there's nowhere else to navigate to) —
+//   window.editHistoryOrder(saleId) loads the order directly, in place.
+//
+// SCOPE: this file only ever runs on the Billing/POS app's own pages (never
+// on the customer-facing Order- app), so "Edit History" is inherently
+// unreachable by customers — satisfies the authorization requirement without
+// any new auth code.
 //
 // This module makes NO changes to any frozen system — it only reads/writes
 // the same localStorage keys and Firestore collections js/cart.js already
@@ -37,32 +46,39 @@ const PENDING_EDIT_KEY = 'pendingOrderEdit';
 
 // Per architecture rule (ARCHITECTURE_LOCK.md §7 item 15): any module that
 // reads/writes Firestore bootstraps signInAnonymously() and gates on
-// onAuthStateChanged. Both pages already have their own anonymous session by
-// the time this runs in practice, but this keeps the module correct/safe on
-// its own regardless of load order.
+// onAuthStateChanged. Every page here already has its own anonymous session
+// by the time this runs in practice, but this keeps the module correct/safe
+// on its own regardless of load order.
 signInAnonymously(auth).catch(() => {}); // no-op if already signed in
 
+// window.editHistoryOrder is defined unconditionally (not gated by page
+// type) so the exact same button/onclick works from admin/index.html,
+// details.html, and index.html's own History drawer.
+window.editHistoryOrder = function (saleId) {
+    if (!saleId) return;
+    if (typeof window._posOpenTable === 'function') {
+        // We're already ON the POS page (e.g. clicked from the History
+        // drawer on index.html itself) — load directly, no redirect needed.
+        _loadOrderForEdit(saleId);
+        return;
+    }
+    // We're on a different page (admin/index.html or details.html) —
+    // hand off via localStorage and navigate to the POS page.
+    localStorage.setItem(PENDING_EDIT_KEY, JSON.stringify({ saleId }));
+    const posPath = window.location.pathname.includes('/admin/') ? '../index.html' : 'index.html';
+    window.location.href = posPath;
+};
+
 document.addEventListener('DOMContentLoaded', () => {
-    const isPOSPage = !!document.getElementById('activeTableName');
-    if (isPOSPage) {
-        initPOSSide();
-    } else {
-        initAdminSide();
+    // Only the POS page can actually pick up a pending handoff (it's the
+    // only page with window._posOpenTable / a cart to load into).
+    if (document.getElementById('activeTableName')) {
+        _checkPendingEdit();
     }
 });
 
-// ── Admin side: "Edit History" button on a Sales tab bill card ─────────────
-function initAdminSide() {
-    window.editHistoryOrder = function (saleId) {
-        if (!saleId) return;
-        localStorage.setItem(PENDING_EDIT_KEY, JSON.stringify({ saleId }));
-        // admin/index.html → ../index.html is the POS app's location.
-        window.location.href = '../index.html';
-    };
-}
-
-// ── POS side: pick up the handoff flag and load the order into the cart ────
-function initPOSSide() {
+// ── Pick up a handoff flag left by editHistoryOrder() on a different page ──
+function _checkPendingEdit() {
     let raw;
     try { raw = localStorage.getItem(PENDING_EDIT_KEY); } catch (_) { raw = null; }
     if (!raw) return;

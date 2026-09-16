@@ -2102,7 +2102,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (window.saveToGhostHistory) {
                 let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
-                window.saveToGhostHistory(orderId, total, cartSnapshot);
+                // AI UPDATE [2026-09-16] round 2: pass billId + customer identity so
+                // the on-device 24h History drawer / details.html can show who this
+                // bill belongs to and offer an Edit button for it (see js/order-edit.js).
+                window.saveToGhostHistory(orderId, total, cartSnapshot, {
+                    billId,
+                    customerName:  _onlineName  || _manualCustomer.name || null,
+                    customerPhone: _onlinePhone || (_manualCustomer.phone ? `+91${_manualCustomer.phone}` : null),
+                });
             }
 
             // AI UPDATE [2026-09-12]: Mark the redeemed coupon as used (fire & forget).
@@ -2256,7 +2263,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (window.saveToGhostHistory) {
                     let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
-                    window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot);
+                    // AI UPDATE [2026-09-16] round 2: see the matching Bill & Settle note above.
+                    window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot, {
+                        billId,
+                        customerName:  _onlineName  || _manualCustomer.name || null,
+                        customerPhone: _onlinePhone || (_manualCustomer.phone ? `+91${_manualCustomer.phone}` : null),
+                    });
                 }
 
                 // AI UPDATE [2026-09-12]: Mark the redeemed coupon as used (fire & forget).
