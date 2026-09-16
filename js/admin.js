@@ -253,7 +253,18 @@ window.loadSalesData = async function(filterType, filterValue) {
             targetStats[n].rev += (Number(item.qty) || 0) * (Number(item.price) || 0);
         });
 
-        const card = { id: sale.id, label, timeStr, total };
+        // AI UPDATE [2026-09-16] EDIT HISTORY: surface customer name/phone on the
+        // bill card when the order has one attached (QR/online first, then a
+        // manually-captured POS customer). Old/anonymous orders have neither
+        // field — customerLabel stays empty and the card layout is unchanged
+        // for them (requirement: never show fake/empty customer data).
+        const customerLabel = sale.onlineCustomerName
+            ? `${sale.onlineCustomerName}${sale.onlineCustomerPhone ? ' · ' + sale.onlineCustomerPhone : ''}`
+            : (sale.manualCustomerName || sale.manualCustomerPhone)
+                ? `${sale.manualCustomerName || 'Customer'}${sale.manualCustomerPhone ? ' · ' + sale.manualCustomerPhone : ''}`
+                : '';
+
+        const card = { id: sale.id, label, timeStr, total, customerLabel, isEdited: !!sale.isEdited };
         if (isQS) { qsRevenue += total; qsOrders++; qsBills.push(card); }
         else       { tableRevenue += total; tableOrders++; tableBills.push(card); }
     });
@@ -294,14 +305,20 @@ window.loadSalesData = async function(filterType, filterValue) {
             el.innerHTML = '<div class="empty-state">No bills found.</div>';
             return;
         }
+        // AI UPDATE [2026-09-16] EDIT HISTORY: added the optional customer line,
+        // an "Edited" badge for orders already edited once, and the "✏️ Edit
+        // History" button (wired to window.editHistoryOrder — see js/order-edit.js).
+        // Existing markup/classes are unchanged; everything here is additive.
         el.innerHTML = bills.map(b => `
             <div class="bill-card">
                 <div class="bill-card-left">
-                    <div class="bill-card-name">${b.label}</div>
+                    <div class="bill-card-name">${b.label}${b.isEdited ? ' <span style="font-size:0.65rem;color:#d29922;font-weight:700;">(Edited)</span>' : ''}</div>
+                    ${b.customerLabel ? `<div class="bill-card-time" style="color:#58a6ff;">${b.customerLabel}</div>` : ''}
                     <div class="bill-card-time">${b.timeStr}</div>
                 </div>
                 <div class="bill-card-right">
                     <div class="bill-card-amt">₹${Number(b.total).toFixed(0)}</div>
+                    <button class="bill-del-btn" style="font-size:0.68rem;padding:4px 8px;margin-bottom:4px;" onclick="editHistoryOrder('${b.id}')">✏️ Edit History</button>
                     <button class="bill-del-btn" onclick="deleteSale('${b.id}')">🗑</button>
                 </div>
             </div>
