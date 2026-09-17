@@ -6168,3 +6168,88 @@ flow, from the screens the user actually uses.
 now also covering: History-drawer Edit (same-page, no redirect), and
 `details.html` Edit (redirect from repo root, not from `/admin/`).
 
+### [AI UPDATE 2026-09-16 session 5] — BUG FIX: Customer Statistics not updating when a customer is attached via Edit History
+
+**Reported symptom:** editing a previously-anonymous completed order through
+Edit History to attach a customer's name/phone correctly created/updated the
+`customer_order_history` entry, but the customer's `totalOrders`/
+`lifetimeSpend` on `customers/{phone}` did not change at all.
+
+**Root cause (audited, not guessed):** `syncManualCustomerProfile()` and
+`syncCustomerOrderCompletion()`'s `editContext` parameter (session 4) was
+built as `_editMode ? { previousTotal: _editMode.originalTotal } : null` —
+i.e. it treated *"an edit is in progress"* as equivalent to *"this order
+already contributed to a customer's stats once, so only apply the total's
+delta."* Those are different things. An order that was saved with NO
+customer at all, then gets a customer attached during Edit History, has
+NEVER contributed to that customer's stats — it needs the FULL total added
+(like any new order), not a delta against its pre-edit total. In the
+reported case the item total didn't change during that edit (still ₹10), so
+`delta = 10 − 10 = 0` and the stats silently didn't move — exactly the
+observed bug.
+
+**Fix:** added a `hadCustomer` flag to the edit-mode payload
+(`editingOrder_<table>_<slot>` in localStorage, written by
+`js/order-edit.js`), set from whether the loaded `sales_history` doc already
+had `onlineCustomerUid` or `manualCustomerPhone` **before** this edit
+session started. New helper `_statsEditContext(editMode)` in `js/cart.js`
+now gates the delta behavior on that flag:
+- `hadCustomer: true` (order already belonged to a customer) → delta-only,
+  `totalOrders` untouched — same behavior as session 4, unchanged.
+- `hadCustomer: false` (anonymous order, customer attached during this
+  edit) → returns `null`, so `syncManualCustomerProfile()`/
+  `syncCustomerOrderCompletion()` take their normal, non-edit "full add"
+  path: `totalOrders +1`, `lifetimeSpend += total` (the order's current,
+  post-edit total — correct, since that IS this customer's actual
+  contribution from this order).
+- A missing `hadCustomer` (only possible for an edit session started with
+  the pre-session-5 `js/order-edit.js` and settled after this fix is
+  deployed — a narrow, self-resolving rollout window) defaults to `true`
+  (delta-only) — the safer failure mode, since it can only under-count a
+  mid-transition first-time attachment, never double-count an order that
+  genuinely already belonged to a customer.
+
+**Files/functions changed:** `js/order-edit.js` (`hadCustomer` computed and
+stored), `js/cart.js` (new `_statsEditContext()` helper; the 4 call sites
+in Bill & Settle / Save & Exit — both `syncCustomerOrderCompletion()` and
+`syncManualCustomerProfile()` calls in each — now call it instead of
+inlining the old unconditional ternary).
+
+**Multiple-edit correctness (re-verified, not changed by this fix):**
+`_editMode.originalTotal` is set from the sale's CURRENT `total` at the
+moment each edit session is loaded (not a fixed first-ever total), so
+repeated edits already correctly collapse to "one order, final total"
+contribution — e.g. ₹10 → ₹50 → ₹70 across two edits nets exactly +₹60
+total lifetime-spend impact, never +₹130. This was already correct in
+session 4 and did not need changing.
+
+**Customer-reassignment (spec §5) — audited, deliberately NOT implemented:**
+the current Edit History UI has no way to change which customer an order is
+attached to during an edit — the identity popup only appears when NO
+identity is already resolved for the slot, and once `js/order-edit.js`
+restores an existing identity, there is no affordance to swap it. Per the
+task's own instruction ("if not intended/supported by the current feature,
+preserve the existing intended behavior rather than adding reassignment"),
+no reassignment logic was added. If this becomes reachable in the future,
+correct handling requires decrementing the ORIGINAL customer's stats by the
+order's last-known contribution and crediting the NEW customer per the
+anonymous-attach rule above — not implemented here.
+
+**Atomicity — audited, unchanged by design:** the existing codebase updates
+`customers/{phone}` stats via plain `updateDoc()` + `increment()` (atomic
+per-field, but not a multi-document transaction with the
+`customer_order_history` write) everywhere, not just in the edit path. This
+fix follows that same existing pattern rather than introducing a new
+transactional mechanism, per the "reuse existing architecture" instruction.
+This was true before session 4/5 as well — not a regression introduced by
+Edit History.
+
+**Sales History / security:** untouched — this fix only changes which
+`editContext` value is computed before calling two already-existing
+functions; no new Firestore writes, no rule changes, no new UI.
+
+**Not yet tested against a live session** — verify at minimum: TEST 1
+(anonymous order → attach customer, same total) and TEST 2 (edit an
+already-customer'd order, total changes) from the bug report, since those
+are exactly the two branches this fix distinguishes between.
+
