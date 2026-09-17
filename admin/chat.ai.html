@@ -440,8 +440,15 @@
     /* ── Groq call (static site — no backend, key ships in
        groq-key.generated.js which build.js writes at publish time) ── */
     const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-    const GROQ_PRIMARY_MODEL = 'llama-3.3-70b-versatile';
-    const GROQ_FALLBACK_MODEL = 'llama-3.1-8b-instant';
+    // AI UPDATE [2026-09-17]: llama-3.3-70b-versatile and llama-3.1-8b-instant
+    // were both decommissioned by Groq on 2026-08-16 (see
+    // https://console.groq.com/docs/deprecations) — every request was failing
+    // with "model does not exist". Replaced with Groq's own recommended
+    // migration targets: openai/gpt-oss-120b (quality tier, primary) and
+    // openai/gpt-oss-20b (fast tier, fallback) — same primary/fallback shape
+    // as before, just current model IDs.
+    const GROQ_PRIMARY_MODEL = 'openai/gpt-oss-120b';
+    const GROQ_FALLBACK_MODEL = 'openai/gpt-oss-20b';
 
     async function callGroq(model, prompt) {
         return fetch(GROQ_URL, {
@@ -464,7 +471,11 @@
         }
 
         let res = await callGroq(GROQ_PRIMARY_MODEL, prompt);
-        if (res.status === 429) {
+        // AI UPDATE [2026-09-17]: also fall back on 404 (model not
+        // found/decommissioned), not just 429 (rate limit) — so a FUTURE
+        // Groq deprecation of just the primary model degrades to the
+        // fallback model instead of hard-failing the whole chat again.
+        if (res.status === 429 || res.status === 404) {
             res = await callGroq(GROQ_FALLBACK_MODEL, prompt);
         }
 
