@@ -1,3 +1,8 @@
 # groq-key.generated.js is intentionally committed so GitHub Pages can serve it.
 # build.js regenerates it from the GROQ_API_KEY secret on every Replit start/deploy.
 # The key is intentionally visible in source — see replit.md for the accepted tradeoff.
+
+# AI UPDATE [2026-09-17]: real .env file (holds your actual GROQ_API_KEY etc. for
+# local/Termux use) must NEVER be committed/force-pushed — only .env.example
+# (which has no real values) is meant to be in the repo.
+.env

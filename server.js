@@ -33,6 +33,17 @@
 
 'use strict';
 
+// AI UPDATE [2026-09-17]: dotenv support added for local/Termux use — lets
+// GROQ_API_KEY (and CLOUDINARY_* below) be set once in a local .env file
+// instead of needing `export VAR=...` in every new terminal session. Has
+// ZERO effect on Replit or any host that already sets real environment
+// variables — dotenv only ever fills in a var that isn't already set, it
+// never overrides one that is. Requires `npm install` to fetch the new
+// `dotenv` package (added to package.json) before this line will do anything;
+// if dotenv isn't installed yet this require would crash the server, so it's
+// wrapped in try/catch — falls back to plain process.env, same as before.
+try { require('dotenv').config(); } catch (_) { /* dotenv not installed yet — falls back to real env vars only */ }
+
 const express   = require('express');
 const path      = require('path');
 const fs        = require('fs');

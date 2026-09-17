@@ -6253,3 +6253,25 @@ functions; no new Firestore writes, no rule changes, no new UI.
 already-customer'd order, total changes) from the bug report, since those
 are exactly the two branches this fix distinguishes between.
 
+### [AI UPDATE 2026-09-17] — dotenv support for local/Termux use (unrelated to Edit History)
+
+**Not a bug fix — a deployment convenience, requested directly by the user.**
+The user runs this app from Termux (not Replit) and was hitting "AI key not
+configured" because `GROQ_API_KEY` was never set as a real environment
+variable in that shell. Added:
+- `server.js`: `try { require('dotenv').config(); } catch {}` as the very
+  first line, before any `process.env.*` reads. Wrapped in try/catch so a
+  missing `dotenv` package (until `npm install` is run) never crashes the
+  server — falls back to real env vars exactly as before.
+- `package.json`: added `dotenv` to dependencies. **User must run
+  `npm install` once** for this to take effect.
+- `.env.example` (new, safe to commit — no real values): documents
+  `GROQ_API_KEY` and the three `CLOUDINARY_*` vars `server.js` reads.
+- `.gitignore`: added `.env` so a real `.env` file (created by the user,
+  holding their actual key) can never be committed/force-pushed.
+
+dotenv only fills in variables that aren't already set — this has zero
+effect on Replit or any host that sets real environment variables, so the
+existing Replit/GitHub Pages `build.js`/committed-key deployment path
+(see the `.gitignore` comment above this entry) is unaffected.
+
