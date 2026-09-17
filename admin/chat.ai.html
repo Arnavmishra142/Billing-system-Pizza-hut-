@@ -514,7 +514,43 @@ ${days || 'No data yet'}
 - Full menu (${(history.menu || []).length} items): ${menuList}`;
         }
 
-        return `You are the Smart AI Manager for "New Pizza Hut & Live Cake", a restaurant. You have both LIVE (selected period on the dashboard) stats and cached HISTORICAL data covering all past sales, expenses, and the full menu — use both together to spot trends and give grounded advice, not just today's snapshot. Always report sales as ONE combined business total — never split or mention "Table" vs "Quick Sale"/"Cash Sale" as separate categories, the owner only cares about total numbers. Be concise, smart, and friendly. Reply in Hinglish (Hindi + English mix) with practical business insights. Keep answers under 120 words unless a detailed breakdown is asked. Use emojis naturally.
+        // AI UPDATE [2026-09-17]: Customers/Coupons/Staff blocks — extends the
+        // Smart AI Manager from Sales+Expenses-only to the full Admin Panel.
+        // Note: names shown here are already visible to the operator elsewhere
+        // in the Admin Panel; phone numbers and per-day staff notes are
+        // deliberately never included (see js/ai-data-cache.js).
+        let customersBlock = 'CUSTOMER DATA: Not available right now.';
+        const custData = history?.customers;
+        if (custData) {
+            const sc = custData.statusCounts || {};
+            const top = (custData.topSpenders || [])
+                .map(c => `${c.name} (₹${c.spending}, ${c.orders} orders)`)
+                .join('; ') || 'No data';
+            customersBlock = `CUSTOMER DATA:
+- Total customers: ${custData.totalCustomers || 0} (New: ${sc.new || 0}, Returning: ${sc.returning || 0}, Inactive 30d+: ${sc.inactive || 0}, Never ordered: ${sc.neverOrdered || 0})
+- Top spenders: ${top}`;
+        }
+
+        let couponsBlock = 'COUPON DATA: Not available right now.';
+        const cpData = history?.coupons;
+        if (cpData) {
+            couponsBlock = `COUPON DATA:
+- Total coupons: ${cpData.totalCoupons || 0} (Active: ${cpData.active || 0}, Used: ${cpData.used || 0})
+- Value issued: ₹${cpData.valueIssued || 0}, Value redeemed: ₹${cpData.valueRedeemed || 0}`;
+        }
+
+        let staffBlock = 'STAFF DATA: Not available right now.';
+        const stData = history?.staff;
+        if (stData) {
+            const roster = (stData.roster || [])
+                .map(s => `${s.name} (${s.workType || 'N/A'}) — Advances (30d): ₹${s.last30DaysAdvance}, Holidays (30d): ${s.last30DaysHolidays}`)
+                .join('; ') || 'No data';
+            staffBlock = `STAFF DATA:
+- Active staff: ${stData.totalStaff || 0}
+- Roster: ${roster}`;
+        }
+
+        return `You are the Smart AI Manager for "New Pizza Hut & Live Cake", a restaurant. You have LIVE (selected period on the dashboard) stats and cached HISTORICAL data covering sales, expenses, the full menu, customers, coupons, and staff — use all of it together to spot trends and give grounded advice, not just today's snapshot. Always report sales as ONE combined business total — never split or mention "Table" vs "Quick Sale"/"Cash Sale" as separate categories, the owner only cares about total numbers. Be concise, smart, and friendly. Reply in Hinglish (Hindi + English mix) with practical business insights. Keep answers under 120 words unless a detailed breakdown is asked. Use emojis naturally.
 
 LIVE DASHBOARD STATS (selected period):
 - Total Revenue: ${ctx.totalRevenue || 'N/A'}
@@ -523,6 +559,12 @@ LIVE DASHBOARD STATS (selected period):
 - Top Selling Items: ${topItems}
 
 ${historyBlock}
+
+${customersBlock}
+
+${couponsBlock}
+
+${staffBlock}
 
 Admin's Question: ${userMessage}`;
     }
