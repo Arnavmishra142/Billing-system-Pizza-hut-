@@ -6275,3 +6275,26 @@ effect on Replit or any host that sets real environment variables, so the
 existing Replit/GitHub Pages `build.js`/committed-key deployment path
 (see the `.gitignore` comment above this entry) is unaffected.
 
+### [AI UPDATE 2026-09-17] — BUG FIX: Groq model deprecated ("model does not exist")
+
+**Symptom:** Smart AI Manager chat (`admin/chat.ai.html`) failed every
+request with `The model llama-3.3-70b-versatile does not exist or you do not
+have access to it.`
+
+**Root cause:** Groq decommissioned `llama-3.3-70b-versatile` (primary
+model) and `llama-3.1-8b-instant` (fallback model, used on rate-limit) on
+2026-08-16 — both were hardcoded in `admin/chat.ai.html`
+(`GROQ_PRIMARY_MODEL`/`GROQ_FALLBACK_MODEL`). Confirmed via Groq's own
+deprecations page, not guessed.
+
+**Fix:** replaced with Groq's own recommended migration targets:
+`openai/gpt-oss-120b` (primary) and `openai/gpt-oss-20b` (fallback) — same
+quality/speed split as before, just current model IDs. Also widened the
+fallback trigger from only `429` (rate limit) to `429 || 404` (model not
+found too), so a future single-model deprecation degrades to the fallback
+instead of hard-failing the whole chat again.
+
+File changed: `admin/chat.ai.html` only. `js/ai-manager.js` (the 🤖 launcher
+button on `admin/index.html`) just navigates to this page and was not
+touched — it has no model reference of its own.
+
