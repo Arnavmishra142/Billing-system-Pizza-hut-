@@ -150,12 +150,24 @@ async function _loadOrderForEdit(saleId) {
     // Anonymous/walk-in order (neither field present): nothing to restore —
     // editing behaves exactly like any new manual bill on this slot.
 
+    // AI UPDATE [2026-09-16] session 5 — CUSTOMER STATS BUG FIX:
+    // hadCustomer records whether THIS order already had a customer identity
+    // attached BEFORE this edit session. This is the missing signal that
+    // caused the bug: js/cart.js's edit-mode stats branch was applying a
+    // DELTA (new total − old total) unconditionally whenever `_editMode`
+    // existed, with no way to tell "editing an order that already belonged
+    // to this customer" (delta is correct) apart from "attaching a customer
+    // to a previously-anonymous order for the first time" (the FULL total
+    // should count, since this customer never got any prior credit for this
+    // order). See the matching fix in js/cart.js Bill & Settle / Save & Exit.
+    const hadCustomer = !!(sale.onlineCustomerUid || sale.manualCustomerPhone);
+
     // 3. Flag this slot as an edit-in-progress — js/cart.js's Bill & Settle /
     //    Save & Exit handlers check for this to update the ORIGINAL record
     //    instead of creating a new one (see js/cart.js "EDIT HISTORY" block).
     localStorage.setItem(
         `editingOrder_${editTable}_${slot}`,
-        JSON.stringify({ orderId: saleId, originalTotal: Number(sale.total) || 0 })
+        JSON.stringify({ orderId: saleId, originalTotal: Number(sale.total) || 0, hadCustomer })
     );
 
     // 4. Open the existing POS cart screen — no new UI, same screen every

@@ -152,7 +152,7 @@ const COUPON_SECTION_MIN_SUBTOTAL = 200;
 // byte-for-byte unchanged when no edit-mode flag is present for the slot.
 //
 // Flag shape (localStorage, key: editingOrder_<table>_<slot>):
-//   { orderId: string, originalTotal: number }
+//   { orderId: string, originalTotal: number, hadCustomer: boolean }
 // Written by js/order-edit.js when it loads a sales_history record into the
 // cart; read here; cleared here once the edit is actually settled/saved.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -167,6 +167,40 @@ function _getEditMode(tableName, customerSlot) {
 }
 function _clearEditMode(tableName, customerSlot) {
     localStorage.removeItem(_editModeKey(tableName, customerSlot));
+}
+
+// AI UPDATE [2026-09-16] session 5 — CUSTOMER STATS BUG FIX.
+//
+// ROOT CAUSE: syncCustomerOrderCompletion()/syncManualCustomerProfile()'s
+// `editContext` param (added session 4) was passed whenever `_editMode`
+// existed, full stop — i.e. "an edit is happening" was treated as identical
+// to "this order already contributed to this customer's stats once." Those
+// are NOT the same thing: an order that was originally saved with NO
+// customer attached, and only gets a customer attached during this very
+// edit, has never contributed to ANY customer's totalOrders/lifetimeSpend —
+// it needs the FULL normal increment (like a brand-new order), not a delta
+// against its pre-edit total (which is frequently 0, e.g. when only the
+// customer identity changed and no items did — exactly the reported bug).
+//
+// FIX: only ever build a delta-style editContext when the order ALREADY had
+// a customer identity attached before this edit session started
+// (`_editMode.hadCustomer`, set by js/order-edit.js from the loaded
+// sales_history doc's onlineCustomerUid/manualCustomerPhone). Otherwise
+// (anonymous → customer attach, or no edit at all) this returns null, which
+// makes both sync functions take their normal "full add" path — exactly
+// correct for a customer's first-ever contribution from this order.
+//
+// A missing `hadCustomer` field (only possible for an edit session that was
+// started with a pre-session-5 build of js/order-edit.js and settled after
+// this fix was deployed) defaults to `true` — i.e. still delta-only — since
+// that is the safer failure mode: it can under-count a genuinely-new
+// customer attachment made mid-transition, but it can never DOUBLE-count an
+// order that truly already belonged to a customer. This is a narrow,
+// self-resolving rollout edge case, not an ongoing design gap.
+function _statsEditContext(editMode) {
+    if (!editMode) return null;
+    const hadCustomer = editMode.hadCustomer === undefined ? true : !!editMode.hadCustomer;
+    return hadCustomer ? { previousTotal: editMode.originalTotal } : null;
 }
 
 async function _maybeIssueLoyaltyCoupon(phone, name) {
@@ -2137,7 +2171,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // null on a normal (non-edit) bill, so behavior there is unchanged.
             syncCustomerOrderCompletion(
                 tableName, customerName, cartSnapshot, total, 'bill_settle', shortOrderId,
-                billId, _editMode ? { previousTotal: _editMode.originalTotal } : null
+                billId, _statsEditContext(_editMode)
             );
 
             // [AI UPDATE 2026-09-14] Manual POS customer identification — only
@@ -2147,7 +2181,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (_manualCustomer.phone) {
                 syncManualCustomerProfile(
                     _manualCustomer.name, _manualCustomer.phone, total, shortOrderId, tableName, 'bill_settle', cartSnapshot,
-                    billId, _editMode ? { previousTotal: _editMode.originalTotal } : null
+                    billId, _statsEditContext(_editMode)
                 );
             }
 
@@ -2295,7 +2329,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // — both null/undefined on a normal (non-edit) save, so unchanged there.
                 syncCustomerOrderCompletion(
                     tableName, customerName, cartSnapshot, total, 'save_exit', null,
-                    billId, _editMode ? { previousTotal: _editMode.originalTotal } : null
+                    billId, _statsEditContext(_editMode)
                 );
 
                 // [AI UPDATE 2026-09-14] Manual POS customer identification —
@@ -2303,7 +2337,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (_manualCustomer.phone) {
                     syncManualCustomerProfile(
                         _manualCustomer.name, _manualCustomer.phone, total, shortOrderId, tableName, 'save_exit', cartSnapshot,
-                        billId, _editMode ? { previousTotal: _editMode.originalTotal } : null
+                        billId, _statsEditContext(_editMode)
                     );
                 }
 
