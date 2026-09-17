@@ -6298,3 +6298,43 @@ File changed: `admin/chat.ai.html` only. `js/ai-manager.js` (the 🤖 launcher
 button on `admin/index.html`) just navigates to this page and was not
 touched — it has no model reference of its own.
 
+### [AI UPDATE 2026-09-17] — Smart AI Manager: full Admin Panel data access (was Sales+Expenses only)
+
+**Task:** Give the Smart AI Manager chat (`admin/chat.ai.html`) visibility
+into the *whole* existing Admin Panel — not just Sales and Expenses — so it
+can answer questions about Customers, Coupons, and Staff too. No parallel
+architecture, no new collections, no auth changes.
+
+**What changed:**
+- `js/ai-data-cache.js` — the existing 24h-cached historical-context fetch
+  (previously `sales_history` + `daily_expenses` + `menu_items` only) now
+  also reads the existing `customers`, `coupons`, and `staff` collections
+  (plus a `collectionGroup('dailyRecords')` query for staff daily records —
+  one query instead of one read per staff doc). Each is summarized into
+  compact aggregates:
+  - **Customers:** total count, status buckets (new/returning/inactive/never
+    ordered — same definitions as the Customer Management panel), and top
+    spenders by lifetime spend.
+  - **Coupons:** total/active/used counts and value issued vs redeemed.
+  - **Staff:** active roster (name, work type) with last-30-day advance and
+    holiday totals per person.
+  - Cache key bumped to `ai_history_cache_v2` since the cached shape changed.
+- `admin/chat.ai.html` — `buildPrompt()` now includes CUSTOMER DATA, COUPON
+  DATA, and STAFF DATA blocks alongside the existing sales/expense/menu
+  blocks, and the system prompt sentence was updated to mention them.
+
+**Privacy consideration:** this data is sent to a third-party API (Groq).
+Customer phone numbers and individual staff daily-record notes are
+deliberately **excluded** from the summary — only names and aggregate
+business stats are sent, consistent with how sales data was already
+aggregated (top items, not raw order rows) rather than sent raw.
+
+**Security:** no Firestore rules, auth, or collection names were changed.
+Every collection read here was already isOperator()-gated in
+`firestore.rules` and already readable elsewhere in the Admin Panel by an
+authenticated operator (`js/customers.js`, `js/staff-shared.js`) — this
+change only lets the *AI chat* see summaries of data the admin session
+could already read.
+
+Files changed: `js/ai-data-cache.js`, `admin/chat.ai.html`. No other files
+touched.
