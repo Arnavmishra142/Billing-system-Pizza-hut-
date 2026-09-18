@@ -26,7 +26,7 @@ import {
     collection, collectionGroup, getDocsFromServer
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-const BUILD    = '2026-09-18-a'; // bump this any time this file changes — logged on every fetch/error so you can confirm a deploy actually took effect
+const BUILD    = '2026-09-18-b'; // bump this any time this file changes — logged on every fetch/error so you can confirm a deploy actually took effect
 const LS_KEY   = 'ai_history_cache_v2'; // v2: schema now includes customers/coupons/staff
 const TTL_MS   = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_DAYS = 120;                 // cap how many days of history we keep/send
@@ -230,12 +230,18 @@ export async function getAiHistoricalContext() {
     if (isFresh) return cached.data;
 
     // Each entry: [label, fetch function]. Fetched independently so one
-    // failing collection can never wipe out the others.
+    // failing collection can never wipe out the others. Errors are
+    // collected (not just console.logged) so they can be surfaced directly
+    // in the chat UI — see admin/chat.ai.html — since a phone browser's
+    // console isn't practically reachable for most people.
+    const errors = {};
     async function safeFetch(label, fn) {
         try {
             return await fn();
         } catch (e) {
+            const msg = e?.code || e?.message || String(e);
             console.error(`[ai-data-cache v${BUILD}] Failed to fetch "${label}":`, e);
+            errors[label] = msg;
             return null; // caller treats null as "section unavailable"
         }
     }
@@ -252,11 +258,27 @@ export async function getAiHistoricalContext() {
         safeFetch('staff/*/dailyRecords', () => getDocsFromServer(collectionGroup(db, "dailyRecords"))),
     ]);
 
-    // If EVERY single read failed (e.g. fully offline), fall back to
-    // whatever cache we have, however stale, rather than showing nothing.
-    if (!salesSnap && !expenseSnap && !menuSnap && !customersSnap && !couponsSnap && !staffSnap && !dailyRecordsSnap) {
-        console.error(`[ai-data-cache v${BUILD}] All Firestore reads failed — falling back to stale cache if any.`);
-        return cached ? cached.data : null;
+    const anySucceeded = salesSnap || expenseSnap || menuSnap || customersSnap || couponsSnap || staffSnap || dailyRecordsSnap;
+
+    // AI UPDATE [2026-09-18]: BUG FIX (2nd pass) — previously, if EVERY
+    // read failed, this returned `cached ? cached.data : null` with the
+    // actual error messages only in the console (unreachable on a phone).
+    // Now the real error map is always attached as `_lastFetchErrors` on
+    // whatever we return (cache or empty shell), so chat.ai.html can show
+    // the actual reason ("permission-denied", etc.) directly in the chat.
+    if (!anySucceeded) {
+        console.error(`[ai-data-cache v${BUILD}] All Firestore reads failed:`, errors);
+        if (cached) return { ...cached.data, _lastFetchErrors: errors };
+        // No cache at all yet — return an empty-but-valid shell (not null)
+        // so the UI can still show exactly what failed and why.
+        return {
+            ...summarize([], [], []),
+            customers: summarizeCustomers([]),
+            coupons:   summarizeCoupons([]),
+            staff:     summarizeStaff([], []),
+            _sectionsLoaded: { sales: false, expenses: false, menu: false, customers: false, coupons: false, staff: false, dailyRecords: false },
+            _lastFetchErrors: errors,
+        };
     }
 
     const sales     = []; salesSnap?.forEach(d => sales.push(d.data()));
@@ -285,6 +307,11 @@ export async function getAiHistoricalContext() {
             staff: !!staffSnap, dailyRecords: !!dailyRecordsSnap,
         },
     };
+    // Partial failure (some sections loaded, some didn't) — still attach
+    // the real errors so chat.ai.html can show exactly which section(s)
+    // failed, even though the overall fetch "succeeded".
+    if (Object.keys(errors).length > 0) data._lastFetchErrors = errors;
+
     writeLS({ fetchedAt: Date.now(), data });
     return data;
 }
