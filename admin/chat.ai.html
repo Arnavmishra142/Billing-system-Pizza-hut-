@@ -344,7 +344,7 @@
     // DevTools console, without needing to view-source. The header title
     // ("Smart AI Manager v2") is the same marker, visible with no DevTools
     // at all — bump both together.
-    const CHAT_BUILD = '2026-09-18-a';
+    const CHAT_BUILD = '2026-09-18-b';
     console.log(`[chat.ai.html] loaded, build ${CHAT_BUILD}`);
 
     const messagesEl  = document.getElementById('aiMessages');
@@ -392,6 +392,17 @@
 
     /* ── Welcome message ─────────────────────────────────────── */
     appendMsg('ai', `👋 Hello Boss! Main hoon aapka **Smart AI Manager v2**.\n\nAbhi ke live stats dekh raha hoon — Revenue **${ctx.totalRevenue || 'N/A'}**, Orders **${ctx.totalOrders || 'N/A'}**. Kuch bhi poochho! 🚀`);
+
+    /* ── Data-sync diagnostic (AI UPDATE 2026-09-18) ─────────────
+       Renders as a plain system message — NOT sent through Groq — so the
+       exact Firestore error is visible right in the chat itself. This
+       replaces having to dig through a phone browser's DevTools console:
+       a screenshot of this bubble is now enough to diagnose a sync issue. */
+    const fetchErrors = ctx.history?._lastFetchErrors;
+    if (fetchErrors && Object.keys(fetchErrors).length > 0) {
+        const lines = Object.entries(fetchErrors).map(([label, msg]) => `• ${label}: ${msg}`).join('\n');
+        appendMsg('ai', `⚠️ **Data sync issue detected** (build ${CHAT_BUILD}):\n\n${lines}\n\nYeh screenshot developer ko bhej dena — isse exact wajah pata chal jayegi.`);
+    }
 
     /* ── Suggestion chips ────────────────────────────────────── */
     suggestions.querySelectorAll('.ai-suggestion-chip').forEach(chip => {
