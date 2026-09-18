@@ -6443,3 +6443,64 @@ guess, (4) the 429/404 model-fallback still works mid-tool-loop.
 Files changed: `js/ai-live-lookup.js` (new), `admin/chat.ai.html`. No other
 files touched — `js/ai-data-cache.js` (the summary layer) is untouched and
 still runs exactly as before.
+
+### [AI UPDATE 2026-09-18] — BUG FIX: `staff/*/dailyRecords` permission-denied (pre-existing, surfaced by testing the live lookup tools)
+
+**Symptom:** live on the deployed site, the Smart AI Manager's own
+data-sync diagnostic bubble showed:
+`⚠️ Data sync issue detected: • staff/*/dailyRecords: permission-denied`
+
+**This was NOT caused by the live-lookup-tools change above** — it's a
+pre-existing bug. `js/ai-data-cache.js`'s `summarizeStaff()` has always run
+a `collectionGroup(db, "dailyRecords")` query (one query across every staff
+member's daily records, instead of one read per staff doc — see that file's
+comments), and it was always silently failing; `safeFetch()`'s per-section
+try/catch (session [AI UPDATE 2026-09-18] earlier in this doc) just
+swallowed it into the diagnostic bubble instead of crashing the whole
+chat, which is why it went unnoticed until now. It only became visible
+today because the new `search_notes` tool in `js/ai-live-lookup.js` runs
+the exact same kind of `collectionGroup('dailyRecords')` query and its
+result surfaces the error immediately in the same diagnostic.
+
+**Root cause:** `firestore.rules` had
+```
+match /staff/{staffId} {
+  allow read, write: if isOperator();
+  match /dailyRecords/{dateId} {
+    allow read, write: if isOperator();
+  }
+}
+```
+A subcollection rule nested under one specific parent (`staff/{staffId}`)
+only ever applies to a direct-path read/write
+(`staff/{staffId}/dailyRecords/{dateId}` or a plain, non-group query at
+that one path). It does **not** apply to a `collectionGroup()` query, which
+Firestore evaluates against every `dailyRecords` collection across every
+parent at once — that needs its own separate wildcard rule. Individual
+staff pages (`js/staff-shared.js`, direct-path reads only) always worked
+fine, which is exactly why this stayed hidden.
+
+**Fix:** added, in `firestore.rules`, right after the existing `staff`
+block:
+```
+match /{path=**}/dailyRecords/{dateId} {
+  allow read: if isOperator();
+}
+```
+Read-only — the app never writes via a collectionGroup query (all writes
+go through `saveDailyRecord()` in `js/staff-shared.js`, which always uses
+the direct per-staff path), so the existing nested write rule is untouched
+and this adds no new write surface.
+
+**⚠️ Deploy step required — this does NOT ship with the static site build:**
+`firestore.rules` is deployed separately from GitHub Pages/`build.js`. Run:
+```
+firebase deploy --only firestore:rules
+```
+Until that's run against the live Firebase project, staff 30-day
+advance/holiday aggregates in the AI chat's summary AND the new
+`search_notes`/`get_staff_record` tools will keep silently missing staff
+daily-record data (aggregates from `dailyRecords` will read as empty, not
+error out loud everywhere — only the chat's own diagnostic bubble shows it).
+
+Files changed: `firestore.rules` only.

@@ -218,6 +218,24 @@ service cloud.firestore {
       }
     }
 
+    // AI UPDATE [2026-09-18] BUG FIX: the nested `match /dailyRecords/{dateId}`
+    // rule above only covers reads/writes at the direct path
+    // staff/{staffId}/dailyRecords/{dateId} — it does NOT cover a
+    // collectionGroup('dailyRecords') query (Firestore requires a separate
+    // wildcard rule for collection-group reads; a subcollection rule nested
+    // under a specific parent never applies to one). Every dailyRecords
+    // collectionGroup read in the app (js/ai-data-cache.js's staff
+    // 30-day-advance/holiday summary, and js/ai-live-lookup.js's search_notes
+    // tool) was silently failing with "permission-denied" because of this —
+    // confirmed live in the Smart AI Manager chat's own data-sync diagnostic
+    // (see admin/chat.ai.html). Individual staff pages worked fine (they only
+    // ever did direct-path reads), which is why this went unnoticed. Read-only
+    // — the app never writes via a collectionGroup query, only via the direct
+    // per-staff path above, so that write rule is untouched.
+    match /{path=**}/dailyRecords/{dateId} {
+      allow read: if isOperator();
+    }
+
     // ── customer_order_history ────────────────────────────────────────────────
     // Written by the billing panel (operator) when Bill & Settle / Save & Exit
     // completes an order that originated from the Customer Panel.
