@@ -23,12 +23,24 @@
  */
 import { db } from './firebase-config.js';
 import {
-    collection, collectionGroup, getDocsFromServer
+    collection, collectionGroup, doc, updateDoc, getDocsFromServer
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-const BUILD    = '2026-09-18-b'; // bump this any time this file changes — logged on every fetch/error so you can confirm a deploy actually took effect
-const LS_KEY   = 'ai_history_cache_v2'; // v2: schema now includes customers/coupons/staff
-const TTL_MS   = 24 * 60 * 60 * 1000; // 24 hours
+const BUILD    = '2026-09-18-c'; // bump this any time this file changes — logged on every fetch/error so you can confirm a deploy actually took effect
+// v3: bumped on purpose (not just because the schema changed) — this
+// immediately invalidates any old cached snapshot on the very next chat
+// open after deploying, instead of silently serving a stale cache for up
+// to TTL_MS more. Needed because a stale cache was the direct cause of the
+// AI reporting a staff advance as ₹0 when it had actually been added.
+const LS_KEY   = 'ai_history_cache_v3';
+// AI UPDATE [2026-09-18]: BUG FIX — was 24h. A restaurant updates staff
+// advances/holidays and gets new customers throughout the day, so a 24h
+// cache meant the AI could report money/customer numbers that were up to
+// a full day out of date (this is exactly what happened with Golu's ₹2000
+// advance). Shortened to 1h — still avoids refetching everything on every
+// single chat open, but a stale answer now self-corrects within the hour
+// instead of a full day.
+const TTL_MS   = 60 * 60 * 1000; // 1 hour
 const MAX_DAYS = 120;                 // cap how many days of history we keep/send
 const RECENT_DAYS_MS = 30 * 24 * 60 * 60 * 1000; // used for staff-record + customer-activity windows
 
@@ -123,7 +135,55 @@ function summarize(sales, expenses, menuItems) {
  * Customer Management panel reads — see js/customers.js _fetchCustomers).
  * PRIVACY: phone numbers are intentionally never included — only names
  * and aggregate/lifetime stats, since this goes to a third-party AI API.
+ *
+ * AI UPDATE [2026-09-18]: BUG FIX — this only ever read the FAST-PATH
+ * fields (totalOrders/lifetimeSpend), so any customer whose profile
+ * hadn't been migrated yet (see js/customers.js's own migration path)
+ * silently showed as 0 orders/spend and got dropped from "top spenders" —
+ * this is why only 8 of ~30 customers ever showed up. Now runs the exact
+ * same one-time migration read+write-back as js/customers.js for any
+ * customer still missing the fast-path fields, so it becomes permanently
+ * fixed for that customer (not just patched for this one AI response).
  */
+async function migrateCustomerStats(customers) {
+    const needsMigration = customers.filter(c => typeof c.totalOrders !== 'number');
+    if (needsMigration.length === 0) return customers;
+
+    await Promise.all(needsMigration.map(async c => {
+        const resolvedUid = c.uid || c.authUid || '';
+        if (!resolvedUid) {
+            c.totalOrders = 0; c.lifetimeSpend = 0;
+            updateDoc(doc(db, 'customers', c.id), { totalOrders: 0, lifetimeSpend: 0, lastOrderAt: null }).catch(() => {});
+            return;
+        }
+        try {
+            const ordSnap = await getDocsFromServer(collection(db, `customer_order_history/${resolvedUid}/orders`));
+            let totalSpending = 0, lastOrderTs = 0, orderCount = 0;
+            ordSnap.forEach(od => {
+                const data = od.data();
+                orderCount++;
+                totalSpending += data.total || 0;
+                const ts = data.completedAt?.toMillis?.() ?? 0;
+                if (ts > lastOrderTs) lastOrderTs = ts;
+            });
+            c.totalOrders = orderCount;
+            c.lifetimeSpend = totalSpending;
+            c.lastOrderAt = lastOrderTs ? { toMillis: () => lastOrderTs } : null; // shape-compatible with summarizeCustomers below
+            // Same permanent write-back js/customers.js does — this customer
+            // will hit the fast path (no extra reads) from now on, here and
+            // in the Customer Management panel alike.
+            updateDoc(doc(db, 'customers', c.id), {
+                totalOrders: orderCount, lifetimeSpend: totalSpending,
+                lastOrderAt: lastOrderTs ? new Date(lastOrderTs) : null,
+            }).catch(() => {});
+        } catch (e) {
+            console.error(`[ai-data-cache v${BUILD}] Failed migrating stats for customer ${c.id}:`, e);
+            c.totalOrders = 0; c.lifetimeSpend = 0;
+        }
+    }));
+    return customers;
+}
+
 function summarizeCustomers(customers) {
     const now = Date.now();
     let neverOrdered = 0, newCustomers = 0, returning = 0, inactive = 0;
@@ -295,7 +355,7 @@ export async function getAiHistoricalContext() {
 
     const data = {
         ...summarize(sales, expenses, menuItems),
-        customers: summarizeCustomers(customers),
+        customers: summarizeCustomers(await migrateCustomerStats(customers)),
         coupons:   summarizeCoupons(coupons),
         staff:     summarizeStaff(staffList, dailyRecords),
         // Debug field — not sent to the AI, just lets you check in the
