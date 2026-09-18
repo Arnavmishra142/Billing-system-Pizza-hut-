@@ -6338,3 +6338,108 @@ could already read.
 
 Files changed: `js/ai-data-cache.js`, `admin/chat.ai.html`. No other files
 touched.
+
+### [AI UPDATE 2026-09-18] — Smart AI Manager: live Firestore lookup tools (was summary-only)
+
+**Task (user's own framing):** the AI only ever saw a pre-built SUMMARY
+(`js/ai-data-cache.js`) — totals, top items, last-30-day aggregates. That
+summary structurally drops exact detail (an expense's note text, one
+customer's exact profile, one staff day's advance) to keep the prompt small
+and cheap. No amount of enlarging the summary fixes this — something is
+always left out. The user wanted the AI to be able to **search** Firestore
+for the exact record on demand, the moment it's asked a specific question,
+instead of only ever reasoning over a pre-digested snapshot.
+
+**What changed — new file `js/ai-live-lookup.js`:**
+Exports `AI_TOOLS` (an OpenAI/Groq function-calling tool schema) and
+`executeAiTool(name, args)`, a dispatcher. Five tools, each a **fresh**
+(`getDocsFromServer`/`getDocFromServer` — not cached, unlike
+`ai-data-cache.js`) read against collections the Admin Panel already reads
+elsewhere:
+- `get_expenses_by_date(date)` — every expense (amount + note) on one exact
+  date.
+- `get_sales_by_date(date)` — every order (with items) on one exact date.
+- `get_customer_details(name)` — one customer's exact profile (orders,
+  lifetime spend, last order date) by name — catches customers outside the
+  cached "top 8 spenders" list.
+- `get_staff_record(name, date?)` — one staff member's exact
+  holiday/advance/note for one date (direct doc read — `dailyRecords` doc ID
+  IS the date, see `js/staff-shared.js`), or every date with a
+  holiday/advance/note recorded if no date is given, so the AI can itself
+  find "Golu ka advance kab liya" without the admin naming the date.
+- `search_notes(keyword)` — full-text search across every expense note AND
+  every staff daily-record note (one `collectionGroup('dailyRecords')`
+  query), for when neither the exact date nor name is known.
+Every function returns a plain object (never throws — errors come back as
+`{error}`) capped at 25 results, safe to `JSON.stringify()` straight into a
+`tool` message.
+
+**What changed — `admin/chat.ai.html`:**
+- Script tag switched from classic (`<script>`) to `<script type="module">`
+  so it can `import { AI_TOOLS, executeAiTool } from '../js/ai-live-lookup.js'`
+  — same import pattern `js/ai-manager.js` already uses elsewhere.
+- `callGroq()` now sends `tools: AI_TOOLS, tool_choice: 'auto'` with every
+  request. Confirmed via Groq's own docs that both configured models
+  (`openai/gpt-oss-120b` primary, `openai/gpt-oss-20b` fallback) support
+  tool calling on `/chat/completions`.
+- `askGroq()` rewritten around a tool-call loop (capped at
+  `MAX_TOOL_ROUNDS = 4`, new `callGroqWithFallback()` holds the existing
+  429/404 primary→fallback swap so it can be called more than once per
+  turn): if the model's response contains `tool_calls`, each one is run
+  for real via `executeAiTool()`, the exact result is appended as a `role:
+  'tool'` message, and the model is asked again — repeating until it
+  replies with plain text (no more tool calls) or the round cap is hit.
+  Only the final user question + final answer are pushed into
+  `conversationHistory` — the intermediate tool_calls/tool-result messages
+  stay local to that one exchange so history doesn't fill up with raw
+  Firestore JSON.
+- System prompt gained a new **LIVE LOOKUP TOOLS** block instructing the
+  model: the data blocks below are a summary only, so for anything SPECIFIC
+  (an exact date, a specific name, a note's content) call the matching tool
+  instead of guessing — and only answer straight from the summary for
+  broad/aggregate questions. The old "date outside the 120-day cached
+  range → tell the admin it's unavailable" instruction was replaced with
+  "call `get_sales_by_date`/`get_expenses_by_date` for that exact date
+  instead", since those tools scan the full collection regardless of the
+  summary's 120-day cap.
+- Added one suggestion chip ("🔍 Kisi specific date ka expense note?") so
+  the feature is discoverable.
+- `CHAT_BUILD` bumped `2026-09-18-c` → `2026-09-18-d`.
+
+**Two-layer design (both stay, on purpose):** the cached summary
+(`js/ai-data-cache.js`, unchanged by this task) still answers broad/overview
+questions in one round with zero extra latency. These new tools only fire
+when the model itself decides a specific lookup is needed — so "aaj ka
+revenue?" is still one fast round-trip, while "19 August ko expense mein
+kya note tha?" now triggers exactly one `get_expenses_by_date` round instead
+of the AI guessing or claiming it doesn't have the data.
+
+**Privacy — unchanged stance, re-applied here:** `get_customer_details`
+never returns the phone number (same deliberate exclusion as
+`summarizeCustomers` in `js/ai-data-cache.js`) — only name + aggregate
+figures ever reach the third-party Groq API.
+
+**Security:** no Firestore rule changes, no new collections, no new auth
+path. Every read in `js/ai-live-lookup.js` targets a collection already
+`isOperator()`-gated in `firestore.rules` and already readable elsewhere in
+the Admin Panel by an authenticated operator — this only lets the *AI
+chat*, on request, read the same exact records the admin could already open
+directly in Expenses/Sales History/Customers/Staff.
+
+**Trade-off, stated honestly:** a question that needs a lookup now costs
+one extra Groq round-trip (roughly 1–2s) before the final answer appears —
+acceptable given the alternative was either a wrong/guessed answer or an
+"I don't have that" that wasn't true. Firestore reads increase slightly
+(each tool call reads a full collection, same pattern `ai-data-cache.js`
+already uses) — negligible at this restaurant's scale.
+
+**Not yet tested against a live chat session** — verify at minimum: (1) a
+specific-date expense-note question actually triggers `get_expenses_by_date`
+and answers with the real note, (2) a broad question ("aaj ka revenue?")
+still answers in one round with no tool call, (3) a lookup for a
+non-existent date/name returns the `found:false` message rather than a
+guess, (4) the 429/404 model-fallback still works mid-tool-loop.
+
+Files changed: `js/ai-live-lookup.js` (new), `admin/chat.ai.html`. No other
+files touched — `js/ai-data-cache.js` (the summary layer) is untouched and
+still runs exactly as before.
