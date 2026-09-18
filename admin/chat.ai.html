@@ -321,6 +321,7 @@
     <button class="ai-suggestion-chip">📉 Expenses kitne hain?</button>
     <button class="ai-suggestion-chip">🍕 Best selling items?</button>
     <button class="ai-suggestion-chip">📊 Kya improve karna chahiye?</button>
+    <button class="ai-suggestion-chip">🔍 Kisi specific date ka expense note?</button>
 </div>
 
 <!-- ── Input bar ── -->
@@ -335,7 +336,9 @@
     </button>
 </div>
 
-<script>
+<script type="module">
+import { AI_TOOLS, executeAiTool } from '../js/ai-live-lookup.js';
+
 (function () {
     'use strict';
 
@@ -344,7 +347,11 @@
     // DevTools console, without needing to view-source. The header title
     // ("Smart AI Manager v2") is the same marker, visible with no DevTools
     // at all — bump both together.
-    const CHAT_BUILD = '2026-09-18-c';
+    //
+    // AI UPDATE [2026-09-18]: Live lookup tools (js/ai-live-lookup.js) added
+    // — see askGroq() below. Script tag switched from classic to
+    // type="module" so it can `import` that file.
+    const CHAT_BUILD = '2026-09-18-d';
     console.log(`[chat.ai.html] loaded, build ${CHAT_BUILD}`);
 
     const messagesEl  = document.getElementById('aiMessages');
@@ -479,6 +486,10 @@
     const GROQ_PRIMARY_MODEL = 'openai/gpt-oss-120b';
     const GROQ_FALLBACK_MODEL = 'openai/gpt-oss-20b';
 
+    // AI UPDATE [2026-09-18]: `tools` param added — this is what lets the
+    // model ask for a live Firestore lookup mid-answer instead of guessing
+    // from the cached summary. Both configured models (openai/gpt-oss-120b
+    // and -20b) support tool calling on Groq's /chat/completions endpoint.
     async function callGroq(model, messages) {
         return fetch(GROQ_URL, {
             method: 'POST',
@@ -490,9 +501,46 @@
                 model,
                 messages,
                 temperature: 0.7,
+                tools: AI_TOOLS,
+                tool_choice: 'auto',
             }),
         });
     }
+
+    // One call to Groq, with the primary→fallback model swap on rate-limit
+    // or a decommissioned model — same logic as before, just pulled out so
+    // the tool loop below can call it more than once per user message.
+    async function callGroqWithFallback(messages) {
+        let res = await callGroq(GROQ_PRIMARY_MODEL, messages);
+        // AI UPDATE [2026-09-17]: also fall back on 404 (model not
+        // found/decommissioned), not just 429 (rate limit) — so a FUTURE
+        // Groq deprecation of just the primary model degrades to the
+        // fallback model instead of hard-failing the whole chat again.
+        if (res.status === 429 || res.status === 404) {
+            res = await callGroq(GROQ_FALLBACK_MODEL, messages);
+        }
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error?.message || `Groq API error ${res.status}`);
+        }
+        return data;
+    }
+
+    // AI UPDATE [2026-09-18]: askGroq now runs a TOOL-CALL LOOP instead of
+    // a single request/response. Why: the system prompt only ever carried
+    // a SUMMARY (cached, aggregated — see js/ai-data-cache.js), which by
+    // construction can never contain every exact detail (a specific
+    // expense's note, one customer's exact profile, one staff day's
+    // advance). Enlarging the summary can't fix that — something is always
+    // left out. So instead, if the model's reply contains `tool_calls`
+    // (it decided it needs an exact record — see js/ai-live-lookup.js for
+    // what's available), we execute each one against Firestore for real,
+    // feed the exact result back as a `tool` message, and ask again. This
+    // repeats (capped below) until the model answers with plain text.
+    // Broad/aggregate questions ("aaj ka revenue?") are answered straight
+    // from the summary in one round, same as before — the loop only runs
+    // extra rounds when the model itself decides a lookup is needed.
+    const MAX_TOOL_ROUNDS = 4;
 
     async function askGroq(userMessage) {
         if (!window.GROQ_API_KEY) {
@@ -508,27 +556,45 @@
             { role: 'user', content: userMessage },
         ];
 
-        let res = await callGroq(GROQ_PRIMARY_MODEL, messages);
-        // AI UPDATE [2026-09-17]: also fall back on 404 (model not
-        // found/decommissioned), not just 429 (rate limit) — so a FUTURE
-        // Groq deprecation of just the primary model degrades to the
-        // fallback model instead of hard-failing the whole chat again.
-        if (res.status === 429 || res.status === 404) {
-            res = await callGroq(GROQ_FALLBACK_MODEL, messages);
+        let reply = '';
+        for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+            const data = await callGroqWithFallback(messages);
+            const msg = data.choices?.[0]?.message || {};
+            const toolCalls = msg.tool_calls || [];
+
+            if (toolCalls.length === 0) {
+                reply = msg.content || '';
+                break;
+            }
+
+            // Model wants to look something up — run every requested tool
+            // for real (js/ai-live-lookup.js), then hand the exact result
+            // back so it can either ask for another lookup or answer.
+            messages.push(msg); // the assistant turn that made these tool_calls
+            for (const call of toolCalls) {
+                let args = {};
+                try { args = JSON.parse(call.function?.arguments || '{}'); } catch (_) { /* malformed args — pass {} */ }
+                const result = await executeAiTool(call.function?.name, args);
+                messages.push({
+                    role: 'tool',
+                    tool_call_id: call.id,
+                    name: call.function?.name,
+                    content: JSON.stringify(result),
+                });
+            }
+            // loop continues → model sees the tool result(s) next round
         }
 
-        const data = await res.json();
-        if (!res.ok) {
-            throw new Error(data.error?.message || `Groq API error ${res.status}`);
-        }
-        const reply = data.choices?.[0]?.message?.content || '';
-
-        // Record this turn so the next message remembers it.
+        // Record this turn so the next message remembers it. Only the
+        // final user question + final answer go into memory — the
+        // intermediate tool_calls/tool-result messages stay local to this
+        // one exchange so conversationHistory doesn't balloon with raw
+        // Firestore JSON on every turn.
         conversationHistory.push({ role: 'user', content: userMessage });
         if (reply) conversationHistory.push({ role: 'assistant', content: reply });
         while (conversationHistory.length > MAX_HISTORY_TURNS) conversationHistory.shift();
 
-        return reply;
+        return reply || '⚠️ Lookup complete ho gaya lekin final jawab nahi mila — dobara try karo.';
     }
 
     /* ── System prompt builder (business data + instructions) ───── */
@@ -558,7 +624,7 @@
             const t = history.allTimeTotals || {};
             historyBlock = `HISTORICAL DATA (cached, refreshed at most once every 24h so it may lag today's live numbers by a few hours):
 - All-time totals across ${t.daysTracked || 0} tracked days: Revenue ₹${t.totalRevenueEver || 0}, Orders ${t.totalOrdersEver || 0}, Expenses ₹${t.totalExpensesEver || 0}
-- Full day-by-day history, most recent first (up to 120 days — if the admin asks about a date not listed here, tell them that specific date is outside the cached range, don't guess):
+- Full day-by-day history, most recent first (up to 120 days — if the admin asks about a date not listed here, don't say it's unavailable: call get_sales_by_date / get_expenses_by_date for that exact date instead):
 ${days || 'No data yet'}
 - Top selling items all-time: ${topAllTime}
 - Full menu (${(history.menu || []).length} items): ${menuList}`;
@@ -601,6 +667,8 @@ ${days || 'No data yet'}
         }
 
         return `You are the Smart AI Manager for "New Pizza Hut & Live Cake", a restaurant. You have LIVE (selected period on the dashboard) stats and cached HISTORICAL data covering sales, expenses, the full menu, customers, coupons, and staff — use all of it together to spot trends and give grounded advice, not just today's snapshot. Always report sales as ONE combined business total — never split or mention "Table" vs "Quick Sale"/"Cash Sale" as separate categories, the owner only cares about total numbers. Be concise, smart, and friendly. Reply in Hinglish (Hindi + English mix) with practical business insights. Keep answers under 120 words unless a detailed breakdown is asked. Use emojis naturally.
+
+LIVE LOOKUP TOOLS — you also have function-calling tools (get_expenses_by_date, get_sales_by_date, get_customer_details, get_staff_record, search_notes) that fetch an EXACT record straight from the database right now, on demand. The blocks below are a SUMMARY only — they intentionally leave out things like an individual expense's note, a specific customer's exact profile, or one staff member's advance/note on one particular day. Rule: if the admin asks something SPECIFIC (an exact date, a specific person's name, a note's content, "kab/kis din", anything not clearly answered by the aggregate numbers below) — call the matching tool and answer from its real result, don't guess or say you don't have it. Use the summary directly only for broad/aggregate questions (totals, trends, top items, "overall kaisa chal raha hai"). If a tool comes back with found:false or an error, say so plainly instead of inventing an answer.
 
 IMPORTANT — if any data block below says "Not available right now": this app has NO manual upload/import/CSV/Excel feature anywhere, so NEVER tell the admin to "upload a file", "export data", or "wait for the kitchen to process orders" — that is not a real option and will confuse them. Instead say plainly that the data sync failed this time (e.g. "Data load nahi ho paya abhi — thoda ruk ke phir try karo, agar baar-baar ho raha hai toh developer ko batao") and suggest reopening the AI chat from the dashboard button again. Never invent app features, billing plans, "token limits", "upgrade to Dev Tier" messages, or any other system/infrastructure explanation that isn't true — you have no visibility into your own API usage or billing, so never mention it or suggest the admin needs to pay for more of anything.
 
