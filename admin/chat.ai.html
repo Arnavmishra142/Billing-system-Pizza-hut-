@@ -410,6 +410,16 @@
     /* ── Send ─────────────────────────────────────────────────── */
     sendBtn.addEventListener('click', sendMessage);
 
+    /* ── Conversation memory ─────────────────────────────────────
+       AI UPDATE [2026-09-18]: BUG FIX — every message was previously sent
+       as a single standalone `messages: [{role:'user', content: prompt}]`
+       call with no history at all, so the AI had zero memory of anything
+       said earlier in the same chat (it would "forget" the previous
+       message immediately). Now we keep a running turn history and send
+       it with every request, capped so the prompt doesn't grow forever. */
+    const conversationHistory = []; // [{role:'user'|'assistant', content}]
+    const MAX_HISTORY_TURNS = 20;   // ~10 user+AI exchanges kept verbatim
+
     async function sendMessage() {
         const text = inputEl.value.trim();
         if (!text || sendBtn.disabled) return;
@@ -425,7 +435,7 @@
         const thinkEl = appendThinking();
 
         try {
-            const reply = await askGroq(buildPrompt(text));
+            const reply = await askGroq(text);
             thinkEl.remove();
             appendMsg('ai', reply || '⚠️ Koi response nahi mila. Dobara try karo.');
         } catch (err) {
@@ -450,7 +460,7 @@
     const GROQ_PRIMARY_MODEL = 'openai/gpt-oss-120b';
     const GROQ_FALLBACK_MODEL = 'openai/gpt-oss-20b';
 
-    async function callGroq(model, prompt) {
+    async function callGroq(model, messages) {
         return fetch(GROQ_URL, {
             method: 'POST',
             headers: {
@@ -459,41 +469,62 @@
             },
             body: JSON.stringify({
                 model,
-                messages: [{ role: 'user', content: prompt }],
+                messages,
                 temperature: 0.7,
             }),
         });
     }
 
-    async function askGroq(prompt) {
+    async function askGroq(userMessage) {
         if (!window.GROQ_API_KEY) {
             throw new Error('AI key not configured. Run the build step to generate groq-key.generated.js.');
         }
 
-        let res = await callGroq(GROQ_PRIMARY_MODEL, prompt);
+        // System prompt (business data) is rebuilt fresh every call so it
+        // never goes stale mid-conversation; the actual back-and-forth
+        // (conversationHistory) carries the memory across turns.
+        const messages = [
+            { role: 'system', content: buildSystemPrompt() },
+            ...conversationHistory,
+            { role: 'user', content: userMessage },
+        ];
+
+        let res = await callGroq(GROQ_PRIMARY_MODEL, messages);
         // AI UPDATE [2026-09-17]: also fall back on 404 (model not
         // found/decommissioned), not just 429 (rate limit) — so a FUTURE
         // Groq deprecation of just the primary model degrades to the
         // fallback model instead of hard-failing the whole chat again.
         if (res.status === 429 || res.status === 404) {
-            res = await callGroq(GROQ_FALLBACK_MODEL, prompt);
+            res = await callGroq(GROQ_FALLBACK_MODEL, messages);
         }
 
         const data = await res.json();
         if (!res.ok) {
             throw new Error(data.error?.message || `Groq API error ${res.status}`);
         }
-        return data.choices?.[0]?.message?.content || '';
+        const reply = data.choices?.[0]?.message?.content || '';
+
+        // Record this turn so the next message remembers it.
+        conversationHistory.push({ role: 'user', content: userMessage });
+        if (reply) conversationHistory.push({ role: 'assistant', content: reply });
+        while (conversationHistory.length > MAX_HISTORY_TURNS) conversationHistory.shift();
+
+        return reply;
     }
 
-    /* ── Prompt builder ───────────────────────────────────────── */
-    function buildPrompt(userMessage) {
+    /* ── System prompt builder (business data + instructions) ───── */
+    function buildSystemPrompt() {
         const topItems = (ctx.topItems || []).join('; ') || 'No data';
         const history  = ctx.history || null;
 
         let historyBlock = 'HISTORICAL DATA: Not available right now.';
         if (history) {
-            const days = (history.dailyHistory || []).slice(0, 14)
+            // AI UPDATE [2026-09-18]: BUG FIX — was .slice(0, 14), so any
+            // question about a date older than ~2 weeks ago (e.g. "19 August
+            // sale") got no data at all even though ai-data-cache.js already
+            // caches up to MAX_DAYS=120 days and the AI incorrectly claimed
+            // it "didn't have" that data. Now sends the full cached range.
+            const days = (history.dailyHistory || [])
                 .map(d => `${d.date}: Rev ₹${d.revenue}, Orders ${d.orders}, Expenses ₹${d.expenses}`)
                 .join('\n');
 
@@ -508,7 +539,7 @@
             const t = history.allTimeTotals || {};
             historyBlock = `HISTORICAL DATA (cached, refreshed at most once every 24h so it may lag today's live numbers by a few hours):
 - All-time totals across ${t.daysTracked || 0} tracked days: Revenue ₹${t.totalRevenueEver || 0}, Orders ${t.totalOrdersEver || 0}, Expenses ₹${t.totalExpensesEver || 0}
-- Last 14 days (most recent first):
+- Full day-by-day history, most recent first (up to 120 days — if the admin asks about a date not listed here, tell them that specific date is outside the cached range, don't guess):
 ${days || 'No data yet'}
 - Top selling items all-time: ${topAllTime}
 - Full menu (${(history.menu || []).length} items): ${menuList}`;
@@ -566,7 +597,7 @@ ${couponsBlock}
 
 ${staffBlock}
 
-Admin's Question: ${userMessage}`;
+You are now in an ongoing conversation with the admin — remember what they've already told you or asked earlier in this chat and refer back to it naturally instead of treating each message as the first one.`;
     }
 
     /* ── Render helpers ───────────────────────────────────────── */
