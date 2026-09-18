@@ -298,7 +298,7 @@
     <button class="ai-back-btn" id="backBtn" aria-label="Go back">&#8592;</button>
     <div class="ai-header-avatar">🤖</div>
     <div class="ai-header-text">
-        <div class="ai-header-title">Smart AI Manager</div>
+        <div class="ai-header-title">Smart AI Manager v2</div>
         <div class="ai-header-sub">New Pizza Hut &amp; Live Cake</div>
     </div>
     <span class="ai-header-badge">Groq AI</span>
@@ -338,6 +338,14 @@
 <script>
 (function () {
     'use strict';
+
+    // Bump this string any time chat.ai.html changes — logged to the
+    // console on every load so a deploy can be confirmed by opening
+    // DevTools console, without needing to view-source. The header title
+    // ("Smart AI Manager v2") is the same marker, visible with no DevTools
+    // at all — bump both together.
+    const CHAT_BUILD = '2026-09-18-a';
+    console.log(`[chat.ai.html] loaded, build ${CHAT_BUILD}`);
 
     const messagesEl  = document.getElementById('aiMessages');
     const inputEl     = document.getElementById('aiInputField');
@@ -383,7 +391,7 @@
     });
 
     /* ── Welcome message ─────────────────────────────────────── */
-    appendMsg('ai', `👋 Hello Boss! Main hoon aapka **Smart AI Manager**.\n\nAbhi ke live stats dekh raha hoon — Revenue **${ctx.totalRevenue || 'N/A'}**, Orders **${ctx.totalOrders || 'N/A'}**. Kuch bhi poochho! 🚀`);
+    appendMsg('ai', `👋 Hello Boss! Main hoon aapka **Smart AI Manager v2**.\n\nAbhi ke live stats dekh raha hoon — Revenue **${ctx.totalRevenue || 'N/A'}**, Orders **${ctx.totalOrders || 'N/A'}**. Kuch bhi poochho! 🚀`);
 
     /* ── Suggestion chips ────────────────────────────────────── */
     suggestions.querySelectorAll('.ai-suggestion-chip').forEach(chip => {
@@ -582,6 +590,8 @@ ${days || 'No data yet'}
         }
 
         return `You are the Smart AI Manager for "New Pizza Hut & Live Cake", a restaurant. You have LIVE (selected period on the dashboard) stats and cached HISTORICAL data covering sales, expenses, the full menu, customers, coupons, and staff — use all of it together to spot trends and give grounded advice, not just today's snapshot. Always report sales as ONE combined business total — never split or mention "Table" vs "Quick Sale"/"Cash Sale" as separate categories, the owner only cares about total numbers. Be concise, smart, and friendly. Reply in Hinglish (Hindi + English mix) with practical business insights. Keep answers under 120 words unless a detailed breakdown is asked. Use emojis naturally.
+
+IMPORTANT — if any data block below says "Not available right now": this app has NO manual upload/import/CSV/Excel feature anywhere, so NEVER tell the admin to "upload a file", "export data", or "wait for the kitchen to process orders" — that is not a real option and will confuse them. Instead say plainly that the data sync failed this time (e.g. "Data load nahi ho paya abhi — thoda ruk ke phir try karo, agar baar-baar ho raha hai toh developer ko batao") and suggest reopening the AI chat from the dashboard button again. Never invent app features that don't exist.
 
 LIVE DASHBOARD STATS (selected period):
 - Total Revenue: ${ctx.totalRevenue || 'N/A'}
