@@ -26,10 +26,13 @@ import {
     collection, collectionGroup, getDocsFromServer
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-const LS_KEY   = 'ai_history_cache_v2'; // v2: bumped — schema now includes customers/coupons/staff
+const BUILD    = '2026-09-18-a'; // bump this any time this file changes — logged on every fetch/error so you can confirm a deploy actually took effect
+const LS_KEY   = 'ai_history_cache_v2'; // v2: schema now includes customers/coupons/staff
 const TTL_MS   = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_DAYS = 120;                 // cap how many days of history we keep/send
 const RECENT_DAYS_MS = 30 * 24 * 60 * 60 * 1000; // used for staff-record + customer-activity windows
+
+console.log(`[ai-data-cache] loaded, build ${BUILD}`);
 
 function dateKey(iso) {
     const d = new Date(iso);
@@ -208,49 +211,80 @@ function summarizeStaff(staffList, dailyRecords) {
 /**
  * Returns the cached historical summary if it's fresh (<24h old),
  * otherwise fetches everything fresh from Firestore, summarizes,
- * caches it, and returns it. Never throws — falls back to stale
- * cache (if any) on fetch failure so the AI still has *something*.
+ * caches it, and returns it. Never throws.
+ *
+ * AI UPDATE [2026-09-18]: BUG FIX — this used to be ONE Promise.all() over
+ * all 7 reads. If any single new read (customers/coupons/staff/
+ * dailyRecords) failed for ANY reason, the whole call threw and — because
+ * the cache key had just changed to v2, so there was no old cache to fall
+ * back to — the AI lost ALL data (even sales/expenses/menu, which used to
+ * work fine on their own). Each collection is now fetched independently
+ * with its own try/catch, so one bad read degrades gracefully (that
+ * section just comes back empty) instead of nuking everything else. Every
+ * failure is also logged to the console with WHICH collection failed, so
+ * it's actually diagnosable instead of a silent generic "no data".
  */
 export async function getAiHistoricalContext() {
     const cached = readLS();
     const isFresh = cached && (Date.now() - cached.fetchedAt) < TTL_MS;
     if (isFresh) return cached.data;
 
-    try {
-        const [salesSnap, expenseSnap, menuSnap, customersSnap, couponsSnap, staffSnap, dailyRecordsSnap] = await Promise.all([
-            getDocsFromServer(collection(db, "sales_history")),
-            getDocsFromServer(collection(db, "daily_expenses")),
-            getDocsFromServer(collection(db, "menu_items")),
-            getDocsFromServer(collection(db, "customers")),
-            getDocsFromServer(collection(db, "coupons")),
-            getDocsFromServer(collection(db, "staff")),
-            // One query for every staff member's dailyRecords subcollection,
-            // instead of one read per staff doc (see js/staff-shared.js §5).
-            getDocsFromServer(collectionGroup(db, "dailyRecords")),
-        ]);
+    // Each entry: [label, fetch function]. Fetched independently so one
+    // failing collection can never wipe out the others.
+    async function safeFetch(label, fn) {
+        try {
+            return await fn();
+        } catch (e) {
+            console.error(`[ai-data-cache v${BUILD}] Failed to fetch "${label}":`, e);
+            return null; // caller treats null as "section unavailable"
+        }
+    }
 
-        const sales     = []; salesSnap.forEach(d => sales.push(d.data()));
-        const expenses  = []; expenseSnap.forEach(d => expenses.push(d.data()));
-        const menuItems = []; menuSnap.forEach(d => menuItems.push(d.data()));
-        const customers = []; customersSnap.forEach(d => customers.push({ id: d.id, ...d.data() }));
-        const coupons   = []; couponsSnap.forEach(d => coupons.push(d.data()));
-        const staffList = []; staffSnap.forEach(d => staffList.push({ id: d.id, ...d.data() }));
-        const dailyRecords = [];
-        dailyRecordsSnap.forEach(d => {
-            // Parent of a dailyRecords doc is the staff/{staffId} doc.
-            dailyRecords.push({ staffId: d.ref.parent.parent?.id, ...d.data() });
-        });
+    const [salesSnap, expenseSnap, menuSnap, customersSnap, couponsSnap, staffSnap, dailyRecordsSnap] = await Promise.all([
+        safeFetch('sales_history', () => getDocsFromServer(collection(db, "sales_history"))),
+        safeFetch('daily_expenses', () => getDocsFromServer(collection(db, "daily_expenses"))),
+        safeFetch('menu_items',     () => getDocsFromServer(collection(db, "menu_items"))),
+        safeFetch('customers',      () => getDocsFromServer(collection(db, "customers"))),
+        safeFetch('coupons',        () => getDocsFromServer(collection(db, "coupons"))),
+        safeFetch('staff',          () => getDocsFromServer(collection(db, "staff"))),
+        // One query for every staff member's dailyRecords subcollection,
+        // instead of one read per staff doc (see js/staff-shared.js §5).
+        safeFetch('staff/*/dailyRecords', () => getDocsFromServer(collectionGroup(db, "dailyRecords"))),
+    ]);
 
-        const data = {
-            ...summarize(sales, expenses, menuItems),
-            customers: summarizeCustomers(customers),
-            coupons:   summarizeCoupons(coupons),
-            staff:     summarizeStaff(staffList, dailyRecords),
-        };
-        writeLS({ fetchedAt: Date.now(), data });
-        return data;
-    } catch (e) {
-        console.error('AI history fetch failed, falling back to cache if any:', e);
+    // If EVERY single read failed (e.g. fully offline), fall back to
+    // whatever cache we have, however stale, rather than showing nothing.
+    if (!salesSnap && !expenseSnap && !menuSnap && !customersSnap && !couponsSnap && !staffSnap && !dailyRecordsSnap) {
+        console.error(`[ai-data-cache v${BUILD}] All Firestore reads failed — falling back to stale cache if any.`);
         return cached ? cached.data : null;
     }
+
+    const sales     = []; salesSnap?.forEach(d => sales.push(d.data()));
+    const expenses  = []; expenseSnap?.forEach(d => expenses.push(d.data()));
+    const menuItems = []; menuSnap?.forEach(d => menuItems.push(d.data()));
+    const customers = []; customersSnap?.forEach(d => customers.push({ id: d.id, ...d.data() }));
+    const coupons   = []; couponsSnap?.forEach(d => coupons.push(d.data()));
+    const staffList = []; staffSnap?.forEach(d => staffList.push({ id: d.id, ...d.data() }));
+    const dailyRecords = [];
+    dailyRecordsSnap?.forEach(d => {
+        // Parent of a dailyRecords doc is the staff/{staffId} doc.
+        dailyRecords.push({ staffId: d.ref.parent.parent?.id, ...d.data() });
+    });
+
+    const data = {
+        ...summarize(sales, expenses, menuItems),
+        customers: summarizeCustomers(customers),
+        coupons:   summarizeCoupons(coupons),
+        staff:     summarizeStaff(staffList, dailyRecords),
+        // Debug field — not sent to the AI, just lets you check in the
+        // console (localStorage.getItem('ai_history_cache_v2')) exactly
+        // which sections loaded on the last fetch.
+        _sectionsLoaded: {
+            sales: !!salesSnap, expenses: !!expenseSnap, menu: !!menuSnap,
+            customers: !!customersSnap, coupons: !!couponsSnap,
+            staff: !!staffSnap, dailyRecords: !!dailyRecordsSnap,
+        },
+    };
+    writeLS({ fetchedAt: Date.now(), data });
+    return data;
 }
