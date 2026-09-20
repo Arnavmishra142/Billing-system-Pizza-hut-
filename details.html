@@ -387,6 +387,13 @@
         });
 
         billText += "--------------------------------\n";
+        // AI UPDATE [2026-09-20]: Custom Instant Discount — items sum to the pre-discount subtotal.
+        const _cd = Number(bill.customDiscount) || 0;
+        if (_cd > 0) {
+            billText += rightText(`Subtotal: Rs ${+_printTotal.toFixed(2)}`) + "\n";
+            billText += rightText(`Custom Discount: -Rs ${_cd}`) + "\n";
+            _printTotal = Math.max(0, +(_printTotal - _cd).toFixed(2));
+        }
         billText += rightText(`TOTAL: Rs ${_printTotal}`) + "\n";
         billText += "--------------------------------\n";
         billText += centerText("Thank You! Visit Again") + "\n\n";
@@ -438,6 +445,12 @@
                 return sum + (item.price + ep) * item.qty;
             }, 0)
             : (bill.total || 0);
+
+        // AI UPDATE [2026-09-20]: Custom Instant Discount. _derivedTotal above is the pre-discount
+        // item subtotal; the final TOTAL shown/printed is that minus the stored flat discount.
+        const _customDisc = Number(bill.customDiscount) || 0;
+        const _subtotalShown = _derivedTotal;
+        const _finalTotal = _customDisc > 0 ? Math.max(0, +(_derivedTotal - _customDisc).toFixed(2)) : _derivedTotal;
 
         const itemsHTML = hasItems ? `
             <div class="items-section">
@@ -496,9 +509,15 @@
 
                 ${itemsHTML}
 
+                ${_customDisc > 0 ? `
+                <div class="items-section" style="padding-top:0;">
+                    <div class="item-row"><span class="item-name">Subtotal</span><span></span><span class="item-amt">₹${_subtotalShown}</span></div>
+                    <div class="item-row"><span class="item-name" style="color:#3fb950;">Custom Discount</span><span></span><span class="item-amt" style="color:#3fb950;">-₹${_customDisc}</span></div>
+                </div>` : ''}
+
                 <div class="total-section">
                     <span class="total-label">TOTAL</span>
-                    <span class="total-amount">₹${_derivedTotal}</span>
+                    <span class="total-amount">₹${_finalTotal}</span>
                 </div>
 
                 <div class="upi-section">
