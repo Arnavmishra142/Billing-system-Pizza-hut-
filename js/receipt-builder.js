@@ -1,3 +1,6 @@
+// AI UPDATE [2026-09-20]: buildBillReceipt()'s optional 5th param now also accepts
+// { label, amount } (used for the Custom Instant Discount) besides { code, amount }
+// (coupon); payable is rounded to 2 dp so decimal discounts never print float noise.
 // js/receipt-builder.js
 //
 // AI UPDATE [2026-07-30]: New module — ESC/POS receipt builder for the
@@ -88,7 +91,7 @@ export async function initReceiptPrinter() {
  * @param {string} title    Bill-to label (table name, "Takeaway", etc.)
  * @param {string} billNo   Short bill identifier (last 5 digits of Date.now())
  * @param {string} dateStr  Formatted date/time string from getFormattedDate()
- * @param {{code:string, amount:number}|null} [coupon]  AI UPDATE [2026-09-12]:
+ * @param {{code?:string, label?:string, amount:number}|null} [coupon]  AI UPDATE [2026-09-12]:
  *        Optional applied coupon. When present, prints a Discount line and a
  *        final Payable line below the subtotal. null/undefined = no coupon,
  *        receipt prints exactly as before (fully backward compatible).
@@ -170,7 +173,7 @@ export function buildBillReceipt(cart, title, billNo, dateStr, coupon = null) {
 
         // AI UPDATE [2026-09-12]: Coupon discount + payable total.
         const _hasCoupon = coupon && coupon.amount > 0;
-        const _payable    = _hasCoupon ? Math.max(0, total - coupon.amount) : total;
+        const _payable    = _hasCoupon ? Math.max(0, +(total - coupon.amount).toFixed(2)) : total;
 
         enc = enc
             .line(DIVIDER)
@@ -179,7 +182,10 @@ export function buildBillReceipt(cart, title, billNo, dateStr, coupon = null) {
             .line(`Subtotal      : Rs ${total}`);
 
         if (_hasCoupon) {
-            enc = enc.line(`Coupon (${coupon.code}) : -Rs ${coupon.amount}`);
+            // AI UPDATE [2026-09-20]: `label` (e.g. "Custom Discount") replaces the coupon-code caption.
+            enc = enc.line(coupon.label
+                ? `${coupon.label} : -Rs ${coupon.amount}`
+                : `Coupon (${coupon.code}) : -Rs ${coupon.amount}`);
         }
 
         enc = enc
