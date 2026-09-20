@@ -150,6 +150,13 @@ async function _loadOrderForEdit(saleId) {
     // Anonymous/walk-in order (neither field present): nothing to restore —
     // editing behaves exactly like any new manual bill on this slot.
 
+    // AI UPDATE [2026-09-20]: restore a Custom Instant Discount so re-settling the edited order
+    // keeps it (js/cart.js re-validates it against the edited cart and drops it, with a notice,
+    // if it no longer fits). Same key/shape cart.js reads: customDiscount_<table>_<slot> = {amount}.
+    if (Number(sale.customDiscount) > 0) {
+        localStorage.setItem(`customDiscount_${editTable}_${slot}`, JSON.stringify({ amount: Number(sale.customDiscount) }));
+    }
+
     // AI UPDATE [2026-09-16] session 5 — CUSTOMER STATS BUG FIX:
     // hadCustomer records whether THIS order already had a customer identity
     // attached BEFORE this edit session. This is the missing signal that

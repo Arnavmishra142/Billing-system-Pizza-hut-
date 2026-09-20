@@ -2150,3 +2150,22 @@ body {
     cursor: pointer; transition: transform 0.15s;
 }
 .inc-accept-btn:active { transform: scale(0.96); }
+
+/* =========================================
+   CUSTOM INSTANT DISCOUNT — AI UPDATE [2026-09-20]
+   Reuses the existing .btn / .btn-details / .btn-cancel / .modal styles;
+   only layout + message styling is added here.
+   ========================================= */
+.custom-discount-box { margin: 10px 0; }
+.custom-discount-btn { width: 100%; padding: 10px 12px; font-size: 0.85rem; }
+.custom-discount-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.custom-discount-msg { font-size: 0.75rem; color: #8b949e; font-weight: 600; margin-top: 6px; min-height: 0; }
+.custom-discount-msg:empty { display: none; }
+.custom-discount-actions { display: flex; gap: 10px; margin: -8px 0 12px; }
+.custom-discount-actions .btn { flex: 1; padding: 9px; font-size: 0.85rem; }
+.custom-discount-error { color: #f85149; font-size: 0.85rem; font-weight: 600; min-height: 18px; text-align: center; }
+#customDiscountInput:focus { border-color: #34d399; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.18); }
+.light-mode .custom-discount-msg { color: #6b7280; }
+/* The cart drawer (.cart-panel) is z-index:10000 !important — the base .modal (1000) would open
+   UNDER it on a phone, hiding the Apply button. Lift only this modal above the drawer/overlay. */
+#customDiscountModal { z-index: 10050; }

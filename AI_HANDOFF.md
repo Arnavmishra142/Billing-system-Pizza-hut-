@@ -1,6 +1,85 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-15 session 4 (Parcel KOT — large centered "P" marker; see below)
+> Last updated: 2026-09-20 (Custom Instant Discount — flat ₹ order-level discount; see below)
+
+---
+
+## [AI UPDATE 2026-09-20] — Custom Instant Discount (flat ₹ order-level discount)
+
+### What it is
+A new **"➖ Custom Instant Discount"** control in the POS cart drawer's billing section.
+Staff tap it → small modal (₹ amount, CANCEL / APPLY DISCOUNT) → a flat ₹ amount is taken off
+the CURRENT bill. It is an **order-level** discount only — item prices are never altered.
+After applying, the drawer shows `Custom Discount  -₹100` with **EDIT** / **REMOVE**, and the
+existing "Payable" row shows the new total immediately. Works for tables, takeaway and direct entry.
+
+### ⚠️ The one rule to remember
+**`_computePricing(rawTotal)` in `js/cart.js` is now THE single pricing calculation.**
+The cart UI (`_updateCouponUI`), `getFinalTotal()`, **Bill & Settle** and **Save & Exit** all call
+it. Do NOT compute a subtotal→total/discount anywhere else. It returns
+`{ subtotal, coupon, couponDiscount, customDiscount, total }` and never lets `total` go below 0.
+
+### Files changed
+| File | Change |
+|---|---|
+| `js/cart.js` | Core logic (see functions below); both settle handlers; history-sync signatures |
+| `index.html` | Button + applied-row (Edit/Remove) in `.billing-section`; `#customDiscountModal`; 24h-history entry stores `subtotal`/`customDiscount` and the history card shows the discount |
+| `css/style.css` | Small block at the end (layout only, reuses `.btn`/`.modal`). `#customDiscountModal` is lifted to `z-index:10050` because `.cart-panel` is `z-index:10000 !important` — the base `.modal` (1000) would open UNDER the drawer on a phone |
+| `js/receipt-builder.js` | `buildBillReceipt()` 5th param also accepts `{label, amount}` (prints `Custom Discount : -Rs N`); payable rounded to 2 dp |
+| `details.html` | Shows Subtotal / Custom Discount / TOTAL and prints them (total = item subtotal − `customDiscount`) |
+| `js/admin.js` | Sales-tab bill card shows "Custom discount -₹N" (`total` was already final) |
+| `js/customers.js` | Customer History order card shows a "Custom Discount" row |
+| `js/order-edit.js` | Edit History restores the discount into the slot's `customDiscount_<table>_<slot>` key so a re-settle keeps it |
+| `sw.js` | `pos-static-v49` → `v50` |
+| `ARCHITECTURE_LOCK.md` | Added the additive fields to the `sales_history` and `customer_order_history` schemas |
+
+### Functions changed / added (all in `js/cart.js`)
+- **New (marked `// BEGIN/END CUSTOM_DISCOUNT_CORE`)**: `getCustomDiscountKey`, `_loadCustomDiscount`, `_saveCustomDiscount`, `_fmtMoney`, `_validateCustomDiscountInput`, `_customDiscountFor`, `_computePricing`.
+- **New UI**: `_updateCustomDiscountUI`; `wireCustomDiscount()` IIFE (modal/Edit/Remove DOM plumbing only).
+- **Changed**: `getFinalTotal` (delegates to `_computePricing`), `_updateCouponUI` (renders from `_computePricing`), `saveLocalCart` (clears the discount key when the cart empties), `pos-opened` + `load-table-cart` handlers (load per-slot discount), coupon Apply handler + customer-coupons-panel Apply (blocked while a custom discount is active), `checkoutBtn` and `saveExitBtn` handlers (pricing via `_computePricing`; write new fields; pass discount to receipt/history), `syncCustomerOrderCompletion` / `syncManualCustomerProfile` (new trailing optional `pricing` param).
+- **Superseded, kept not deleted**: `_couponDiscount()` — no longer called by anything; do not add callers.
+
+### Pricing calculation changes
+`total = max(0, subtotal − customDiscount − couponDiscount)`, but the two discounts are **mutually exclusive** (below), so at most one is non-zero. In both settle handlers the local `discount` variable **still means the coupon discount**, so every pre-existing coupon line (mark used, `couponCode`, `couponDiscount`, receipt) is untouched; `customDiscount` is the new sibling.
+**Behaviour change to be aware of (coupon UI):** the cart's coupon line now uses the same rule Bill & Settle always used (`_getRedeemableCoupon`: strictly > ₹200 and customer-bound). Before, in the two edge cases (order exactly ₹200; slot phone ≠ coupon phone) the screen showed a coupon discount that settlement then refused to apply. The screen now shows exactly what will be charged; in those cases it shows "⚠️ COUPON can't be applied to this order" with a Remove link.
+
+### Storage
+- **In-progress** (per table/slot, like the coupon): `localStorage["customDiscount_<table>_<slot>"] = {"amount": 100}`; cleared on settle/save/empty cart.
+- **Persisted with the order**: `sales_history/{id}` → `subtotal` (pre-discount), `customDiscount` (0 if none), `total` (final). Same two fields on `customer_order_history/{uid|phone}/orders/{id}` and in the `pos_24h_history` localStorage entry. Written on every new bill AND on Edit-History updates (so removing the discount during an edit resets it to 0). Additive/optional: absent on older docs = no discount. **No Firestore rules change needed** (no field allow-lists on these collections).
+
+### Validation rules (`_validateCustomDiscountInput`, re-checked on every calculation by `_customDiscountFor`)
+Must be a plain positive number: digits with up to 2 decimals (the system already works in 2-dp rupees). Rejected: empty, `0`, `0.00`, negatives, letters, `1e2`, >2 decimals. Must **not exceed** the current order amount — else the exact message **"Discount cannot exceed the order amount."** (a discount **equal** to the order is allowed → ₹0 payable). Compared in paise to avoid float noise.
+**Cart changes:** if items are removed so the stored discount no longer fits, the discount is **removed with a visible notice** (never silently clamped, never a negative payable). Adding items keeps a still-valid discount. Emptying the cart clears it.
+
+### Coupon interaction — DECISION (please confirm with the owner)
+The existing architecture is a **single-discount model** (one discount line on the printed bill, one `couponCode/couponDiscount` pair per sale, one discount number in both settle handlers), and the spec says not to stack silently. So **custom discount and coupon are mutually exclusive**:
+- Coupon applied → custom button disabled with "Remove the coupon to use a custom discount." (modal also refuses to open).
+- Custom applied → coupon box disabled with "Remove Custom Discount to use a coupon" (Apply handler + customer-coupons panel also refuse, including after the async Firestore read).
+- `_computePricing` enforces it even if storage is tampered (custom wins; the coupon is **not redeemed/burned**).
+- Also fixed on the way: the "coupon below minimum" warning had no Remove link, which would now have trapped the operator; it has one.
+If the owner wants stacking instead, change ONLY `_computePricing` (+ receipt/`buildBillReceipt` needs a second discount line) — the storage fields already support both.
+
+### Permission / audit
+The POS has **no** manager/PIN control for manual discounts and no per-user audit trail, and none was invented. The record of the discount is the `subtotal`/`customDiscount` fields on the sale (same mechanism as `couponCode`/`couponDiscount`). No customer data is exposed by this feature.
+
+### Test results (all run on the real code; 2026-09-20)
+- **Pricing core** extracted from the real `cart.js` source and run in Node: **31/31** (spec examples 850−100=750 and 350−30=320, decimals, discount==subtotal, cart shrink, empty cart, corrupt/negative storage, float noise, coupon-only, custom+coupon = custom only, coupon capped, validator accept/reject list, storage round-trip).
+- **End-to-end** in headless Chromium (Playwright) with Firebase stubbed (network was unavailable): **68/68** — modal is above the drawer and tappable; every validation message; Edit/Remove; decimals; cart-shrink auto-removal + notice; coupon⇄custom blocking incl. bypassing the `disabled` attribute and tampered storage; Bill & Settle and Save & Exit write `subtotal 850 / customDiscount 100 / total 750` to `sales_history`, `customer_order_history`, `pos_24h_history`; customer `lifetimeSpend` += net total; printed ESC/POS bill; history drawer; reprint; `details.html` view + print; coupon-only and no-discount regressions unchanged; a custom-discount settle never touches a coupon; Edit-History restore + re-settle updates the SAME sale; reload persistence; per-table isolation.
+- **Legacy text-bill fallback** (encoder library unavailable) and ESC/POS both verified with a decimal discount (₹99.99 − ₹12.50 = ₹87.49).
+- `customers.js` history renderer exercised in Node (row shown / hidden / old docs without the field); `admin.js` and the other JS files syntax-checked only — the Sales-tab bill-card line was **not** rendered in a browser (admin panel needs its own auth/PIN flow).
+- **NOT tested**: real Firebase/Firestore, a real thermal printer, a real Android/iOS device. Please do a live smoke test before relying on it.
+
+### Known gaps / pre-existing behaviour noticed (deliberately NOT changed)
+- Home **Running Orders** cards (`js/tables.js`) and the floating "View Details ₹X" badge show the **pre-discount** cart subtotal (they already do for coupons). The Payable row in the drawer and everything saved/printed use the final total.
+- `details.html`, the history-drawer reprint and the 24h history **ignore coupon discounts** (they derive totals from items). Only the custom discount is handled there.
+- **Every coupon error message is erased instantly** in the original code (`applyCouponBtn` `finally { renderCart() }` → `_updateCouponUI` clears `#couponMsg`); verified against the untouched baseline. So "Invalid coupon code" etc. never stay visible. My extra guard message is subject to the same thing; the guard itself (coupon not stored, total unchanged) works.
+- Edit History does **not** restore a previously applied *coupon* (pre-existing); it does restore a custom discount.
+- Legacy text bill: for a coupon-only bill with a **decimal** amount the TOTAL now prints 2 dp instead of rounding to a whole rupee (integers unchanged).
+- Customer Panel (separate repo) shows only `total`; to show the discount there, read `customDiscount`/`subtotal` from `customer_order_history` (fields are already written).
+
+### Important information for a future AI agent
+- Anything that turns a cart into a payable amount goes through `_computePricing` — extend it, don't fork it.
+- The test harness used is not in the repo. To re-verify: serve the folder statically, block the network, and stub `firebase-*` (gstatic) modules plus `unpkg…esc-pos-encoder`; each scenario needs a **fresh browser context** (after one Bill & Settle the drawer stops opening on later loads in the same context — identical on the untouched baseline, not caused by this feature).
 
 ---
 

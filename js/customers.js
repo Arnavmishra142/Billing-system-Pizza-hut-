@@ -253,6 +253,7 @@ function _buildOrdersHtml(orders) {
         <div class="bill-card-amt" style="flex-shrink:0;">${_fmtRupee(o.total)}</div>
     </div>
     ${itemsHtml ? `<div style="border-top:1px solid #21262d;padding-top:8px;">${itemsHtml}</div>` : ''}
+    ${Number(o.customDiscount) > 0 ? `<div class="cust-ord-item-row"><span class="name" style="color:#3fb950;">Custom Discount</span><span class="qty"></span><span class="sub" style="color:#3fb950;">-${_fmtRupee(o.customDiscount)}</span></div>` : ''}
     <div style="font-size:0.75rem;font-weight:600;color:#3fb950;">${_esc(statusLabel)}</div>
 </div>`;
     }).join('') + `</div>`;

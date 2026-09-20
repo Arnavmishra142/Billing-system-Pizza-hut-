@@ -1,3 +1,9 @@
+// AI UPDATE [2026-09-20]: Added CUSTOM INSTANT DISCOUNT — a flat ₹ order-level
+// discount typed by staff. It is folded into the SAME authoritative pricing
+// calculation the coupon already uses (see _computePricing() below), so the cart
+// UI, Bill & Settle, Save & Exit, printed bill, sales_history and customer
+// history all read one final total. See the "CUSTOM INSTANT DISCOUNT" block
+// near _getRedeemableCoupon() and AI_HANDOFF.md for the full design.
 // AI UPDATE [2026-09-13]: Added the "Customer Coupons" panel — tapping the
 // online customer name badge in Order Details shows that customer's
 // available/unused coupons (Copy / Apply). Reuses the existing coupons/{code}
@@ -307,7 +313,9 @@ async function _lookupManualCustomerByPhone(rawTenDigitPhone) {
 // DELTA (new total − previous total) instead of the full total, and
 // totalOrders is NOT incremented again. Both params are no-ops (existing
 // behavior, fully unchanged) when omitted — i.e. every normal, non-edit bill.
-async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tableName, completionReason, cartSnapshot, orderIdOverride = null, editContext = null) {
+// AI UPDATE [2026-09-20]: trailing optional `pricing` = { subtotal, customDiscount } — written onto the
+// customer_order_history doc so Customer History can show the discount. Omitted = fields not written.
+async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tableName, completionReason, cartSnapshot, orderIdOverride = null, editContext = null, pricing = null) {
     if (!rawPhone) return;
     const phone = rawPhone.startsWith('+91') ? rawPhone : `+91${rawPhone}`;
 
@@ -375,6 +383,8 @@ async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tabl
                     orderedAt:        new Date().toISOString(),
                     // AI UPDATE [2026-09-16] Edit History audit trail (absent on first save).
                     ...(editContext ? { isEdited: true, editedAt: serverTimestamp() } : {}),
+                    // AI UPDATE [2026-09-20]: Custom Instant Discount — additive order-level fields.
+                    ...(pricing ? { subtotal: pricing.subtotal, customDiscount: pricing.customDiscount } : {}),
                 },
                 { merge: true }
             );
@@ -452,7 +462,9 @@ async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tabl
 // params for the Edit History feature — same purpose/behavior as the matching
 // params on syncManualCustomerProfile() above (see that comment). No-ops when
 // omitted, so every normal completion is completely unaffected.
-async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot, total, completionReason, billNumber = null, orderIdOverride = null, editContext = null) {
+// AI UPDATE [2026-09-20]: trailing optional `pricing` = { subtotal, customDiscount } — see
+// syncManualCustomerProfile() above. `total` is already the final (post-discount) payable.
+async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot, total, completionReason, billNumber = null, orderIdOverride = null, editContext = null, pricing = null) {
     // AI UPDATE [2026-09-13]: slot-scoped key suffix — see header comment above.
     const _slotSuffix = `${tableName}_${customerSlot}`;
 
@@ -570,6 +582,8 @@ async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot
                     orderedAt:        new Date().toISOString(),
                     // AI UPDATE [2026-09-16] Edit History audit trail (absent on first save).
                     ...(editContext ? { isEdited: true, editedAt: serverTimestamp() } : {}),
+                    // AI UPDATE [2026-09-20]: Custom Instant Discount — additive order-level fields.
+                    ...(pricing ? { subtotal: pricing.subtotal, customDiscount: pricing.customDiscount } : {}),
                 },
                 { merge: true }
             );
@@ -959,9 +973,14 @@ document.addEventListener('DOMContentLoaded', () => {
             // (₹200) — a disabled button's click handler does not fire, which is
             // exactly right: this panel must not bypass that existing gate.
             if (!applyCouponBtnEl || applyCouponBtnEl.disabled) {
+                // AI UPDATE [2026-09-20]: the section can also be closed because a Custom
+                // Instant Discount is applied (mutually exclusive with coupons) — say so.
+                const _blockedByCustom = _customDiscountFor(_rawCartTotal()) > 0;
                 applyBtn.closest('.coupon-panel-item')?.insertAdjacentHTML(
                     'beforeend',
-                    `<div class="coupon-panel-gate-msg">Available after ₹${COUPON_SECTION_MIN_SUBTOTAL} order subtotal</div>`
+                    `<div class="coupon-panel-gate-msg">${_blockedByCustom
+                        ? 'Remove the Custom Discount to use a coupon'
+                        : `Available after ₹${COUPON_SECTION_MIN_SUBTOTAL} order subtotal`}</div>`
                 );
                 return;
             }
@@ -996,6 +1015,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     // Discount is 0 if no coupon applied, or if the current order no longer
     // meets that coupon's minimum order requirement (e.g. items were removed).
+    // AI UPDATE [2026-09-20]: SUPERSEDED — no longer called by the UI or the settle
+    // handlers; _computePricing() (below) is the single authoritative calculation
+    // and uses _getRedeemableCoupon() so what the screen shows is exactly what is
+    // charged. Kept only so this historical helper isn't silently removed; do not
+    // add new callers.
     function _couponDiscount(rawTotal) {
         if (!_appliedCoupon) return 0;
         if (rawTotal < (_appliedCoupon.minOrder || 0)) return 0;
@@ -1015,10 +1039,100 @@ document.addEventListener('DOMContentLoaded', () => {
         if (_appliedCoupon.phone && _appliedCoupon.phone !== _slotPhone) return null;
         return _appliedCoupon;
     }
+    // ═══════════════════════════════════════════════════════════════════════
+    // AI UPDATE [2026-09-20]: CUSTOM INSTANT DISCOUNT
+    //
+    // A flat ₹ order-level discount typed by staff at the counter. It is stored
+    // as ORDER-level data only (item prices are never touched) and lives in
+    // localStorage per table/slot — exactly like the applied coupon — until the
+    // order is settled/saved, when it is written to sales_history /
+    // customer_order_history as `customDiscount` (with `subtotal` = pre-discount).
+    //
+    // ONE AUTHORITATIVE CALCULATION: _computePricing(rawTotal) below is the only
+    // place that turns a pre-discount subtotal into a final total. The cart UI
+    // (_updateCouponUI), getFinalTotal(), Bill & Settle and Save & Exit ALL call
+    // it — do not compute a total or discount anywhere else.
+    //
+    // STACKING RULE (documented decision): the existing architecture is a
+    // SINGLE-DISCOUNT model (one discount line on the printed bill, one
+    // couponCode/couponDiscount pair per sale, one discount number in both
+    // settle handlers). So a Custom Instant Discount and a coupon are MUTUALLY
+    // EXCLUSIVE — the UI blocks whichever is applied second with an explicit
+    // message, and _computePricing() enforces it too (custom wins, and the coupon
+    // is then NOT redeemed/burned), so the two can never double-discount.
+    //
+    // Validation lives in _validateCustomDiscountInput() (entry) and is
+    // re-checked on every calculation by _customDiscountFor() (cart changes).
+    // BEGIN CUSTOM_DISCOUNT_CORE
+    const getCustomDiscountKey = () => `customDiscount_${getCurrentTable()}_${getCurrentCustomer()}`;
+    let _customDiscount = null;       // { amount: number } | null
+    let _customDiscountNotice = '';   // one-shot message shown when a discount was auto-removed
+
+    function _loadCustomDiscount() {
+        try {
+            const raw = localStorage.getItem(getCustomDiscountKey());
+            _customDiscount = raw ? JSON.parse(raw) : null;
+        } catch (_) { _customDiscount = null; }
+    }
+    function _saveCustomDiscount() {
+        const key = getCustomDiscountKey();
+        if (_customDiscount) localStorage.setItem(key, JSON.stringify(_customDiscount));
+        else localStorage.removeItem(key);
+    }
+    // 850 -> "850", 12.5 -> "12.50" (whole rupees stay clean, paise only when present)
+    function _fmtMoney(n) {
+        const v = Number(n) || 0;
+        return Number.isInteger(v) ? String(v) : v.toFixed(2);
+    }
+    // Entry validation. Returns { ok:true, value } or { ok:false, error }.
+    // Rules: positive number, plain decimal (max 2 dp — the billing system
+    // already works in 2-dp rupees), no signs/exponents/letters, and never
+    // more than the current order amount.
+    function _validateCustomDiscountInput(raw, orderAmount) {
+        const s = String(raw == null ? '' : raw).trim();
+        if (s === '') return { ok: false, error: 'Enter a discount amount.' };
+        if (/^-/.test(s)) return { ok: false, error: 'Discount must be greater than 0.' };
+        if (!/^\d+(\.\d{1,2})?$/.test(s)) {
+            return { ok: false, error: 'Enter a valid amount (numbers only, up to 2 decimals).' };
+        }
+        const v = Number(s);
+        if (!(v > 0)) return { ok: false, error: 'Discount must be greater than 0.' };
+        // Compare in paise so 0.1+0.2-style float noise can never flip the result.
+        if (Math.round(v * 100) > Math.round((Number(orderAmount) || 0) * 100)) {
+            return { ok: false, error: 'Discount cannot exceed the order amount.' };
+        }
+        return { ok: true, value: +v.toFixed(2) };
+    }
+    // The custom discount that is VALID for this order amount, else 0. Called on every
+    // calculation, so a cart change that shrinks the order below the stored discount
+    // yields 0 here (never a negative payable) and the UI then removes it with a notice.
+    function _customDiscountFor(rawTotal) {
+        if (!_customDiscount) return 0;
+        const amt = Number(_customDiscount.amount);
+        if (!Number.isFinite(amt) || amt <= 0) return 0;
+        if (Math.round(amt * 100) > Math.round((Number(rawTotal) || 0) * 100)) return 0;
+        return +amt.toFixed(2);
+    }
+    // THE authoritative pricing calculation. rawTotal = pre-discount cart subtotal.
+    //   coupon          -> the coupon to redeem at settle (null if none / not redeemable /
+    //                      custom discount active)
+    //   couponDiscount  -> ₹ off from that coupon (0 if none)
+    //   customDiscount  -> ₹ off from the custom instant discount (0 if none/invalid)
+    //   total           -> final payable, never below 0
+    function _computePricing(rawTotal) {
+        const raw = Number(rawTotal) || 0;
+        const customDiscount = _customDiscountFor(raw);
+        const coupon = customDiscount > 0 ? null : _getRedeemableCoupon(raw);
+        const couponDiscount = coupon ? Math.min(coupon.amount, raw) : 0;
+        const total = Math.max(0, +(raw - customDiscount - couponDiscount).toFixed(2));
+        return { subtotal: +raw.toFixed(2), coupon, couponDiscount, customDiscount, total };
+    }
+    // END CUSTOM_DISCOUNT_CORE
+
     // Exposed so checkout/save-exit handlers can read the final payable amount.
+    // AI UPDATE [2026-09-20]: now delegates to _computePricing() (single calculation).
     function getFinalTotal() {
-        const rawTotal = _rawCartTotal();
-        return +(rawTotal - _couponDiscount(rawTotal)).toFixed(2);
+        return _computePricing(_rawCartTotal()).total;
     }
 
     function _updateCouponUI(rawTotal) {
@@ -1031,18 +1145,25 @@ document.addEventListener('DOMContentLoaded', () => {
         const grandEl   = document.getElementById('grandTotalAmount');
         const gateMsgEl = document.getElementById('couponGateMsg');
 
+        // AI UPDATE [2026-09-20]: single authoritative calculation (coupon + custom
+        // instant discount) — every number rendered below comes from `pricing`.
+        const pricing = _computePricing(rawTotal);
+        const customActive = pricing.customDiscount > 0;
+
         // [AI UPDATE 2026-09-12] session 2: whole-section gate. Below/at ₹200 the coupon
         // box is disabled outright — this is the UX layer; the authoritative business-rule
         // enforcement is the identical rawTotal check inside the applyCouponBtn handler and
         // the checkoutBtn/saveExitBtn redemption logic below, so a disabled attribute being
         // bypassed (e.g. dev tools) still cannot result in a coupon being redeemed.
-        const sectionOpen = rawTotal > COUPON_SECTION_MIN_SUBTOTAL;
+        // AI UPDATE [2026-09-20]: the section is also closed while a Custom Instant
+        // Discount is applied (single-discount model — see CUSTOM INSTANT DISCOUNT block).
+        const sectionOpen = rawTotal > COUPON_SECTION_MIN_SUBTOTAL && !customActive;
         if (inputEl)  inputEl.disabled  = !sectionOpen;
         if (applyBtn) applyBtn.disabled = !sectionOpen;
         if (gateMsgEl) {
-            gateMsgEl.textContent = sectionOpen
-                ? ''
-                : `Available after ₹${COUPON_SECTION_MIN_SUBTOTAL} order subtotal`;
+            gateMsgEl.textContent = customActive
+                ? 'Remove Custom Discount to use a coupon'
+                : (sectionOpen ? '' : `Available after ₹${COUPON_SECTION_MIN_SUBTOTAL} order subtotal`);
         }
 
         if (_appliedCoupon) {
@@ -1050,32 +1171,84 @@ document.addEventListener('DOMContentLoaded', () => {
             if (inputEl) inputEl.value = _appliedCoupon.code;
             if (applyBtn) applyBtn.style.display = 'none';
 
+            const _removeLink = ` <a href="#" id="removeCouponLink" style="color:#f85149;margin-left:8px;">Remove</a>`;
             if (!valid) {
+                // AI UPDATE [2026-09-20]: a Remove link is now shown here too. Previously an
+                // applied-but-below-minimum coupon had no way to be removed from this state,
+                // which would now also block the Custom Instant Discount (mutually exclusive).
                 if (msgEl) msgEl.innerHTML =
-                    `<span style="color:#f85149;">⚠️ Coupon needs min order ₹${_appliedCoupon.minOrder} (add ₹${Math.ceil(_appliedCoupon.minOrder - rawTotal)} more)</span>`;
+                    `<span style="color:#f85149;">⚠️ Coupon needs min order ₹${_appliedCoupon.minOrder} (add ₹${Math.ceil(_appliedCoupon.minOrder - rawTotal)} more)</span>` + _removeLink;
+                if (rowEl) rowEl.style.display = 'none';
+            } else if (pricing.couponDiscount <= 0) {
+                // AI UPDATE [2026-09-20]: valid per its own minOrder but NOT redeemable at
+                // settle (_getRedeemableCoupon: section minimum / customer binding). The old
+                // UI still showed a discount here that Bill & Settle then refused to apply;
+                // the screen now shows exactly what will be charged.
+                if (msgEl) msgEl.innerHTML =
+                    `<span style="color:#d29922;">⚠️ ${_appliedCoupon.code} can't be applied to this order</span>` + _removeLink;
                 if (rowEl) rowEl.style.display = 'none';
             } else {
                 if (msgEl) msgEl.innerHTML =
-                    `<span style="color:#3fb950;">✅ ${_appliedCoupon.code} applied</span> <a href="#" id="removeCouponLink" style="color:#f85149;margin-left:8px;">Remove</a>`;
+                    `<span style="color:#3fb950;">✅ ${_appliedCoupon.code} applied</span>` + _removeLink;
                 if (rowEl) rowEl.style.display = 'flex';
-                if (amtEl) amtEl.textContent = `-₹${_couponDiscount(rawTotal).toFixed(0)}`;
-                const rmLink = document.getElementById('removeCouponLink');
-                if (rmLink) rmLink.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    _appliedCoupon = null;
-                    _saveCoupon();
-                    renderCart();
-                });
+                if (amtEl) amtEl.textContent = `-₹${pricing.couponDiscount.toFixed(0)}`;
             }
+            const rmLink = document.getElementById('removeCouponLink');
+            if (rmLink) rmLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                _appliedCoupon = null;
+                _saveCoupon();
+                renderCart();
+            });
         } else {
             if (rowEl) rowEl.style.display = 'none';
             if (msgEl) msgEl.innerHTML = '';
             if (applyBtn) applyBtn.style.display = '';
         }
 
-        const discount = _couponDiscount(rawTotal);
+        const discount = pricing.couponDiscount + pricing.customDiscount;
         if (grandRow) grandRow.style.display = discount > 0 ? 'flex' : 'none';
-        if (grandEl)  grandEl.textContent = `₹${(rawTotal - discount).toFixed(2)}`;
+        if (grandEl)  grandEl.textContent = `₹${pricing.total.toFixed(2)}`;
+
+        _updateCustomDiscountUI(rawTotal, pricing);
+    }
+
+    // AI UPDATE [2026-09-20]: refreshes the Custom Instant Discount controls/rows from the
+    // authoritative `pricing` object. Also performs the "revalidate when the cart changes"
+    // rule: a stored discount that no longer fits the order amount is REMOVED with a visible
+    // notice (never silently clamped up/down, never allowed to make the payable negative).
+    function _updateCustomDiscountUI(rawTotal, pricing) {
+        const btn     = document.getElementById('customDiscountBtn');
+        const msgEl   = document.getElementById('customDiscountMsg');
+        const appliedEl = document.getElementById('customDiscountApplied');
+        const amtEl   = document.getElementById('customDiscountAmount');
+
+        if (_customDiscount && pricing.customDiscount === 0) {
+            if (rawTotal > 0) {
+                _customDiscountNotice =
+                    `⚠️ Custom discount ₹${_fmtMoney(_customDiscount.amount)} removed — it no longer fits the order amount.`;
+            }
+            _customDiscount = null;
+            _saveCustomDiscount();
+        }
+        if (rawTotal <= 0) _customDiscountNotice = '';
+
+        const active = !!_customDiscount;
+        if (appliedEl) appliedEl.style.display = active ? 'block' : 'none';
+        if (amtEl && active) amtEl.textContent = `-₹${_fmtMoney(pricing.customDiscount)}`;
+
+        if (btn) {
+            btn.style.display = active ? 'none' : '';
+            const blockedByCoupon = !!_appliedCoupon;
+            btn.disabled = blockedByCoupon || rawTotal <= 0;
+        }
+        if (msgEl) {
+            if (active) msgEl.innerHTML = '';
+            else if (_appliedCoupon) msgEl.textContent = 'Remove the coupon to use a custom discount.';
+            else if (rawTotal <= 0) msgEl.textContent = 'Add items to apply a discount.';
+            else if (_customDiscountNotice) msgEl.innerHTML = `<span style="color:#d29922;">${_customDiscountNotice}</span>`;
+            else msgEl.textContent = '';
+        }
     }
 
     const getLocalCart = () => {
@@ -1098,6 +1271,8 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.removeItem(getManualCustomerIdentityKey());
             // AI UPDATE [2026-09-12]: Clear any applied coupon for this slot too.
             localStorage.removeItem(getCouponKey());
+            // AI UPDATE [2026-09-20]: ...and any Custom Instant Discount for this slot.
+            localStorage.removeItem(getCustomDiscountKey());
         } else {
             localStorage.setItem(key, JSON.stringify(cartData));
         }
@@ -1106,6 +1281,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.addEventListener('pos-opened', (e) => {
         _loadCoupon(); // AI UPDATE [2026-09-12]: restore any applied coupon for this table/slot
+        _loadCustomDiscount(); // AI UPDATE [2026-09-20]: restore any Custom Instant Discount for this slot
+        _customDiscountNotice = '';
         const name = e.detail.name;
         const holdBtn = document.getElementById('holdBtn');
         const kotBtn = document.getElementById('kotBtn');
@@ -1225,6 +1402,8 @@ document.addEventListener('DOMContentLoaded', () => {
         currentCart = getLocalCart();
         _servedItems.clear(); // clear served state when switching to a different table
         _loadCoupon();        // AI UPDATE [2026-09-12]: restore coupon state for this table/slot
+        _loadCustomDiscount(); // AI UPDATE [2026-09-20]: restore Custom Instant Discount for this table/slot
+        _customDiscountNotice = '';
         renderCart();
     });
 
@@ -1875,6 +2054,73 @@ document.addEventListener('DOMContentLoaded', () => {
         kotBtn.addEventListener('click', () => printKOT(false));
     }
 
+    // ── Custom Instant Discount: modal + Edit / Remove wiring ──────────────────
+    // AI UPDATE [2026-09-20]: opens a small modal (₹ amount, CANCEL / APPLY DISCOUNT).
+    // All rules live in _validateCustomDiscountInput() / _computePricing() (see the
+    // CUSTOM INSTANT DISCOUNT block above) — this section is only DOM plumbing, so
+    // there is exactly one validation path and one total calculation.
+    (function wireCustomDiscount() {
+        const modalEl  = document.getElementById('customDiscountModal');
+        const inputEl  = document.getElementById('customDiscountInput');
+        const errEl    = document.getElementById('customDiscountError');
+        const hintEl   = document.getElementById('customDiscountHint');
+        const applyBtn = document.getElementById('applyCustomDiscountBtn');
+        const cancelBtn= document.getElementById('cancelCustomDiscountBtn');
+        const openBtn  = document.getElementById('customDiscountBtn');
+        const editBtn  = document.getElementById('customDiscountEditBtn');
+        const removeBtn= document.getElementById('customDiscountRemoveBtn');
+        if (!modalEl || !inputEl || !applyBtn || !cancelBtn) return;
+
+        const showError = (msg) => { if (errEl) errEl.textContent = msg || ''; };
+        const closeModal = () => { modalEl.classList.add('hidden'); showError(''); };
+
+        function openModal() {
+            const rawTotal = _rawCartTotal();
+            // Mutually exclusive with coupons (single-discount model).
+            if (_appliedCoupon) { renderCart(); return; }
+            if (rawTotal <= 0) { renderCart(); return; }
+            _customDiscountNotice = '';
+            showError('');
+            inputEl.value = _customDiscount ? String(_customDiscount.amount) : '';
+            if (hintEl) hintEl.textContent = `Order amount: ₹${_fmtMoney(rawTotal)}`;
+            modalEl.classList.remove('hidden');
+            setTimeout(() => { inputEl.focus(); inputEl.select(); }, 100);
+        }
+
+        function applyFromModal() {
+            const rawTotal = _rawCartTotal();
+            if (_appliedCoupon) { showError('Remove the coupon to use a custom discount.'); return; }
+            const result = _validateCustomDiscountInput(inputEl.value, rawTotal);
+            if (!result.ok) { showError(result.error); return; }
+            _customDiscount = { amount: result.value };
+            _customDiscountNotice = '';
+            _saveCustomDiscount();
+            closeModal();
+            renderCart(); // payable updates immediately
+        }
+
+        openBtn?.addEventListener('click', openModal);
+        editBtn?.addEventListener('click', openModal);
+        removeBtn?.addEventListener('click', () => {
+            _customDiscount = null;
+            _customDiscountNotice = '';
+            _saveCustomDiscount();
+            renderCart(); // original total restored immediately
+        });
+        applyBtn.addEventListener('click', applyFromModal);
+        cancelBtn.addEventListener('click', closeModal);
+        inputEl.addEventListener('input', () => showError(''));
+        inputEl.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Enter') { ev.preventDefault(); applyFromModal(); }
+        });
+        // Esc closes from anywhere while the modal is open (not only when the input has focus).
+        document.addEventListener('keydown', (ev) => {
+            if (ev.key === 'Escape' && !modalEl.classList.contains('hidden')) { ev.preventDefault(); closeModal(); }
+        });
+        modalEl.addEventListener('click', (ev) => { if (ev.target === modalEl) closeModal(); }); // backdrop
+    })();
+    // ── end Custom Instant Discount wiring ──────────────────────────────────────
+
     // ── Apply Coupon ───────────────────────────────────────────────────────────
     // AI UPDATE [2026-09-12]: Verifies the code against coupons/{code} in
     // Firestore, checks it hasn't been used, and checks the current cart total
@@ -1895,6 +2141,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 const rawTotal = _rawCartTotal();
+
+                // AI UPDATE [2026-09-20]: authoritative single-discount guard — a coupon can't be
+                // applied while a Custom Instant Discount is active (the disabled input is only UX).
+                if (_customDiscountFor(rawTotal) > 0) {
+                    if (msgEl) msgEl.innerHTML =
+                        `<span style="color:#f85149;">❌ Remove the Custom Discount to use a coupon</span>`;
+                    return; // `finally` below restores the button and re-renders
+                }
 
                 // [AI UPDATE 2026-09-12] session 2: authoritative section gate — this is the
                 // real enforcement point (the disabled input/button is only the UX layer, see
@@ -1934,8 +2188,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         // [AI UPDATE 2026-09-12] session 2: phone stored alongside the applied
                         // coupon so the redemption handlers (Bill & Settle / Save & Exit) can
                         // re-verify customer binding right before marking it used, not just here.
-                        _appliedCoupon = { code, amount: Number(cp.amount) || 0, minOrder, phone: cp.phone || '' };
-                        _saveCoupon();
+                        // AI UPDATE [2026-09-20]: re-check after the async Firestore read — a Custom
+                        // Instant Discount may have been applied while the lookup was in flight.
+                        if (_customDiscountFor(rawTotal) > 0) {
+                            if (msgEl) msgEl.innerHTML =
+                                `<span style="color:#f85149;">❌ Remove the Custom Discount to use a coupon</span>`;
+                        } else {
+                            _appliedCoupon = { code, amount: Number(cp.amount) || 0, minOrder, phone: cp.phone || '' };
+                            _saveCoupon();
+                        }
                     }
                 }
             } catch (err) {
@@ -2007,9 +2268,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 const ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
                 return sum + (item.price + ep) * item.qty;
             }, 0);
-            const _couponToRedeem = _getRedeemableCoupon(rawTotal); // [AI UPDATE 2026-09-12] session 2: authoritative re-check
-            const discount  = _couponToRedeem ? Math.min(_couponToRedeem.amount, rawTotal) : 0;
-            const total     = +(rawTotal - discount).toFixed(2);
+            // AI UPDATE [2026-09-20]: the coupon/custom-discount/total split now comes from the ONE
+            // authoritative _computePricing() (which internally does the same authoritative
+            // _getRedeemableCoupon() re-check as before, and enforces "custom discount and coupon are
+            // mutually exclusive"). `discount` keeps its original meaning — the COUPON discount — so
+            // every coupon line below is unchanged; `customDiscount` is the new order-level field.
+            const _pricing        = _computePricing(rawTotal);
+            const _couponToRedeem = _pricing.coupon;
+            const discount        = _pricing.couponDiscount;
+            const customDiscount  = _pricing.customDiscount;
+            const total           = _pricing.total;
 
             // AI UPDATE [2026-09-16] EDIT HISTORY: if this slot was loaded via
             // "Edit History" (js/order-edit.js), _editMode is non-null and carries
@@ -2031,7 +2299,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 getDisplayTitle(),
                 shortOrderId,
                 getFormattedDate(),
-                discount > 0 ? { code: _couponToRedeem.code, amount: discount } : null
+                // AI UPDATE [2026-09-20]: one discount slot on the bill (single-discount model) — either the
+                // coupon (unchanged) or the Custom Instant Discount (label-only entry, see receipt-builder.js).
+                customDiscount > 0
+                    ? { label: 'Custom Discount', amount: customDiscount }
+                    : (discount > 0 ? { code: _couponToRedeem.code, amount: discount } : null)
             );
 
             if (escposBuffer) {
@@ -2072,8 +2344,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (discount > 0) {
                     billText += `Coupon (${_couponToRedeem.code})`.padEnd(25, ' ') + ('-' + discount).padStart(7, ' ') + "\n";
                 }
+                // AI UPDATE [2026-09-20]: Custom Instant Discount line in the legacy text bill.
+                if (customDiscount > 0) {
+                    billText += `Custom Discount`.padEnd(25, ' ') + ('-' + _fmtMoney(customDiscount)).padStart(7, ' ') + "\n";
+                }
                 billText += "\n";
-                billText += centerText(`TOTAL: Rs ${(_legacyTotal - discount).toFixed(0)}`) + "\n\n";
+                billText += centerText(`TOTAL: Rs ${_fmtMoney(+(_legacyTotal - discount - customDiscount).toFixed(2))}`) + "\n\n";
                 billText += centerText("Thank You! Visit Again!") + "\n\n\n\n" + BOLD_OFF;
                 triggerRawBTPrint(billText);
             }
@@ -2105,6 +2381,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     total: total,
                     couponCode:     discount > 0 ? _couponToRedeem.code : null,
                     couponDiscount: discount,
+                    // AI UPDATE [2026-09-20]: order-level pricing split — see setDoc branch below.
+                    subtotal:       _pricing.subtotal,
+                    customDiscount: customDiscount,
                     isEdited:      true,
                     editedAt:      serverTimestamp(),
                     originalTotal: _editMode.originalTotal, // set once, never overwritten on later edits
@@ -2120,6 +2399,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     // AI UPDATE [2026-09-12]: coupon audit trail on the sale record.
                     couponCode:     discount > 0 ? _couponToRedeem.code : null,
                     couponDiscount: discount,
+                    // AI UPDATE [2026-09-20]: CUSTOM INSTANT DISCOUNT — order-level fields. `subtotal` is
+                    // the pre-discount item total, `customDiscount` the flat ₹ off (0 if none), and
+                    // `total` (above) is the final payable. Item prices in `items` are untouched.
+                    subtotal:       _pricing.subtotal,
+                    customDiscount: customDiscount,
                     // [AI UPDATE 2026-09-14] Optional manual-customer details entered
                     // in the popup, for traceability on the bill record itself.
                     // Purely additive — does not replace the existing `customer` slot field.
@@ -2143,6 +2427,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     billId,
                     customerName:  _onlineName  || _manualCustomer.name || null,
                     customerPhone: _onlinePhone || (_manualCustomer.phone ? `+91${_manualCustomer.phone}` : null),
+                    // AI UPDATE [2026-09-20]: so History drawer / details.html / reprint show the discount.
+                    subtotal:       _pricing.subtotal,
+                    customDiscount: customDiscount,
                 });
             }
 
@@ -2171,7 +2458,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // null on a normal (non-edit) bill, so behavior there is unchanged.
             syncCustomerOrderCompletion(
                 tableName, customerName, cartSnapshot, total, 'bill_settle', shortOrderId,
-                billId, _statsEditContext(_editMode)
+                billId, _statsEditContext(_editMode),
+                { subtotal: _pricing.subtotal, customDiscount } // AI UPDATE [2026-09-20]
             );
 
             // [AI UPDATE 2026-09-14] Manual POS customer identification — only
@@ -2181,7 +2469,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (_manualCustomer.phone) {
                 syncManualCustomerProfile(
                     _manualCustomer.name, _manualCustomer.phone, total, shortOrderId, tableName, 'bill_settle', cartSnapshot,
-                    billId, _statsEditContext(_editMode)
+                    billId, _statsEditContext(_editMode),
+                    { subtotal: _pricing.subtotal, customDiscount } // AI UPDATE [2026-09-20]
                 );
             }
 
@@ -2241,9 +2530,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
                 return sum + (item.price + ep) * item.qty;
             }, 0);
-            const _couponToRedeem = _getRedeemableCoupon(rawTotal); // [AI UPDATE 2026-09-12] session 2: authoritative re-check
-            const discount = _couponToRedeem ? Math.min(_couponToRedeem.amount, rawTotal) : 0;
-            const total    = +(rawTotal - discount).toFixed(2);
+            // AI UPDATE [2026-09-20]: same single authoritative pricing calculation as Bill & Settle
+            // above (see the note there) — coupon + Custom Instant Discount + final total.
+            const _pricing        = _computePricing(rawTotal);
+            const _couponToRedeem = _pricing.coupon;
+            const discount        = _pricing.couponDiscount;
+            const customDiscount  = _pricing.customDiscount;
+            const total           = _pricing.total;
             const shortOrderId = String(Date.now()).slice(-5);
 
             // AI UPDATE [2026-09-16] EDIT HISTORY — see the matching note in the
@@ -2269,6 +2562,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         total: total,
                         couponCode:     discount > 0 ? _couponToRedeem.code : null,
                         couponDiscount: discount,
+                        // AI UPDATE [2026-09-20]: order-level pricing split.
+                        subtotal:       _pricing.subtotal,
+                        customDiscount: customDiscount,
                         isEdited:      true,
                         editedAt:      serverTimestamp(),
                         originalTotal: _editMode.originalTotal,
@@ -2284,6 +2580,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         // AI UPDATE [2026-09-12]: coupon audit trail on the sale record.
                         couponCode:     discount > 0 ? _couponToRedeem.code : null,
                         couponDiscount: discount,
+                        // AI UPDATE [2026-09-20]: CUSTOM INSTANT DISCOUNT — see Bill & Settle above.
+                        subtotal:       _pricing.subtotal,
+                        customDiscount: customDiscount,
                         // [AI UPDATE 2026-09-14] Optional manual-customer details — see
                         // Bill & Settle above for the matching field.
                         manualCustomerName:  _manualCustomer.name  || null,
@@ -2302,6 +2601,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         billId,
                         customerName:  _onlineName  || _manualCustomer.name || null,
                         customerPhone: _onlinePhone || (_manualCustomer.phone ? `+91${_manualCustomer.phone}` : null),
+                        // AI UPDATE [2026-09-20]: see Bill & Settle.
+                        subtotal:       _pricing.subtotal,
+                        customDiscount: customDiscount,
                     });
                 }
 
@@ -2329,7 +2631,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 // — both null/undefined on a normal (non-edit) save, so unchanged there.
                 syncCustomerOrderCompletion(
                     tableName, customerName, cartSnapshot, total, 'save_exit', null,
-                    billId, _statsEditContext(_editMode)
+                    billId, _statsEditContext(_editMode),
+                    { subtotal: _pricing.subtotal, customDiscount } // AI UPDATE [2026-09-20]
                 );
 
                 // [AI UPDATE 2026-09-14] Manual POS customer identification —
@@ -2337,7 +2640,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (_manualCustomer.phone) {
                     syncManualCustomerProfile(
                         _manualCustomer.name, _manualCustomer.phone, total, shortOrderId, tableName, 'save_exit', cartSnapshot,
-                        billId, _statsEditContext(_editMode)
+                        billId, _statsEditContext(_editMode),
+                        { subtotal: _pricing.subtotal, customDiscount } // AI UPDATE [2026-09-20]
                     );
                 }
 

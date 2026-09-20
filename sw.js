@@ -78,7 +78,9 @@
 // updateStaffPhoto export) — already precached above, covered by this bump.
 // AI UPDATE [2026-09-15]: Bumped pos-static-v48 → pos-static-v49 (js/cart.js
 // changed: Parcel KOT large centered "P" marker — see AI_HANDOFF.md).
-const CACHE_NAME = 'pos-static-v49'; const STATIC_ASSETS = [
+// AI UPDATE [2026-09-20]: Bumped pos-static-v49 → pos-static-v50 (js/cart.js, js/receipt-builder.js,
+// css/style.css changed: Custom Instant Discount — see AI_HANDOFF.md).
+const CACHE_NAME = 'pos-static-v50'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',

@@ -264,7 +264,8 @@ window.loadSalesData = async function(filterType, filterValue) {
                 ? `${sale.manualCustomerName || 'Customer'}${sale.manualCustomerPhone ? ' · ' + sale.manualCustomerPhone : ''}`
                 : '';
 
-        const card = { id: sale.id, label, timeStr, total, customerLabel, isEdited: !!sale.isEdited };
+        // AI UPDATE [2026-09-20]: Custom Instant Discount shown on the bill card (`total` is already final).
+        const card = { id: sale.id, label, timeStr, total, customerLabel, isEdited: !!sale.isEdited, customDiscount: Number(sale.customDiscount) || 0 };
         if (isQS) { qsRevenue += total; qsOrders++; qsBills.push(card); }
         else       { tableRevenue += total; tableOrders++; tableBills.push(card); }
     });
@@ -315,6 +316,7 @@ window.loadSalesData = async function(filterType, filterValue) {
                     <div class="bill-card-name">${b.label}${b.isEdited ? ' <span style="font-size:0.65rem;color:#d29922;font-weight:700;">(Edited)</span>' : ''}</div>
                     ${b.customerLabel ? `<div class="bill-card-time" style="color:#58a6ff;">${b.customerLabel}</div>` : ''}
                     <div class="bill-card-time">${b.timeStr}</div>
+                    ${b.customDiscount > 0 ? `<div class="bill-card-time" style="color:#3fb950;">Custom discount -₹${Number.isInteger(b.customDiscount) ? b.customDiscount : b.customDiscount.toFixed(2)}</div>` : ''}
                 </div>
                 <div class="bill-card-right">
                     <div class="bill-card-amt">₹${Number(b.total).toFixed(0)}</div>

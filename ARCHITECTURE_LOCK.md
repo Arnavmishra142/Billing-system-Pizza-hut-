@@ -340,6 +340,13 @@ When this document does not exist, Customer Panel defaults to **ON** (backward c
                                    // by subsequent edits
   lastEditReason:       string    // "bill_settle" | "save_exit" — which flow made
                                    // the most recent edit
+  // ── Custom Instant Discount fields (added 2026-09-20, additive/optional) ──
+  subtotal:             number    // PRE-discount item total (sum of price×qty + extras)
+  customDiscount:       number    // flat ₹ order-level discount typed by staff (0 = none).
+                                   // Mutually exclusive with couponDiscount.
+                                   // `total` above is already the FINAL payable
+                                   // (= subtotal − customDiscount − couponDiscount).
+                                   // Item prices in `items` are never altered.
 }
 ```
 **Backward-compatibility note:** all Edit History fields are absent on every
@@ -364,7 +371,9 @@ edited" / "no online customer", never an error state.
     quantity: number
     subtotal: number
   }]
-  total:            number
+  total:            number   // FINAL payable (after any custom discount)
+  subtotal:         number   // added 2026-09-20 — pre-discount total (additive/optional)
+  customDiscount:   number   // added 2026-09-20 — flat ₹ discount, 0 = none (additive/optional)
   completedAt:      Timestamp
   completionReason: string   // "bill_settle" | "save_exit"
   orderedAt:        string   // ISO 8601 string
