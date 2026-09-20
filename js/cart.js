@@ -203,6 +203,14 @@ function _clearEditMode(tableName, customerSlot) {
 // customer attachment made mid-transition, but it can never DOUBLE-count an
 // order that truly already belonged to a customer. This is a narrow,
 // self-resolving rollout edge case, not an ongoing design gap.
+// AI UPDATE [2026-09-20] BUG FIX (online-customer Edit History): identity stored on the edit flag by
+// js/order-edit.js. Used as a fallback when the customerName_/customerPhone_ badge keys are gone — they
+// are deleted by saveLocalCart([]) whenever the cart is emptied mid-edit. Never returns null.
+function _editOnlineIdentity(editMode) {
+    const i = editMode && editMode.onlineIdentity;
+    return { name: (i && i.name) || '', phone: (i && i.phone) || '' };
+}
+
 function _statsEditContext(editMode) {
     if (!editMode) return null;
     const hadCustomer = editMode.hadCustomer === undefined ? true : !!editMode.hadCustomer;
@@ -464,7 +472,17 @@ async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tabl
 // omitted, so every normal completion is completely unaffected.
 // AI UPDATE [2026-09-20]: trailing optional `pricing` = { subtotal, customDiscount } — see
 // syncManualCustomerProfile() above. `total` is already the final (post-discount) payable.
-async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot, total, completionReason, billNumber = null, orderIdOverride = null, editContext = null, pricing = null) {
+// AI UPDATE [2026-09-20] BUG FIX (online-customer Edit History — stale Lifetime Spend / Total Orders):
+// trailing optional `identity` = { name, phone } — the online customer's badge name/phone captured by the
+// Bill & Settle / Save & Exit handler BEFORE it calls saveLocalCart([]). ROOT CAUSE: saveLocalCart([])
+// deletes the customerName_<table>_<slot> / customerPhone_<table>_<slot> badge keys, and both handlers call
+// it BEFORE this function runs, so the localStorage fallback below (used on an Edit History re-settle, where
+// there is no fresh pending_table_orders doc to read the phone from) always came back '' → the
+// customers/{phone} stats update (`if (customerPhone)`) was silently SKIPPED, and the merge-write below
+// overwrote the history doc's customerName/customerPhone with ''. The manual flow was immune because
+// syncManualCustomerProfile() receives the phone as an argument, not from localStorage.
+// Omitted (every pre-existing caller) = behaviour exactly as before.
+async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot, total, completionReason, billNumber = null, orderIdOverride = null, editContext = null, pricing = null, identity = null) {
     // AI UPDATE [2026-09-13]: slot-scoped key suffix — see header comment above.
     const _slotSuffix = `${tableName}_${customerSlot}`;
 
@@ -528,8 +546,15 @@ async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot
             // (it was already marked 'completed' the first time). Fall back to the
             // same customerName_/customerPhone_ badge keys the cart UI already reads
             // — js/order-edit.js sets these when it loads the order for editing.
-            customerName  = localStorage.getItem(`customerName_${_slotSuffix}`)  || '';
-            customerPhone = localStorage.getItem(`customerPhone_${_slotSuffix}`) || '';
+            // AI UPDATE [2026-09-20]: prefer the identity the handler captured BEFORE saveLocalCart([])
+            // wiped these keys (see the BUG FIX note on this function's signature); localStorage is
+            // kept only as a last-resort fallback for callers that don't pass `identity`.
+            customerName  = (identity && identity.name)  || localStorage.getItem(`customerName_${_slotSuffix}`)  || '';
+            customerPhone = (identity && identity.phone) || localStorage.getItem(`customerPhone_${_slotSuffix}`) || '';
+            if (editContext && !customerPhone) {
+                console.warn(`[OrderSync] Edit History: no customer phone resolved for slot "${_slotSuffix}" — ` +
+                    'customers/{phone} Total Orders / Lifetime Spend will NOT be adjusted for this edit.');
+            }
         }
 
         // Mark ONLY the imported orders as 'completed'.
@@ -563,8 +588,11 @@ async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot
                     billNumber:       billNumber || null,     // short ID printed on bill (Bill & Settle only)
                     orderStatus:      'completed',
                     tableId:          tableName,
-                    customerName,
-                    customerPhone,
+                    // AI UPDATE [2026-09-20]: on an Edit History re-settle (editContext set) never overwrite the
+                    // stored name/phone with '' — this is a merge write on the SAME doc. Non-edit path unchanged.
+                    ...(editContext
+                        ? { ...(customerName ? { customerName } : {}), ...(customerPhone ? { customerPhone } : {}) }
+                        : { customerName, customerPhone }),
                     items: cartSnapshot.map(i => {
                         const ep = Array.isArray(i.extras) ? i.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
                         return {
@@ -2288,6 +2316,20 @@ document.addEventListener('DOMContentLoaded', () => {
             // ── Snapshot cart before clearing ─────────────────────────────────
             const cartSnapshot = currentCart.slice();
 
+            // AI UPDATE [2026-09-20] BUG FIX (online-customer Edit History): capture the online
+            // customer's identity HERE — before saveLocalCart([]) below, which deletes the
+            // customerName_/customerPhone_ badge keys. These three reads used to sit AFTER that call
+            // (further down, next to the sales_history write), so they always returned null:
+            // sales_history.onlineCustomerName/Phone were saved as null and the History-drawer/details.html
+            // customer line was blank for online Bill & Settle bills. Save & Exit already read them in
+            // this order. See the BUG FIX note on syncCustomerOrderCompletion().
+            // Gated on _onlineUid so a MANUAL customer's badge keys (set by the identity popup) are NOT
+            // newly copied into sales_history.onlineCustomerName/Phone — manual Bill & Settle records stay
+            // exactly as they were (their identity is stored in manualCustomerName/Phone).
+            const _onlineUid   = localStorage.getItem(`activeCustomerUid_${tableName}_${customerName}`) || null;
+            const _onlineName  = _onlineUid ? (localStorage.getItem(getCustomerNameKey())  || _editOnlineIdentity(_editMode).name  || null) : null;
+            const _onlinePhone = _onlineUid ? (localStorage.getItem(getCustomerPhoneKey()) || _editOnlineIdentity(_editMode).phone || null) : null;
+
             // ── Build and print bill immediately (no network wait) ────────────
             // AI UPDATE [2026-07-30]: Replace manual string-based bill generation
             // with ESC/POS encoder (esc-pos-encoder library via CDN in index.html).
@@ -2370,9 +2412,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // restoring them for an edit) — stored on the sale record so a FUTURE
             // Edit History pass on this same bill can restore it without asking
             // for a phone number again. Purely additive; absent = anonymous/manual.
-            const _onlineUid   = localStorage.getItem(`activeCustomerUid_${tableName}_${customerName}`) || null;
-            const _onlineName  = localStorage.getItem(getCustomerNameKey())  || null;
-            const _onlinePhone = localStorage.getItem(getCustomerPhoneKey()) || null;
+            // AI UPDATE [2026-09-20]: _onlineUid/_onlineName/_onlinePhone are now captured above the
+            // saveLocalCart([]) call (they were read here, after the badge keys had been wiped).
 
             if (_editMode) {
                 // ── Update the EXISTING sale in place — never a new document ───
@@ -2459,7 +2500,8 @@ document.addEventListener('DOMContentLoaded', () => {
             syncCustomerOrderCompletion(
                 tableName, customerName, cartSnapshot, total, 'bill_settle', shortOrderId,
                 billId, _statsEditContext(_editMode),
-                { subtotal: _pricing.subtotal, customDiscount } // AI UPDATE [2026-09-20]
+                { subtotal: _pricing.subtotal, customDiscount }, // AI UPDATE [2026-09-20]
+                { name: _onlineName, phone: _onlinePhone }        // AI UPDATE [2026-09-20]: identity captured pre-clear
             );
 
             // [AI UPDATE 2026-09-14] Manual POS customer identification — only
@@ -2544,8 +2586,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const _editMode = _getEditMode(tableName, customerName);
             const billId    = _editMode ? _editMode.orderId : `SALE_${Date.now()}`;
             const _onlineUid   = localStorage.getItem(`activeCustomerUid_${tableName}_${customerName}`) || null;
-            const _onlineName  = localStorage.getItem(getCustomerNameKey())  || null;
-            const _onlinePhone = localStorage.getItem(getCustomerPhoneKey()) || null;
+            const _onlineName  = localStorage.getItem(getCustomerNameKey())  || _editOnlineIdentity(_editMode).name  || null;
+            const _onlinePhone = localStorage.getItem(getCustomerPhoneKey()) || _editOnlineIdentity(_editMode).phone || null;
 
             // ── Clear cart and navigate back immediately ───────────────────────
             saveLocalCart([]);
@@ -2632,7 +2674,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 syncCustomerOrderCompletion(
                     tableName, customerName, cartSnapshot, total, 'save_exit', null,
                     billId, _statsEditContext(_editMode),
-                    { subtotal: _pricing.subtotal, customDiscount } // AI UPDATE [2026-09-20]
+                    { subtotal: _pricing.subtotal, customDiscount }, // AI UPDATE [2026-09-20]
+                    { name: _onlineName, phone: _onlinePhone }        // AI UPDATE [2026-09-20]: identity captured pre-clear
                 );
 
                 // [AI UPDATE 2026-09-14] Manual POS customer identification —

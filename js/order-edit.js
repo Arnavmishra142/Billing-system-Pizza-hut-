@@ -1,3 +1,8 @@
+// AI UPDATE [2026-09-20] BUG FIX (online-customer Edit History — stale Lifetime Spend / Total Orders):
+// _loadOrderForEdit() now resolves the online customer's PHONE (and name) when the sales_history record
+// has none — see _resolveOnlineIdentity() below. Bill & Settle used to save onlineCustomerName/Phone as
+// null (see js/cart.js), so every online bill saved before the fix has no phone on it, and without a
+// phone the edit's customers/{phone} Total Orders / Lifetime Spend update could not be applied.
 // AI UPDATE [2026-09-16]: NEW FILE — "Edit History" feature.
 // AI UPDATE [2026-09-16] round 2: window.editHistoryOrder() is now callable
 // from ANY page that loads this file — the Admin Sales tab (admin/index.html),
@@ -39,7 +44,7 @@
 // the same localStorage keys and Firestore collections js/cart.js already
 // owns, using the exact key formats/shapes it already uses.
 import { db, auth } from './firebase-config.js';
-import { doc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+import { doc, getDoc, getDocs, query, where, collection } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
 const PENDING_EDIT_KEY = 'pendingOrderEdit';
@@ -97,6 +102,48 @@ function _checkPendingEdit() {
     });
 }
 
+// AI UPDATE [2026-09-20] BUG FIX: resolve an online (QR) customer's phone/name for an order being edited.
+// Order of preference — all READS of existing records, no new data source, no writes:
+//   1. what the sales_history record itself carries (correct for orders saved after this fix);
+//   2. customer_order_history/{uid}/orders/{saleId} — the SAME order ID (shared-ID design, session 4);
+//      written from the customer's own pending order, so its customerPhone/customerName are right
+//      unless a pre-fix edit already overwrote them with '';
+//   3. customers where uid == onlineCustomerUid (then authUid, the legacy field name) — the doc ID IS
+//      the phone number (customers/{+91XXXXXXXXXX}).
+// Returns '' for anything it cannot find; the caller then behaves exactly as before.
+async function _resolveOnlineIdentity(sale, saleId) {
+    let name  = sale.onlineCustomerName  || '';
+    let phone = sale.onlineCustomerPhone || '';
+    const uid = sale.onlineCustomerUid;
+    if (phone || !uid) return { name, phone };
+
+    try {
+        const h = await getDoc(doc(db, 'customer_order_history', uid, 'orders', saleId));
+        if (h.exists()) {
+            const d = h.data() || {};
+            phone = d.customerPhone || '';
+            name  = name || d.customerName || '';
+        }
+    } catch (err) {
+        console.warn('[EditHistory] history lookup for customer phone failed:', err.message || err);
+    }
+
+    for (const field of ['uid', 'authUid']) {
+        if (phone) break;
+        try {
+            const snap = await getDocs(query(collection(db, 'customers'), where(field, '==', uid)));
+            snap.forEach(d => {
+                if (phone) return;
+                phone = d.id;
+                name  = name || (d.data() || {}).name || '';
+            });
+        } catch (err) {
+            console.warn(`[EditHistory] customers lookup (${field}) failed:`, err.message || err);
+        }
+    }
+    return { name, phone };
+}
+
 async function _loadOrderForEdit(saleId) {
     let sale;
     try {
@@ -127,14 +174,22 @@ async function _loadOrderForEdit(saleId) {
     localStorage.setItem(`cart_${editTable}_${slot}`, JSON.stringify(sale.items || []));
 
     // 2. Restore customer identity WITHOUT asking for it again.
+    // AI UPDATE [2026-09-20]: also remembered on the editingOrder_ flag (step 3) — the badge keys below
+    // are wiped by js/cart.js saveLocalCart([]) if the operator empties the cart mid-edit (e.g. removes
+    // the only item, then adds a different one), but the editingOrder_ flag survives until settle.
+    let _onlineIdentity = null;
     if (sale.onlineCustomerUid) {
         // QR / online customer — mirrors what "Open in POS" already writes,
         // so syncCustomerOrderCompletion() in js/cart.js needs no special
         // casing to recognize this slot as belonging to that customer.
+        // AI UPDATE [2026-09-20] BUG FIX: the phone may be missing on the saved record (older online
+        // bills) — resolve it so js/cart.js can adjust customers/{phone} stats on re-settle.
+        const _ident = await _resolveOnlineIdentity(sale, saleId);
+        _onlineIdentity = { name: _ident.name || sale.onlineCustomerName || '', phone: _ident.phone || '' };
         localStorage.setItem(`activeCustomerUid_${editTable}_${slot}`, sale.onlineCustomerUid);
-        localStorage.setItem(`customerName_${editTable}_${slot}`, sale.onlineCustomerName || 'Customer');
-        if (sale.onlineCustomerPhone) {
-            localStorage.setItem(`customerPhone_${editTable}_${slot}`, sale.onlineCustomerPhone);
+        localStorage.setItem(`customerName_${editTable}_${slot}`, _ident.name || sale.onlineCustomerName || 'Customer');
+        if (_ident.phone) {
+            localStorage.setItem(`customerPhone_${editTable}_${slot}`, _ident.phone);
         }
     } else if (sale.manualCustomerPhone) {
         // Manually-captured POS customer — pre-resolve the identity popup so
@@ -174,7 +229,8 @@ async function _loadOrderForEdit(saleId) {
     //    instead of creating a new one (see js/cart.js "EDIT HISTORY" block).
     localStorage.setItem(
         `editingOrder_${editTable}_${slot}`,
-        JSON.stringify({ orderId: saleId, originalTotal: Number(sale.total) || 0, hadCustomer })
+        JSON.stringify({ orderId: saleId, originalTotal: Number(sale.total) || 0, hadCustomer,
+                         ...(_onlineIdentity ? { onlineIdentity: _onlineIdentity } : {}) })
     );
 
     // 4. Open the existing POS cart screen — no new UI, same screen every
