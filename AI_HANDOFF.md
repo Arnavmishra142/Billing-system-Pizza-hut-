@@ -1,6 +1,66 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-20 (Custom Instant Discount — flat ₹ order-level discount; see below)
+> Last updated: 2026-09-20 (BUG FIX: online-customer Edit History stats; earlier same day: Custom Instant Discount — see below)
+
+---
+
+## [AI UPDATE 2026-09-20] — BUG FIX: ONLINE (QR) customer Edit History left Total Orders / Lifetime Spend stale
+
+### Symptom
+Editing a completed order of an ONLINE/QR customer (with or without a Custom Instant Discount) updated the item
+prices and `sales_history`, but Customer Details (Total Orders / Lifetime Spend) kept the old figure. Example:
+₹270 − ₹20 custom discount = ₹250 paid; edit adds ₹100 → sale/history say ₹350, Lifetime Spend stayed ₹250.
+The MANUAL customer edit flow was correct and was not touched.
+
+### Audit (full path traced)
+Customer History / History drawer / details.html → `window.editHistoryOrder(saleId)` (`js/order-edit.js`) →
+localStorage cart + identity keys + `editingOrder_<table>_C1` flag → `window._posOpenTable` (`js/tables.js`) →
+`load-table-cart` (`renderCart`, `_loadCustomDiscount`) → item changes → `_computePricing()` →
+Bill & Settle / Save & Exit (`js/cart.js`) → `sales_history` `updateDoc` → `syncCustomerOrderCompletion()` (online)
+or `syncManualCustomerProfile()` (manual) → `customer_order_history/{uid}/orders/{saleId}` `setDoc(merge)` →
+`customers/{phone}` `increment()` → Customer Management (`js/customers.js`, reads `customers.totalOrders/lifetimeSpend`).
+The pricing/discount/final-total calculation and the `sales_history` update were ALREADY correct
+(`_computePricing` is the single authority; verified 270−20=250 → 350 → 450 → 250). The defect was in identity, not pricing.
+
+### Root cause
+`saveLocalCart([])` deletes `customerName_<table>_<slot>` and `customerPhone_<table>_<slot>` (and the manual
+identity flag, coupon and custom-discount keys). Both settle handlers call it BEFORE the sync runs, so:
+1. **Stats skipped.** On an edit there is no fresh `pending_table_orders` doc to read the phone from; the sync
+   fell back to `localStorage customerPhone_…`, which had just been wiped → `''` → `if (customerPhone)` false →
+   `customers/{phone}` was never updated. (Total Orders / Lifetime Spend stale.)
+2. **History doc clobbered.** The merge-`setDoc` on the shared history doc wrote `customerName: ''`, `customerPhone: ''`.
+3. **Sale record lost identity.** In Bill & Settle the reads of `onlineCustomerName/Phone` sat AFTER `saveLocalCart([])`
+   (Save & Exit read them before), so every online Bill & Settle saved them as `null` — a later edit had no phone to restore.
+The manual flow is immune: `syncManualCustomerProfile()` receives the phone as an argument, never from localStorage.
+
+### Files / functions changed
+| File | Change |
+|---|---|
+| `js/cart.js` | **Bill & Settle**: `_onlineUid/_onlineName/_onlinePhone` now captured BEFORE `saveLocalCart([])` (name/phone gated on `_onlineUid`, so manual bills' records are byte-identical to before). **`syncCustomerOrderCompletion`**: new trailing optional param `identity = { name, phone }`, preferred over the localStorage fallback; on an edit (`editContext` set) blank name/phone are no longer merged over stored values; `console.warn` if an edit still cannot resolve a phone. Both handlers pass `{ name: _onlineName, phone: _onlinePhone }`. **New helper `_editOnlineIdentity(editMode)`** (fallback to identity stored on the edit flag; used by both handlers). |
+| `js/order-edit.js` | **New `_resolveOnlineIdentity(sale, saleId)`**: if the sale has no `onlineCustomerPhone` (all online bills saved before this fix), resolve it from (1) `customer_order_history/{uid}/orders/{saleId}`, (2) `customers` where `uid == onlineCustomerUid`, then `authUid`. Reads only. `_loadOrderForEdit` uses it and stores `onlineIdentity: {name, phone}` on the `editingOrder_…` flag (survives the cart being emptied mid-edit). Added imports `getDocs, query, where, collection`. |
+| `sw.js` | `pos-static-v50` → `v51`. |
+No change to `firestore.rules`, schemas, `ARCHITECTURE_LOCK.md`, Customer Panel repo, or any manual-customer code path.
+
+### Behaviour after the fix (unchanged rules, now actually applied for online customers)
+- Edited order: `totalOrders` NOT incremented; `lifetimeSpend += NEW final − OLD final` (`_statsEditContext` delta, `originalTotal` = the sale's current `total` at edit load) — so repeated edits never double-count.
+- `sales_history`, `customer_order_history` and `customers` aggregate all carry the same final `total`; `subtotal` / `customDiscount` are saved on both records on every edit (discount dropped with a notice if it no longer fits, as before).
+- Online Bill & Settle bills now store `onlineCustomerName/Phone` (History drawer / details.html customer line also fills in for them).
+
+### Tests performed (headless Chromium via Playwright, Firebase stubbed with an in-memory Firestore — real Firestore NOT available)
+- Suite of 68 assertions on the FIXED code: **68/68**. Same suite on the untouched original: 58/68 — the 10 failures are exactly the online-edit cases (stats stuck, identity null, history name/phone blanked), so the tests do catch the bug.
+- Covered: online + ₹20 custom discount, Bill & Settle edits 250→350→450→250→15 (stats 250/350/450/250/15, Total Orders stays 1, one sale + one history doc); discount auto-removed when subtotal < discount; cart emptied mid-edit; Save & Exit edits (600→300→390); legacy online sale with `onlineCustomerPhone: null` (history doc has phone / phone already blanked); cross-page hand-off (`pendingOrderEdit`); manual customer edit; anonymous walk-in (no customer writes); fresh online order (Total Orders +1, pending order → `completed`).
+- **Manual regression:** normalized Firestore write log of manual settle + Bill & Settle edit + Save & Exit edit is IDENTICAL between the original and fixed code (9 writes). Fresh online Save & Exit: identical. Fresh online Bill & Settle: only difference is the intended `onlineCustomerName/Phone` now populated.
+- **NOT tested:** real Firebase/Firestore, real thermal printer, real phone. Please smoke-test live (online order → Bill & Settle → History → Edit → add item → Bill & Settle → check Customer Details).
+
+### Known gaps found (deliberately NOT changed)
+- Customers whose online orders were edited BEFORE this fix already have drifted `lifetimeSpend` (sale total changed, stats didn't). Not auto-repaired; a one-off reconcile (sum of `customer_order_history.total`) would need owner approval (§7 rule 13).
+- `sales_history.originalTotal` is overwritten on every edit (code writes the pre-edit total each time) although the schema says "set once". Audit field only; stats use the delta and are unaffected. Fixing needs a `firstOriginalTotal` on the edit flag.
+- `pos_24h_history` (on-device History drawer) `unshift`s a NEW entry per edit, so the old and new total for the same `billId` both show. Same for manual customers; left as is.
+- Emptying the cart mid-edit still clears the badge keys, custom discount, coupon and manual-identity flag (existing design). Online identity is now protected by the edit flag; a manual customer's identity popup may re-appear in that case (unchanged).
+
+### Important for a future AI agent
+- Never read customer identity from `customerName_/customerPhone_` AFTER `saveLocalCart([])`; capture it first and pass it in.
+- Do not build a second pricing or stats path — `_computePricing`, `_statsEditContext` and the two sync functions remain the only ones.
 
 ---
 

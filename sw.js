@@ -80,7 +80,9 @@
 // changed: Parcel KOT large centered "P" marker — see AI_HANDOFF.md).
 // AI UPDATE [2026-09-20]: Bumped pos-static-v49 → pos-static-v50 (js/cart.js, js/receipt-builder.js,
 // css/style.css changed: Custom Instant Discount — see AI_HANDOFF.md).
-const CACHE_NAME = 'pos-static-v50'; const STATIC_ASSETS = [
+// AI UPDATE [2026-09-20]: Bumped pos-static-v50 → pos-static-v51 (js/cart.js, js/order-edit.js changed:
+// online-customer Edit History stats fix — see AI_HANDOFF.md).
+const CACHE_NAME = 'pos-static-v51'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
