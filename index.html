@@ -223,6 +223,70 @@
             color: #f0883e;
             margin-top: 6px;
         }
+
+        /* AI UPDATE [2026-09-21]: Customer History view (#custHistoryModalPOS). Reuses
+           .modal/.modal-content/.coupon-panel-content/.coupon-panel-header/.close-cart-btn
+           as-is (same chrome as the Offers panel above). The rules below only exist because
+           js/pos-customer-history.js reuses js/customers.js's OWN _buildOrdersHtml() output
+           verbatim, which uses the Admin Panel's class names (.stats-row, .stat-card,
+           .cust-av, .list-title, .bills-list, .bill-card, .cust-ord-item-row, .empty-state,
+           .loading-state) — those classes live only in admin.css (not loaded on this POS
+           page), so they are re-declared here, scoped strictly under #custHistoryModalPOS,
+           to match the Admin Customer Details look without pulling in the rest of admin.css
+           (which resets body/html and would break the POS page's own layout). Nothing here
+           can affect any element outside this one modal. */
+        .cust-history-content-pos { max-width: 420px; }
+        .cust-history-body-pos { overflow-y: auto; max-height: 66vh; padding-right: 2px; }
+        #custHistoryModalPOS .stats-row { display: flex; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+        #custHistoryModalPOS .stat-card {
+            flex: 1 1 140px; background: #161b22; border: 1px solid #30363d;
+            border-radius: 14px; padding: 14px 16px; min-width: 0;
+        }
+        #custHistoryModalPOS .stat-card.blue  { border-left: 4px solid #1f6feb; }
+        #custHistoryModalPOS .stat-card.green { border-left: 4px solid #238636; }
+        #custHistoryModalPOS .stat-label {
+            font-size: 0.78rem; font-weight: 600; color: #8b949e;
+            text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+        }
+        #custHistoryModalPOS .stat-value { font-size: 1.6rem; font-weight: 900; color: #e6edf3; line-height: 1.1; }
+        #custHistoryModalPOS .stat-card.blue  .stat-value { color: #58a6ff; }
+        #custHistoryModalPOS .stat-card.green .stat-value { color: #3fb950; }
+        #custHistoryModalPOS .cust-av {
+            width: 42px; height: 42px; border-radius: 50%;
+            background: linear-gradient(135deg, #1f6feb, #388bfd); color: #fff;
+            font-weight: 800; font-size: 1.1rem; display: flex; align-items: center;
+            justify-content: center; flex-shrink: 0;
+        }
+        #custHistoryModalPOS .cust-av-lg { width: 54px; height: 54px; font-size: 1.4rem; }
+        #custHistoryModalPOS .list-title {
+            font-size: 0.8rem; font-weight: 700; color: #8b949e;
+            text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px;
+        }
+        #custHistoryModalPOS .bills-list { display: flex; flex-direction: column; gap: 8px; }
+        #custHistoryModalPOS .bill-card {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px;
+        }
+        #custHistoryModalPOS .bill-card-left { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        #custHistoryModalPOS .bill-card-name {
+            font-weight: 700; font-size: 0.9rem; color: #e6edf3;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        #custHistoryModalPOS .bill-card-time { font-size: 0.75rem; color: #8b949e; }
+        #custHistoryModalPOS .bill-card-amt { font-size: 1rem; font-weight: 800; color: #3fb950; white-space: nowrap; }
+        #custHistoryModalPOS .cust-ord-item-row {
+            display: flex; align-items: baseline; gap: 8px; font-size: 0.85rem;
+            color: #c9d1d9; padding: 3px 0; border-bottom: 1px solid #21262d;
+        }
+        #custHistoryModalPOS .cust-ord-item-row:last-child { border-bottom: none; }
+        #custHistoryModalPOS .cust-ord-item-row .name { flex: 1; }
+        #custHistoryModalPOS .cust-ord-item-row .qty  { color: #8b949e; flex-shrink: 0; }
+        #custHistoryModalPOS .cust-ord-item-row .sub  {
+            color: #8b949e; flex-shrink: 0; min-width: 52px; text-align: right; font-weight: 600;
+        }
+        #custHistoryModalPOS .empty-state, #custHistoryModalPOS .loading-state {
+            text-align: center; color: #8b949e; padding: 28px 16px; font-size: 0.9rem;
+        }
     </style>
 </head>
 
@@ -450,7 +514,28 @@
                 <h3 style="margin:0;">🎟️ <span id="couponPanelCustomerName">Customer</span>'s Offers</h3>
                 <button id="closeCouponsPanelBtn" class="close-cart-btn">✕</button>
             </div>
+            <!-- AI UPDATE [2026-09-21]: "View History" — opens #custHistoryModalPOS below for
+                 THIS SAME customer (js/pos-customer-history.js). Does not touch the coupon
+                 list/logic above or below this button. -->
+            <button type="button" id="viewCustHistoryBtnPOS" class="btn btn-details" style="width:100%;margin-bottom:12px;">
+                📜 View History
+            </button>
             <div id="couponPanelList" class="coupon-panel-list"></div>
+        </div>
+    </div>
+
+    <!-- AI UPDATE [2026-09-21]: Customer History view — opened by "📜 View History" above.
+         Reuses js/customers.js's own order-history fetch + rendering (re-exported there,
+         same customers/{phone} + customer_order_history data the Admin Panel's Customer
+         Details overlay uses; see js/pos-customer-history.js). Markup + scoped CSS only —
+         no admin file touched. -->
+    <div id="custHistoryModalPOS" class="modal hidden">
+        <div class="modal-content coupon-panel-content cust-history-content-pos">
+            <div class="coupon-panel-header">
+                <h3 style="margin:0;">📜 Customer History</h3>
+                <button id="closeCustHistoryBtnPOS" class="close-cart-btn">✕</button>
+            </div>
+            <div id="custHistoryBodyPOS" class="cust-history-body-pos"></div>
         </div>
     </div>
 
@@ -656,6 +741,9 @@
     <script type="module" src="js/review-qr.js"></script>
     <!-- AI UPDATE [2026-09-21]: quick calculator for the Custom Instant Discount modal (standalone; does not touch cart.js) -->
     <script type="module" src="js/discount-calc.js"></script>
+    <!-- AI UPDATE [2026-09-21]: "View History" in the Customer Offers modal (reuses
+         js/customers.js's own data + rendering; see file header for details). -->
+    <script type="module" src="js/pos-customer-history.js"></script>
     
      <script>
         let posPrompt;
