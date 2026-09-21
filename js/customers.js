@@ -56,7 +56,7 @@
 import { showAlert } from './dialog.js';
 import { db, auth } from './firebase-config.js';
 import {
-    collection, getDocs, doc, writeBatch, updateDoc, setDoc, serverTimestamp, query, where
+    collection, getDocs, getDoc, doc, writeBatch, updateDoc, setDoc, serverTimestamp, query, where
 } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js';
 import { signInAnonymously, onAuthStateChanged }
     from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js';
@@ -1092,3 +1092,61 @@ window._custCloseRecovery = function() {
     const body = document.getElementById('custRecoveryBody');
     if (body) body.innerHTML = '';   // never leave a code on screen
 };
+
+// AI UPDATE [2026-09-21]: Exported so the POS Billing Panel's new "View
+// History" button (Customer Offers modal → js/pos-customer-history.js) can
+// render the SAME order-history data/markup as this Admin Panel detail
+// overlay, instead of duplicating the fetch or the HTML — same pattern as
+// the `callRecoveryFn` re-export above for js/incoming-orders-customers.js.
+// Nothing above this line changed.
+export {
+    _buildOrdersHtml as buildOrdersHtml,
+    _esc as escHtml,
+    _fmtDate as fmtDate,
+    _fmtRupee as fmtRupee,
+    _avatarLetter as avatarLetter,
+};
+
+// Standalone fetch for ONE customer's profile + order history — reads the
+// exact same `customers/{phone}` doc and `customer_order_history/{uid}/orders`
+// subcollection as _loadCustomerHistory() above (same uid/authUid
+// resolution, same totalOrders/lifetimeSpend/lastOrderAt fast-path fields,
+// same completedAt sort) — just callable directly by phone, since the POS
+// only ever needs ONE customer at a time and never loads the full
+// Customer Management `_customers` list.
+export async function fetchCustomerHistoryData(phone) {
+    if (!phone) return null;
+    const snap = await getDoc(doc(db, 'customers', phone));
+    if (!snap.exists()) return null;
+
+    const c = { id: phone, ...snap.data() };
+    const resolvedUid = c.uid || c.authUid || '';
+
+    let orders = [];
+    if (resolvedUid) {
+        try {
+            const ordSnap = await getDocs(
+                collection(db, `customer_order_history/${resolvedUid}/orders`)
+            );
+            ordSnap.forEach(od => orders.push({ id: od.id, ...od.data() }));
+            orders.sort((a, b) => (b.completedAt?.toMillis?.() ?? 0) - (a.completedAt?.toMillis?.() ?? 0));
+        } catch { orders = []; }
+    }
+
+    const orderCount    = typeof c.totalOrders === 'number' ? c.totalOrders : orders.length;
+    const totalSpending = typeof c.lifetimeSpend === 'number' ? c.lifetimeSpend
+                         : orders.reduce((s, o) => s + (Number(o.total) || 0), 0);
+    const lastOrderTs   = c.lastOrderAt?.toMillis?.() ?? (orders[0]?.completedAt?.toMillis?.() ?? 0);
+    const joinedTs      = c.createdAt?.toMillis?.() ?? 0;
+
+    return {
+        id: phone,
+        name: c.name || 'Unknown',
+        phone: c.phone || phone,
+        orderCount,
+        totalSpending,
+        lastOrderTs,
+        joinedTs,
+        orders,
+    };
+}

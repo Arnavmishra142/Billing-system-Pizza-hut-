@@ -912,6 +912,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!modal || !listEl) return;
 
         if (nameEl) nameEl.textContent = name || 'Customer';
+        // AI UPDATE [2026-09-21]: stash the phone/name this panel is currently showing
+        // on the modal itself, so the new "📜 View History" button (js/pos-customer-
+        // history.js) always opens history for THIS EXACT customer — no separate
+        // lookup, no change to the coupon logic below.
+        modal.dataset.phone = phone || '';
+        modal.dataset.name  = name  || '';
         listEl.innerHTML = `<div class="coupon-panel-empty">Loading offers…</div>`;
         modal.classList.remove('hidden');
 
