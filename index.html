@@ -344,20 +344,20 @@
                     <button id="closeCartBtn" class="close-cart-btn">Close ❌</button>
                 </div>
 
-                <!-- AI UPDATE [2026-09-21]: Google Review QR — compact static card above the cart items.
-                     The QR is a pre-rendered inline SVG (QR v3, ECC M) of EXACTLY
-                     https://g.page/r/CRMpHT9-_b7JEAE/review — no library, no network request, works offline, no
-                     redirect page, no customer data / tracking parameters. Tapping the card opens the same URL.
-                     Markup + CSS only (css/style.css .cart-review-*); no JS, cart/pricing/coupon logic untouched. -->
-                <a id="googleReviewCard" class="cart-review-card" href="https://g.page/r/CRMpHT9-_b7JEAE/review"
-                   target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer"
-                   aria-label="Google review: scan the QR code or tap to open the review page">
-                    <svg class="cart-review-qr" viewBox="-3 -3 35 35" role="img" aria-label="QR code for the Google review page" shape-rendering="crispEdges"><rect x="-3" y="-3" width="35" height="35" fill="#fff"/><path fill="#000" d="M0 0h7v1h-7zM8 0h2v1h-2zM14 0h1v1h-1zM17 0h1v1h-1zM19 0h1v1h-1zM22 0h7v1h-7zM0 1h1v1h-1zM6 1h1v1h-1zM11 1h2v1h-2zM18 1h1v1h-1zM22 1h1v1h-1zM28 1h1v1h-1zM0 2h1v1h-1zM2 2h3v1h-3zM6 2h1v1h-1zM8 2h4v1h-4zM13 2h1v1h-1zM17 2h4v1h-4zM22 2h1v1h-1zM24 2h3v1h-3zM28 2h1v1h-1zM0 3h1v1h-1zM2 3h3v1h-3zM6 3h1v1h-1zM9 3h2v1h-2zM13 3h2v1h-2zM16 3h2v1h-2zM19 3h1v1h-1zM22 3h1v1h-1zM24 3h3v1h-3zM28 3h1v1h-1zM0 4h1v1h-1zM2 4h3v1h-3zM6 4h1v1h-1zM9 4h1v1h-1zM11 4h1v1h-1zM13 4h2v1h-2zM19 4h1v1h-1zM22 4h1v1h-1zM24 4h3v1h-3zM28 4h1v1h-1zM0 5h1v1h-1zM6 5h1v1h-1zM8 5h1v1h-1zM10 5h3v1h-3zM14 5h1v1h-1zM16 5h1v1h-1zM22 5h1v1h-1zM28 5h1v1h-1zM0 6h7v1h-7zM8 6h1v1h-1zM10 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM16 6h1v1h-1zM18 6h1v1h-1zM20 6h1v1h-1zM22 6h7v1h-7zM9 7h2v1h-2zM12 7h1v1h-1zM14 7h1v1h-1zM16 7h1v1h-1zM18 7h1v1h-1zM0 8h1v1h-1zM2 8h1v1h-1zM6 8h2v1h-2zM10 8h1v1h-1zM15 8h2v1h-2zM18 8h2v1h-2zM23 8h1v1h-1zM26 8h1v1h-1zM28 8h1v1h-1zM1 9h1v1h-1zM4 9h1v1h-1zM8 9h1v1h-1zM11 9h2v1h-2zM14 9h4v1h-4zM19 9h2v1h-2zM22 9h2v1h-2zM27 9h2v1h-2zM0 10h7v1h-7zM9 10h1v1h-1zM15 10h3v1h-3zM19 10h1v1h-1zM22 10h1v1h-1zM24 10h3v1h-3zM28 10h1v1h-1zM0 11h1v1h-1zM3 11h1v1h-1zM5 11h1v1h-1zM7 11h2v1h-2zM10 11h1v1h-1zM14 11h2v1h-2zM18 11h1v1h-1zM20 11h3v1h-3zM25 11h1v1h-1zM0 12h2v1h-2zM3 12h2v1h-2zM6 12h2v1h-2zM12 12h4v1h-4zM17 12h1v1h-1zM20 12h1v1h-1zM22 12h2v1h-2zM28 12h1v1h-1zM0 13h5v1h-5zM7 13h1v1h-1zM9 13h1v1h-1zM11 13h1v1h-1zM13 13h1v1h-1zM15 13h4v1h-4zM20 13h1v1h-1zM22 13h2v1h-2zM27 13h2v1h-2zM0 14h1v1h-1zM3 14h1v1h-1zM6 14h1v1h-1zM8 14h1v1h-1zM10 14h1v1h-1zM15 14h1v1h-1zM19 14h2v1h-2zM22 14h3v1h-3zM28 14h1v1h-1zM0 15h1v1h-1zM2 15h1v1h-1zM5 15h1v1h-1zM9 15h1v1h-1zM11 15h3v1h-3zM15 15h2v1h-2zM18 15h2v1h-2zM21 15h1v1h-1zM1 16h1v1h-1zM3 16h1v1h-1zM6 16h1v1h-1zM8 16h1v1h-1zM10 16h1v1h-1zM12 16h2v1h-2zM16 16h1v1h-1zM19 16h1v1h-1zM21 16h2v1h-2zM28 16h1v1h-1zM1 17h1v1h-1zM3 17h3v1h-3zM8 17h1v1h-1zM10 17h1v1h-1zM15 17h1v1h-1zM20 17h1v1h-1zM22 17h2v1h-2zM26 17h3v1h-3zM0 18h4v1h-4zM6 18h1v1h-1zM8 18h2v1h-2zM11 18h1v1h-1zM13 18h3v1h-3zM18 18h2v1h-2zM23 18h1v1h-1zM25 18h1v1h-1zM28 18h1v1h-1zM4 19h1v1h-1zM7 19h1v1h-1zM9 19h2v1h-2zM12 19h1v1h-1zM14 19h1v1h-1zM16 19h1v1h-1zM19 19h1v1h-1zM21 19h4v1h-4zM0 20h3v1h-3zM6 20h2v1h-2zM9 20h2v1h-2zM13 20h4v1h-4zM18 20h8v1h-8zM27 20h1v1h-1zM8 21h1v1h-1zM11 21h4v1h-4zM16 21h1v1h-1zM18 21h1v1h-1zM20 21h1v1h-1zM24 21h3v1h-3zM28 21h1v1h-1zM0 22h7v1h-7zM8 22h2v1h-2zM11 22h2v1h-2zM15 22h1v1h-1zM19 22h2v1h-2zM22 22h1v1h-1zM24 22h1v1h-1zM28 22h1v1h-1zM0 23h1v1h-1zM6 23h1v1h-1zM10 23h2v1h-2zM13 23h1v1h-1zM18 23h3v1h-3zM24 23h1v1h-1zM27 23h2v1h-2zM0 24h1v1h-1zM2 24h3v1h-3zM6 24h1v1h-1zM10 24h4v1h-4zM15 24h3v1h-3zM19 24h7v1h-7zM28 24h1v1h-1zM0 25h1v1h-1zM2 25h3v1h-3zM6 25h1v1h-1zM9 25h1v1h-1zM16 25h2v1h-2zM19 25h3v1h-3zM24 25h3v1h-3zM28 25h1v1h-1zM0 26h1v1h-1zM2 26h3v1h-3zM6 26h1v1h-1zM8 26h2v1h-2zM11 26h5v1h-5zM18 26h1v1h-1zM23 26h2v1h-2zM27 26h2v1h-2zM0 27h1v1h-1zM6 27h1v1h-1zM11 27h1v1h-1zM14 27h1v1h-1zM16 27h1v1h-1zM20 27h1v1h-1zM23 27h3v1h-3zM0 28h7v1h-7zM8 28h1v1h-1zM10 28h2v1h-2zM14 28h4v1h-4zM19 28h3v1h-3zM24 28h2v1h-2zM28 28h1v1h-1z"/></svg>
+                <!-- AI UPDATE [2026-09-21] (v2): Google Review — compact trigger only. The QR itself lives in
+                     #googleReviewModal (below); js/review-qr.js opens/closes it. No JS in cart.js is involved. -->
+                <button type="button" id="googleReviewBtn" class="cart-review-btn" aria-haspopup="dialog" aria-controls="googleReviewModal">
+                    <span class="cart-review-icon-wrap" aria-hidden="true">
+                        <svg class="cart-review-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+                            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>
+                            <path d="M14 14h3v3h-3zM19 14h2M14 19h2M19 19h2v2h-2z"/>
+                        </svg>
+                    </span>
                     <span class="cart-review-text">
                         <span class="cart-review-title">⭐ Google Review</span>
                         <span class="cart-review-sub">Scan to rate us</span>
                     </span>
-                </a>
+                </button>
 
                 <!-- Online customer name badge — shown only for imported online orders -->
                 <div id="onlineCustomerBadge" class="online-customer-badge ocb-hidden" aria-live="polite"></div>
@@ -549,6 +549,26 @@
     </div>
 </div>
 
+<!-- GOOGLE REVIEW QR MODAL — AI UPDATE [2026-09-21] (v2). Opened from #googleReviewBtn in the cart drawer.
+     The QR is a pre-rendered inline SVG (QR v3, ECC M, decodes to EXACTLY the URL in data-review-url):
+     no library, no network request, works offline, no redirect page, no customer data / tracking parameters.
+     TRACKING HOOK (not active yet): js/review-qr.js dispatches a `review-qr-opened` window event with
+     { url } each time this modal opens, so a scan-tracking flow can be attached later without editing
+     this markup. If the QR must later encode a tracking URL, regenerate the <path> below + data-review-url together. -->
+<div id="googleReviewModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="googleReviewTitle"
+     data-review-url="https://g.page/r/CRMpHT9-_b7JEAE/review">
+    <div class="modal-content review-qr-content">
+        <h3 id="googleReviewTitle">⭐ Scan to Review</h3>
+        <div class="review-qr-box">
+            <svg class="review-qr-svg" viewBox="-3 -3 35 35" role="img" aria-label="QR code for the Google review page" shape-rendering="crispEdges"><rect x="-3" y="-3" width="35" height="35" fill="#fff"/><path fill="#000" d="M0 0h7v1h-7zM8 0h2v1h-2zM14 0h1v1h-1zM17 0h1v1h-1zM19 0h1v1h-1zM22 0h7v1h-7zM0 1h1v1h-1zM6 1h1v1h-1zM11 1h2v1h-2zM18 1h1v1h-1zM22 1h1v1h-1zM28 1h1v1h-1zM0 2h1v1h-1zM2 2h3v1h-3zM6 2h1v1h-1zM8 2h4v1h-4zM13 2h1v1h-1zM17 2h4v1h-4zM22 2h1v1h-1zM24 2h3v1h-3zM28 2h1v1h-1zM0 3h1v1h-1zM2 3h3v1h-3zM6 3h1v1h-1zM9 3h2v1h-2zM13 3h2v1h-2zM16 3h2v1h-2zM19 3h1v1h-1zM22 3h1v1h-1zM24 3h3v1h-3zM28 3h1v1h-1zM0 4h1v1h-1zM2 4h3v1h-3zM6 4h1v1h-1zM9 4h1v1h-1zM11 4h1v1h-1zM13 4h2v1h-2zM19 4h1v1h-1zM22 4h1v1h-1zM24 4h3v1h-3zM28 4h1v1h-1zM0 5h1v1h-1zM6 5h1v1h-1zM8 5h1v1h-1zM10 5h3v1h-3zM14 5h1v1h-1zM16 5h1v1h-1zM22 5h1v1h-1zM28 5h1v1h-1zM0 6h7v1h-7zM8 6h1v1h-1zM10 6h1v1h-1zM12 6h1v1h-1zM14 6h1v1h-1zM16 6h1v1h-1zM18 6h1v1h-1zM20 6h1v1h-1zM22 6h7v1h-7zM9 7h2v1h-2zM12 7h1v1h-1zM14 7h1v1h-1zM16 7h1v1h-1zM18 7h1v1h-1zM0 8h1v1h-1zM2 8h1v1h-1zM6 8h2v1h-2zM10 8h1v1h-1zM15 8h2v1h-2zM18 8h2v1h-2zM23 8h1v1h-1zM26 8h1v1h-1zM28 8h1v1h-1zM1 9h1v1h-1zM4 9h1v1h-1zM8 9h1v1h-1zM11 9h2v1h-2zM14 9h4v1h-4zM19 9h2v1h-2zM22 9h2v1h-2zM27 9h2v1h-2zM0 10h7v1h-7zM9 10h1v1h-1zM15 10h3v1h-3zM19 10h1v1h-1zM22 10h1v1h-1zM24 10h3v1h-3zM28 10h1v1h-1zM0 11h1v1h-1zM3 11h1v1h-1zM5 11h1v1h-1zM7 11h2v1h-2zM10 11h1v1h-1zM14 11h2v1h-2zM18 11h1v1h-1zM20 11h3v1h-3zM25 11h1v1h-1zM0 12h2v1h-2zM3 12h2v1h-2zM6 12h2v1h-2zM12 12h4v1h-4zM17 12h1v1h-1zM20 12h1v1h-1zM22 12h2v1h-2zM28 12h1v1h-1zM0 13h5v1h-5zM7 13h1v1h-1zM9 13h1v1h-1zM11 13h1v1h-1zM13 13h1v1h-1zM15 13h4v1h-4zM20 13h1v1h-1zM22 13h2v1h-2zM27 13h2v1h-2zM0 14h1v1h-1zM3 14h1v1h-1zM6 14h1v1h-1zM8 14h1v1h-1zM10 14h1v1h-1zM15 14h1v1h-1zM19 14h2v1h-2zM22 14h3v1h-3zM28 14h1v1h-1zM0 15h1v1h-1zM2 15h1v1h-1zM5 15h1v1h-1zM9 15h1v1h-1zM11 15h3v1h-3zM15 15h2v1h-2zM18 15h2v1h-2zM21 15h1v1h-1zM1 16h1v1h-1zM3 16h1v1h-1zM6 16h1v1h-1zM8 16h1v1h-1zM10 16h1v1h-1zM12 16h2v1h-2zM16 16h1v1h-1zM19 16h1v1h-1zM21 16h2v1h-2zM28 16h1v1h-1zM1 17h1v1h-1zM3 17h3v1h-3zM8 17h1v1h-1zM10 17h1v1h-1zM15 17h1v1h-1zM20 17h1v1h-1zM22 17h2v1h-2zM26 17h3v1h-3zM0 18h4v1h-4zM6 18h1v1h-1zM8 18h2v1h-2zM11 18h1v1h-1zM13 18h3v1h-3zM18 18h2v1h-2zM23 18h1v1h-1zM25 18h1v1h-1zM28 18h1v1h-1zM4 19h1v1h-1zM7 19h1v1h-1zM9 19h2v1h-2zM12 19h1v1h-1zM14 19h1v1h-1zM16 19h1v1h-1zM19 19h1v1h-1zM21 19h4v1h-4zM0 20h3v1h-3zM6 20h2v1h-2zM9 20h2v1h-2zM13 20h4v1h-4zM18 20h8v1h-8zM27 20h1v1h-1zM8 21h1v1h-1zM11 21h4v1h-4zM16 21h1v1h-1zM18 21h1v1h-1zM20 21h1v1h-1zM24 21h3v1h-3zM28 21h1v1h-1zM0 22h7v1h-7zM8 22h2v1h-2zM11 22h2v1h-2zM15 22h1v1h-1zM19 22h2v1h-2zM22 22h1v1h-1zM24 22h1v1h-1zM28 22h1v1h-1zM0 23h1v1h-1zM6 23h1v1h-1zM10 23h2v1h-2zM13 23h1v1h-1zM18 23h3v1h-3zM24 23h1v1h-1zM27 23h2v1h-2zM0 24h1v1h-1zM2 24h3v1h-3zM6 24h1v1h-1zM10 24h4v1h-4zM15 24h3v1h-3zM19 24h7v1h-7zM28 24h1v1h-1zM0 25h1v1h-1zM2 25h3v1h-3zM6 25h1v1h-1zM9 25h1v1h-1zM16 25h2v1h-2zM19 25h3v1h-3zM24 25h3v1h-3zM28 25h1v1h-1zM0 26h1v1h-1zM2 26h3v1h-3zM6 26h1v1h-1zM8 26h2v1h-2zM11 26h5v1h-5zM18 26h1v1h-1zM23 26h2v1h-2zM27 26h2v1h-2zM0 27h1v1h-1zM6 27h1v1h-1zM11 27h1v1h-1zM14 27h1v1h-1zM16 27h1v1h-1zM20 27h1v1h-1zM23 27h3v1h-3zM0 28h7v1h-7zM8 28h1v1h-1zM10 28h2v1h-2zM14 28h4v1h-4zM19 28h3v1h-3zM24 28h2v1h-2zM28 28h1v1h-1z"/></svg>
+        </div>
+        <p class="review-qr-caption">Scan this QR to rate us on Google</p>
+        <div class="modal-actions">
+            <button id="googleReviewCloseBtn" class="btn btn-cancel" type="button">Close</button>
+        </div>
+    </div>
+</div>
+
     <div id="globalMenuModal" class="modal hidden">
         <div class="modal-content">
             <h3>Add New Item to Menu</h3>
@@ -586,6 +606,8 @@
     <!-- AI UPDATE [2026-09-16]: Edit History feature — loaded after tables.js
          so window._posOpenTable is already available. See js/order-edit.js. -->
     <script type="module" src="js/order-edit.js"></script>
+    <!-- AI UPDATE [2026-09-21]: Google Review QR modal open/close (standalone; does not touch cart.js) -->
+    <script type="module" src="js/review-qr.js"></script>
     
      <script>
         let posPrompt;

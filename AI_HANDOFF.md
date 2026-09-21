@@ -1,6 +1,40 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-21 (Google Review QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+> Last updated: 2026-09-21 (Google Review QR is now a compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+
+---
+
+## [AI UPDATE 2026-09-21] (v2) — Google Review QR: compact trigger in the cart + "Scan to Review" modal
+
+### Change
+The always-visible QR card (previous entry below) was too large. The cart drawer now shows only a slim button (≈52px):
+small QR-glyph icon + "⭐ Google Review / Scan to rate us". Tapping it opens a modal — "⭐ Scan to Review", a large QR (max 260px,
+also capped at 68vw / 46dvh so it fits phones in portrait and landscape), "Scan this QR to rate us on Google", and a CLOSE button
+(also closes on backdrop tap and Esc). The modal is z-index 10050 so it opens above the cart drawer (z-index 10000), same approach as
+`#customDiscountModal`. The big QR is NOT rendered in the cart any more.
+
+### QR / URL
+Unchanged from the previous entry: the same pre-rendered inline SVG (QR v3, ECC M) of exactly
+`https://g.page/r/CRMpHT9-_b7JEAE/review` — no library, no network, no redirect page, no customer data or tracking parameters.
+The URL is also on the modal as `data-review-url`. (The tap-to-open `<a>` link from v1 was removed: the trigger is now a button.)
+
+### Tracking-ready (inactive)
+`js/review-qr.js` dispatches a `review-qr-opened` event on `window` with `{ url }` every time the modal opens, so a scan/tracking flow
+can be attached later without touching this file or the markup. Nothing listens to it yet. If the QR itself must later encode a tracking
+URL, regenerate the `<path>` in `#googleReviewModal` and `data-review-url` together (an SVG edit alone would make them disagree).
+
+### Files changed
+| File | Change |
+|---|---|
+| `index.html` | `#googleReviewCard` (v1) replaced by `<button id="googleReviewBtn" class="cart-review-btn">` in the cart drawer; new `#googleReviewModal` (before `#globalMenuModal`) holding the QR SVG; `<script type="module" src="js/review-qr.js">` after `js/order-edit.js` |
+| `js/review-qr.js` | NEW, ~35 lines: open / close / Esc / backdrop + the `review-qr-opened` event. Standalone — never reads or writes cart, pricing, coupon or order state |
+| `css/style.css` | v1 `.cart-review-card/-qr` rules replaced by `.cart-review-btn*`, `#googleReviewModal`, `.review-qr-*` (dark + `.light-mode`) |
+| `sw.js` | `pos-static-v53` → `v54`; `/js/review-qr.js` added to the precache list |
+Not touched: `js/cart.js` and all cart / pricing / coupon / discount / order logic.
+
+### Checked
+Trigger renders (52px) with no QR in the cart; modal opens above the drawer with a 260px QR, shows the correct URL, closes via the button; no JS errors.
+The QR path is byte-identical to the one decoded with OpenCV in v1 (exact URL). Not checked on a real phone/tablet.
 
 ---
 
