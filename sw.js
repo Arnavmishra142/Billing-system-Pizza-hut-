@@ -88,7 +88,9 @@
 // Google Review QR card in the cart drawer — see AI_HANDOFF.md).
 // AI UPDATE [2026-09-21]: Bumped pos-static-v53 → pos-static-v54 (index.html, css/style.css changed; NEW
 // js/review-qr.js precached below: Google Review QR is now a compact trigger + modal — see AI_HANDOFF.md).
-const CACHE_NAME = 'pos-static-v54'; const STATIC_ASSETS = [
+// AI UPDATE [2026-09-21]: Bumped pos-static-v54 → pos-static-v55 (index.html, css/style.css changed; NEW
+// js/discount-calc.js precached below: quick calculator in the Custom Instant Discount modal — see AI_HANDOFF.md).
+const CACHE_NAME = 'pos-static-v55'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
@@ -106,6 +108,7 @@ const CACHE_NAME = 'pos-static-v54'; const STATIC_ASSETS = [
     '/js/staff-shared.js',
     '/js/staff-pos.js',
     '/js/review-qr.js',
+    '/js/discount-calc.js',
     '/manifest.json',
     '/sounds/pop.sfx.mp3',
     '/sounds/cash.sfx.mp3'

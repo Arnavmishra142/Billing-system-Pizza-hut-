@@ -524,6 +524,15 @@
 <!-- CUSTOM INSTANT DISCOUNT MODAL — AI UPDATE [2026-09-20] (same look as the price-edit modal) -->
 <div id="customDiscountModal" class="modal hidden">
     <div class="modal-content" style="max-width: 320px;">
+        <!-- AI UPDATE [2026-09-21]: small calculator helper icon (top-right). Opens #discountCalcModal on top of this
+             modal without closing it; js/discount-calc.js only ever writes to #customDiscountInput when the user taps "Use Result". -->
+        <button type="button" id="discountCalcBtn" class="cd-calc-btn" aria-label="Open calculator" title="Calculator"
+                aria-haspopup="dialog" aria-controls="discountCalcModal">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="4" y="2.5" width="16" height="19" rx="2.5"/><rect x="7" y="5.5" width="10" height="4" rx="1"/>
+                <path d="M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01"/>
+            </svg>
+        </button>
         <h3>Custom Instant Discount</h3>
         <!-- AI UPDATE [2026-09-20]: Cash / % toggle + live preview (logic in js/cart.js wireCustomDiscount) -->
         <div class="cd-mode-toggle" role="group" aria-label="Discount type">
@@ -545,6 +554,43 @@
         <div class="modal-actions">
             <button id="cancelCustomDiscountBtn" class="btn btn-cancel" type="button">Cancel</button>
             <button id="applyCustomDiscountBtn" class="btn btn-print" type="button">Apply Discount</button>
+        </div>
+    </div>
+</div>
+
+<!-- QUICK CALCULATOR — AI UPDATE [2026-09-21]. Helper for the Custom Instant Discount modal (opens above it, does not close it).
+     Standalone: js/discount-calc.js. It never touches cart / pricing / coupon / discount state — the only thing it can do to the
+     discount form is copy a result into #customDiscountInput when the user taps "Use Result" (Apply is still the user's job). -->
+<div id="discountCalcModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Calculator">
+    <div class="modal-content calc-content">
+        <div class="calc-display" aria-live="polite">
+            <div id="calcSub" class="calc-sub"></div>
+            <div id="calcMain" class="calc-main">0</div>
+        </div>
+        <div class="calc-keys" id="calcKeys">
+            <button type="button" class="calc-key calc-util" data-k="C">C</button>
+            <button type="button" class="calc-key calc-util" data-k="BS" aria-label="Backspace">⌫</button>
+            <button type="button" class="calc-key calc-util" data-k="%">%</button>
+            <button type="button" class="calc-key calc-op" data-k="÷" aria-label="Divide">÷</button>
+            <button type="button" class="calc-key" data-k="7">7</button>
+            <button type="button" class="calc-key" data-k="8">8</button>
+            <button type="button" class="calc-key" data-k="9">9</button>
+            <button type="button" class="calc-key calc-op" data-k="×" aria-label="Multiply">×</button>
+            <button type="button" class="calc-key" data-k="4">4</button>
+            <button type="button" class="calc-key" data-k="5">5</button>
+            <button type="button" class="calc-key" data-k="6">6</button>
+            <button type="button" class="calc-key calc-op" data-k="−" aria-label="Minus">−</button>
+            <button type="button" class="calc-key" data-k="1">1</button>
+            <button type="button" class="calc-key" data-k="2">2</button>
+            <button type="button" class="calc-key" data-k="3">3</button>
+            <button type="button" class="calc-key calc-op" data-k="+" aria-label="Plus">+</button>
+            <button type="button" class="calc-key calc-zero" data-k="0">0</button>
+            <button type="button" class="calc-key" data-k="." aria-label="Decimal point">.</button>
+            <button type="button" class="calc-key calc-eq" data-k="=" aria-label="Equals">=</button>
+        </div>
+        <div class="modal-actions calc-actions">
+            <button id="calcCloseBtn" class="btn btn-cancel" type="button">Close</button>
+            <button id="calcUseBtn" class="btn btn-print" type="button" disabled>Use Result</button>
         </div>
     </div>
 </div>
@@ -608,6 +654,8 @@
     <script type="module" src="js/order-edit.js"></script>
     <!-- AI UPDATE [2026-09-21]: Google Review QR modal open/close (standalone; does not touch cart.js) -->
     <script type="module" src="js/review-qr.js"></script>
+    <!-- AI UPDATE [2026-09-21]: quick calculator for the Custom Instant Discount modal (standalone; does not touch cart.js) -->
+    <script type="module" src="js/discount-calc.js"></script>
     
      <script>
         let posPrompt;

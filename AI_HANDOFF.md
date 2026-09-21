@@ -1,8 +1,42 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-21 (Google Review QR is now a compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+> Last updated: 2026-09-21 (quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
 
 ---
+
+## [AI UPDATE 2026-09-21] — Quick calculator inside the Custom Instant Discount modal
+
+### What was added
+A small calculator icon (32×32) in the TOP-RIGHT corner of `#customDiscountModal`. Tapping it opens a compact calculator modal
+(`#discountCalcModal`, z-index 10060) ABOVE the discount modal — the discount modal stays open and whatever is in its input is preserved.
+Keys: `+ − × ÷`, digits, `.`, `=`, `C`, `⌫` and `%`. Buttons: **Close** and **Use Result**.
+
+### Rules
+- It is only a helper. The ONLY way it touches the discount form is **Use Result**: it copies the on-screen result (rounded to paise, must be > 0;
+  the button is disabled otherwise) into `#customDiscountInput` and fires that input's normal `input` event, so the existing live preview /
+  validation run. It never presses Apply — the discount only changes when the user taps "Apply Discount". In % mode the number lands in the % input.
+- Math (no `eval`, small tokenizer/parser in `js/discount-calc.js`): normal precedence; `500 × 10%` = 50; `200 + 10%` = 220 and `200 − 10%` = 180
+  (n% after + / − means n% of the running total, like phone calculators); `0.1 + 0.2` = 0.3; `÷ 0` shows "Can't divide by 0".
+- Physical keyboard works while it is open (digits, `. + - * / %`, Enter, Backspace, Delete/c = clear). The keydown handler runs in the capture
+  phase and stops propagation so the discount modal's own Esc / Enter handlers do NOT fire — Esc closes only the calculator.
+- Backdrop tap / Close / Esc close only the calculator. Closing the discount modal (Cancel / Apply / Esc) resets any half-done calculation.
+- On open the discount input is blurred so a phone's soft keyboard doesn't cover the keypad.
+
+### Files changed
+| File | Change |
+|---|---|
+| `index.html` | `<button id="discountCalcBtn" class="cd-calc-btn">` (inline SVG icon) inside the discount modal; new `#discountCalcModal` after it; `<script type="module" src="js/discount-calc.js">` after `js/review-qr.js` |
+| `js/discount-calc.js` | NEW: calculator engine + open/close/Use Result/keyboard wiring. Standalone — no imports, does not touch cart / pricing / coupon / discount state |
+| `css/style.css` | `.cd-calc-btn`, `.calc-*` styles at the end (dark + `.light-mode`); `#customDiscountModal .modal-content { position:relative }` and title padding so it clears the icon |
+| `sw.js` | `pos-static-v54` → `v55`; `/js/discount-calc.js` added to the precache list |
+Not touched: `js/cart.js` (discount modal logic, `_computePricing`, coupons, billing), receipts, order-edit.
+
+### Checked (headless Chromium, Firebase stubbed)
+27/27: icon size/position; opens without closing the discount modal; 150 + 75 = 225; 500 × 10% = 50; 200 ± 10%; 0.1 + 0.2; ÷ 0; backspace / clear /
+leading zeros / single decimal point / operator replacement; Use Result disabled for ≤ 0; the discount input (25) and payable stayed unchanged
+through all calculating; Esc, Close and backdrop close only the calculator; keyboard entry; Use Result → input + live preview update but payable
+unchanged until Apply; % mode; 10 ÷ 3 → 3.33; calculator resets when the discount modal closes; no JS errors. Not checked on a real phone/tablet.
+
 
 ## [AI UPDATE 2026-09-21] (v2) — Google Review QR: compact trigger in the cart + "Scan to Review" modal
 
