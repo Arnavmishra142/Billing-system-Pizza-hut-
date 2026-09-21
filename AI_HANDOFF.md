@@ -1,8 +1,38 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-20 (Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+> Last updated: 2026-09-21 (Google Review QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
 
 ---
+
+## [AI UPDATE 2026-09-21] — Google Review QR card at the top of the cart / Order Details drawer
+
+### What was added
+A compact card (≈98px tall) between the "🛒 Order Details" header and the cart items: white QR tile + "⭐ Google Review /
+Scan to rate us". Scanning the QR opens exactly `https://g.page/r/CRMpHT9-_b7JEAE/review` — no intermediate page, no customer data,
+no tracking parameters. The whole card is also an `<a href>` to the same URL (`target=_blank`, `rel="noopener noreferrer"`,
+`referrerpolicy="no-referrer"`), so staff can tap it too.
+
+### Why a static inline SVG (no library)
+The Billing Panel has no QR library. The only QR solution in the wider project is `qrcodejs@1.0.0` loaded from jsDelivr in the
+Customer Panel's `qr-print.html`. For one fixed URL a runtime library would only add a CDN request (and break offline use of
+the PWA), so the QR was pre-rendered once (QR version 3, error correction M, 29×29 modules, 3-module white quiet zone inside the
+SVG so it scans on the dark UI) and embedded as an inline `<svg>` — zero dependencies, zero network, no JS.
+Decoded back with OpenCV at 80px, 160px and 320px: all return exactly the URL above.
+To change the URL later, regenerate the `<path d="…">` in `index.html` (`#googleReviewCard`) — editing only the `href` would make the
+tap link and the QR disagree.
+
+### Files changed
+| File | Change |
+|---|---|
+| `index.html` | new `<a id="googleReviewCard" class="cart-review-card">` with the inline QR SVG, inside `.cart-panel`, directly after `.cart-header-pro` and before `#onlineCustomerBadge` / `#cartItems` |
+| `css/style.css` | new `.cart-review-*` rules appended at the end (dark theme + `.light-mode` overrides); `flex-shrink:0` so the item list, not the card, scrolls |
+| `sw.js` | `pos-static-v52` → `v53` |
+Not touched: `js/cart.js` and all cart, pricing, coupon, discount, order, printing logic (this change is markup + CSS only; the card sits outside `#cartItems`, which `renderCart()` rewrites).
+
+### Checked
+Card renders above the items in the open drawer (dark theme), items list still scrolls below it, no JS errors, QR decodes to the exact URL.
+Not checked on a real phone/tablet camera or in light mode on a device.
+
 
 ## [AI UPDATE 2026-09-20] — Custom Instant Discount modal: ₹ CASH / % PERCENT toggle + live preview
 

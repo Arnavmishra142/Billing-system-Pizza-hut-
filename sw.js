@@ -84,7 +84,9 @@
 // online-customer Edit History stats fix — see AI_HANDOFF.md).
 // AI UPDATE [2026-09-20]: Bumped pos-static-v51 → pos-static-v52 (js/cart.js, css/style.css, index.html
 // changed: Custom Instant Discount Cash / % toggle — see AI_HANDOFF.md).
-const CACHE_NAME = 'pos-static-v52'; const STATIC_ASSETS = [
+// AI UPDATE [2026-09-21]: Bumped pos-static-v52 → pos-static-v53 (index.html, css/style.css changed:
+// Google Review QR card in the cart drawer — see AI_HANDOFF.md).
+const CACHE_NAME = 'pos-static-v53'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
