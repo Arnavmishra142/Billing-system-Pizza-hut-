@@ -2225,3 +2225,52 @@ body {
 .review-qr-caption { margin: 0 0 12px; font-size: 0.9rem; font-weight: 600; color: #8b949e; }
 .review-qr-content .modal-actions .btn { width: 100%; }
 .light-mode .review-qr-caption { color: #6b7280; }
+
+/* =========================================
+   QUICK CALCULATOR for the Custom Instant Discount modal — AI UPDATE [2026-09-21]
+   Icon button top-right of #customDiscountModal + compact #discountCalcModal (js/discount-calc.js).
+   ========================================= */
+#customDiscountModal .modal-content { position: relative; }
+#customDiscountModal .modal-content h3 { padding: 0 34px; }          /* keep the title clear of the icon */
+.cd-calc-btn {
+    position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; padding: 0;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    background: rgba(255,255,255,0.06); border: 1px solid #30363d; border-radius: 8px; color: #8b949e;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation; transition: color 0.15s, border-color 0.15s;
+}
+.cd-calc-btn:hover, .cd-calc-btn:focus-visible { color: #34d399; border-color: #34d399; outline: none; }
+.cd-calc-btn:active { transform: scale(0.94); }
+
+/* Above the discount modal (10050) and the cart drawer (10000). */
+#discountCalcModal { z-index: 10060; }
+.calc-content { max-width: 300px; gap: 10px; padding: 16px; max-height: 96dvh; overflow-y: auto; }
+.calc-display {
+    background: #0b0c10; border: 1px solid #2f3441; border-radius: 10px; padding: 8px 12px;
+    text-align: right; min-height: 74px; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
+}
+.calc-sub  { font-size: 0.85rem; font-weight: 600; color: #34d399; min-height: 1.2em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calc-sub.calc-muted { color: #8b949e; }
+.calc-sub.calc-error { color: #f85149; }
+.calc-main { font-size: 1.7rem; font-weight: 800; color: #e6edf3; line-height: 1.25; white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+.calc-main::-webkit-scrollbar { display: none; }
+.calc-keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.calc-key {
+    height: clamp(40px, 7.2dvh, 52px); font-size: 1.2rem; font-weight: 700; font-family: inherit; cursor: pointer;
+    color: #e6edf3; background: #21262d; border: 1px solid #30363d; border-radius: 10px;
+    touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none;
+}
+.calc-key:active { transform: scale(0.95); filter: brightness(1.25); }
+.calc-util { background: #30363d; color: #c9d1d9; }
+.calc-op   { background: #1f3a5f; border-color: #2b5a99; color: #79b8ff; }
+.calc-eq   { background: #10b981; border-color: #10b981; color: #fff; }
+.calc-zero { grid-column: span 2; }
+.calc-actions { margin-top: 2px; gap: 10px; }
+.calc-actions .btn { padding: 11px 8px; }
+.calc-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.light-mode .cd-calc-btn { background: #f3f4f6; border-color: #d1d5db; color: #6b7280; }
+.light-mode .calc-display { background: #f3f4f6; border-color: #d1d5db; }
+.light-mode .calc-main { color: #111827; }
+.light-mode .calc-key { background: #f3f4f6; border-color: #d1d5db; color: #111827; }
+.light-mode .calc-util { background: #e5e7eb; color: #374151; }
+.light-mode .calc-op { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
+.light-mode .calc-eq { background: #10b981; border-color: #10b981; color: #fff; }
