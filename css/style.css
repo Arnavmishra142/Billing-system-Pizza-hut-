@@ -2166,6 +2166,22 @@ body {
 .custom-discount-error { color: #f85149; font-size: 0.85rem; font-weight: 600; min-height: 18px; text-align: center; }
 #customDiscountInput:focus { border-color: #34d399; box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.18); }
 .light-mode .custom-discount-msg { color: #6b7280; }
+/* AI UPDATE [2026-09-20]: Cash / % toggle + live preview inside the Custom Instant Discount modal. */
+.cd-mode-toggle { display: flex; gap: 0; margin: 4px 0 10px; border: 1px solid #30363d; border-radius: 10px; overflow: hidden; }
+.cd-mode-btn { flex: 1; padding: 9px 6px; font-size: 0.85rem; font-weight: 800; letter-spacing: 0.3px; cursor: pointer;
+    background: transparent; color: #8b949e; border: 0; transition: background 0.15s, color 0.15s; }
+.cd-mode-btn + .cd-mode-btn { border-left: 1px solid #30363d; }
+.cd-mode-btn.active { background: #10b981; color: #fff; }
+.cd-preview { margin: 8px 0 2px; padding: 8px 10px; border-radius: 10px; text-align: center;
+    background: rgba(16, 185, 129, 0.10); border: 1px solid rgba(16, 185, 129, 0.35); }
+.cd-preview-main  { color: #3fb950; font-weight: 800; font-size: 1.05rem; }
+.cd-preview-basis { color: #8b949e; font-size: 0.8rem; font-weight: 600; margin: 2px 0; }
+.cd-preview-final { font-weight: 800; font-size: 0.95rem; color: #e6edf3; }
+.light-mode .cd-mode-toggle, .light-mode .cd-mode-btn + .cd-mode-btn { border-color: #d1d5db; }
+.light-mode .cd-mode-btn { color: #6b7280; }
+.light-mode .cd-mode-btn.active { color: #fff; }
+.light-mode .cd-preview-basis { color: #6b7280; }
+.light-mode .cd-preview-final { color: #111827; }
 /* The cart drawer (.cart-panel) is z-index:10000 !important — the base .modal (1000) would open
    UNDER it on a phone, hiding the Apply button. Lift only this modal above the drawer/overlay. */
 #customDiscountModal { z-index: 10050; }
