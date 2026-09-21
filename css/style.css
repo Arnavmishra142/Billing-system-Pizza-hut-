@@ -2187,22 +2187,41 @@ body {
 #customDiscountModal { z-index: 10050; }
 
 /* =========================================
-   GOOGLE REVIEW QR CARD — AI UPDATE [2026-09-21]
-   Compact card at the top of the cart drawer (index.html #googleReviewCard). The QR keeps its own white
-   quiet zone inside the SVG so it scans on the dark UI. Never shrinks when the item list scrolls.
+   GOOGLE REVIEW QR — AI UPDATE [2026-09-21] (v2: compact trigger + modal)
+   Cart drawer shows only .cart-review-btn (index.html #googleReviewBtn); the large QR is in
+   #googleReviewModal. Replaces the earlier always-visible QR card.
    ========================================= */
-.cart-review-card {
-    display: flex; align-items: center; gap: 12px; flex-shrink: 0;
-    margin: 10px 15px 0; padding: 8px 12px 8px 8px;
-    background: #171921; border: 1px solid #262a35; border-radius: 12px;
-    text-decoration: none; color: #e6edf3; -webkit-tap-highlight-color: transparent;
+.cart-review-btn {
+    display: flex; align-items: center; gap: 10px; flex-shrink: 0; width: calc(100% - 30px);
+    margin: 8px 15px 0; padding: 7px 12px 7px 8px; text-align: left; cursor: pointer;
+    background: #171921; border: 1px solid #262a35; border-radius: 12px; color: #e6edf3;
+    font-family: inherit; -webkit-tap-highlight-color: transparent;
     transition: border-color 0.15s, transform 0.1s;
 }
-.cart-review-card:active { transform: scale(0.98); border-color: #34d399; }
-.cart-review-qr { width: 80px; height: 80px; flex-shrink: 0; border-radius: 8px; display: block; background: #fff; }
-.cart-review-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.cart-review-title { font-size: 0.95rem; font-weight: 800; color: #e6edf3; }
-.cart-review-sub { font-size: 0.78rem; font-weight: 600; color: #8b949e; }
-.light-mode .cart-review-card { background: #f3f4f6; border-color: #e5e7eb; }
+.cart-review-btn:active { transform: scale(0.98); border-color: #34d399; }
+.cart-review-btn:focus-visible { outline: 2px solid #34d399; outline-offset: 2px; }
+.cart-review-icon-wrap {
+    width: 36px; height: 36px; flex-shrink: 0; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+    background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); color: #34d399;
+}
+.cart-review-icon { width: 22px; height: 22px; display: block; }
+.cart-review-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cart-review-title { font-size: 0.92rem; font-weight: 800; color: #e6edf3; line-height: 1.2; }
+.cart-review-sub { font-size: 0.75rem; font-weight: 600; color: #8b949e; line-height: 1.2; }
+.light-mode .cart-review-btn { background: #f3f4f6; border-color: #e5e7eb; }
 .light-mode .cart-review-title { color: #111827; }
 .light-mode .cart-review-sub { color: #6b7280; }
+
+/* Review modal. The cart drawer (.cart-panel) is z-index:10000 !important — lift this modal above it
+   (same approach as #customDiscountModal). */
+#googleReviewModal { z-index: 10050; }
+.review-qr-content { max-width: 340px; text-align: center; max-height: 92dvh; overflow-y: auto; }
+.review-qr-box {
+    width: fit-content; margin: 6px auto 10px; padding: 10px; background: #fff; border-radius: 14px; line-height: 0;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+/* Large, but never taller than the screen (phone landscape) or wider than the modal (phone portrait). */
+.review-qr-svg { width: min(260px, 68vw, 46dvh); height: min(260px, 68vw, 46dvh); display: block; }
+.review-qr-caption { margin: 0 0 12px; font-size: 0.9rem; font-weight: 600; color: #8b949e; }
+.review-qr-content .modal-actions .btn { width: 100%; }
+.light-mode .review-qr-caption { color: #6b7280; }
