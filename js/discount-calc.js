@@ -257,5 +257,28 @@ const fmtNum = (v) => v.toLocaleString('en-US', { useGrouping: false, maximumFra
         }).observe(discModal, { attributes: true, attributeFilter: ['class'] });
     }
 
+    // AI UPDATE [2026-09-21] (v2): double-click the cart/Order Details background (or the
+    // empty-cart area) also opens THIS SAME calculator — same openCalc()/#discountCalcModal
+    // as the 🧮 button above, no second calculator. Single click is untouched (this only
+    // listens for dblclick), and a double-click that lands on any control is ignored so every
+    // existing interactive element keeps working exactly as before: item rows (.cart-item —
+    // qty +/-, remove), the coupon box, the Custom Instant Discount box/applied row, Save &
+    // Exit / Bill & Settle / Cancel Order, the Google Review trigger, and the online-customer
+    // badge. Only empty space in the panel (header bar, gaps in the billing section, the
+    // "Cart is empty" placeholder) triggers it.
+    const cartPanel = document.querySelector('.cart-panel');
+    if (cartPanel) {
+        const CART_DBLCLICK_IGNORE_SEL = [
+            'button', 'input', 'textarea', 'select', 'a', '[role="button"]', '[contenteditable]',
+            '.cart-item', '.coupon-box', '.custom-discount-box', '#customDiscountApplied',
+            '.action-grid', '.cart-review-btn', '#onlineCustomerBadge',
+        ].join(', ');
+        cartPanel.addEventListener('dblclick', (ev) => {
+            if (ev.target.closest(CART_DBLCLICK_IGNORE_SEL)) return; // let existing controls behave normally
+            if (isOpen()) return;                                    // already open — nothing to do
+            openCalc();
+        });
+    }
+
     render();
 })();
