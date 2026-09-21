@@ -1093,8 +1093,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // re-checked on every calculation by _customDiscountFor() (cart changes).
     // BEGIN CUSTOM_DISCOUNT_CORE
     const getCustomDiscountKey = () => `customDiscount_${getCurrentTable()}_${getCurrentCustomer()}`;
-    let _customDiscount = null;       // { amount: number } | null
+    // AI UPDATE [2026-09-20] Cash / % toggle: _customDiscount is EITHER
+    //   { amount }             flat ₹ (the original shape — also what Edit History restores), OR
+    //   { mode:'percent', percent }   % of the CURRENT order amount.
+    // The percent is only the INPUT; it is converted to a ₹ amount by _customDiscountFor() on every
+    // calculation (so it follows cart changes), and everything downstream — _computePricing(),
+    // the printed bill, sales_history / customer_order_history `customDiscount` — only ever sees that ₹ amount.
+    let _customDiscount = null;       // { amount } | { mode:'percent', percent } | null
     let _customDiscountNotice = '';   // one-shot message shown when a discount was auto-removed
+    let _customDiscountModalRefresh = null; // set by wireCustomDiscount(); re-renders the modal preview on cart change
+    const _CD_LIMIT_MSG = 'Discount cannot be 100% or more.';
 
     function _loadCustomDiscount() {
         try {
@@ -1112,33 +1120,72 @@ document.addEventListener('DOMContentLoaded', () => {
         const v = Number(n) || 0;
         return Number.isInteger(v) ? String(v) : v.toFixed(2);
     }
-    // Entry validation. Returns { ok:true, value } or { ok:false, error }.
-    // Rules: positive number, plain decimal (max 2 dp — the billing system
-    // already works in 2-dp rupees), no signs/exponents/letters, and never
-    // more than the current order amount.
-    function _validateCustomDiscountInput(raw, orderAmount) {
+    // AI UPDATE [2026-09-20] Cash / % conversion — the ONLY place a percentage becomes rupees
+    // (and back). Done in whole paise so float noise can't creep in: 7.5% of ₹1000 = exactly ₹75.
+    function _percentToAmount(orderAmount, percent) {
+        const paise = Math.round((Number(orderAmount) || 0) * 100);
+        const hundredths = Math.round((Number(percent) || 0) * 100);      // 7.5% -> 750
+        return Math.round(paise * hundredths / 10000) / 100;              // rupees, 2 dp
+    }
+    function _amountToPercent(orderAmount, amount) {
+        const paise = Math.round((Number(orderAmount) || 0) * 100);
+        if (paise <= 0) return 0;
+        return Math.round(Math.round((Number(amount) || 0) * 100) / paise * 10000) / 100; // % to 2 dp
+    }
+    // 5 -> "5", 8.333 -> "8.33", 7.5 -> "7.5"
+    function _fmtPct(p) { return String(+(Number(p) || 0).toFixed(2)); }
+
+    // Entry validation. Returns { ok:true, mode, amount, percent, value } or { ok:false, error }.
+    //   value = the ₹ discount (kept for the original single-mode callers).
+    // Rules: positive number, plain decimal (max 2 dp — the billing system already works in 2-dp
+    // rupees), no signs/exponents/letters, and NEVER 100% or more of the current order amount
+    // (cash: amount >= order amount; percent: >= 100%) so the payable can't be ₹0 or negative.
+    // mode = 'cash' (default, original behaviour) | 'percent'.
+    function _validateCustomDiscountInput(raw, orderAmount, mode = 'cash') {
+        const isPct = mode === 'percent';
         const s = String(raw == null ? '' : raw).trim();
-        if (s === '') return { ok: false, error: 'Enter a discount amount.' };
+        if (s === '') return { ok: false, error: isPct ? 'Enter a discount percentage.' : 'Enter a discount amount.' };
         if (/^-/.test(s)) return { ok: false, error: 'Discount must be greater than 0.' };
         if (!/^\d+(\.\d{1,2})?$/.test(s)) {
-            return { ok: false, error: 'Enter a valid amount (numbers only, up to 2 decimals).' };
+            return { ok: false, error: isPct
+                ? 'Enter a valid percentage (numbers only, up to 2 decimals).'
+                : 'Enter a valid amount (numbers only, up to 2 decimals).' };
         }
         const v = Number(s);
         if (!(v > 0)) return { ok: false, error: 'Discount must be greater than 0.' };
         // Compare in paise so 0.1+0.2-style float noise can never flip the result.
-        if (Math.round(v * 100) > Math.round((Number(orderAmount) || 0) * 100)) {
-            return { ok: false, error: 'Discount cannot exceed the order amount.' };
+        const orderPaise = Math.round((Number(orderAmount) || 0) * 100);
+        if (isPct) {
+            if (Math.round(v * 100) >= 10000) return { ok: false, error: _CD_LIMIT_MSG };
+            const amount = _percentToAmount(orderAmount, v);
+            if (!(amount > 0)) return { ok: false, error: 'Discount is too small for this order amount.' };
+            if (Math.round(amount * 100) >= orderPaise) return { ok: false, error: _CD_LIMIT_MSG };
+            return { ok: true, mode: 'percent', percent: +v.toFixed(2), amount, value: amount };
         }
-        return { ok: true, value: +v.toFixed(2) };
+        if (Math.round(v * 100) >= orderPaise) return { ok: false, error: _CD_LIMIT_MSG };
+        const amount = +v.toFixed(2);
+        return { ok: true, mode: 'cash', amount, percent: _amountToPercent(orderAmount, amount), value: amount };
     }
     // The custom discount that is VALID for this order amount, else 0. Called on every
     // calculation, so a cart change that shrinks the order below the stored discount
     // yields 0 here (never a negative payable) and the UI then removes it with a notice.
-    function _customDiscountFor(rawTotal) {
-        if (!_customDiscount) return 0;
-        const amt = Number(_customDiscount.amount);
+    // AI UPDATE [2026-09-20]: optional `spec` (default = the stored discount) lets the modal's live
+    // preview run the SAME math on a not-yet-applied discount. A percent spec is converted to ₹ here,
+    // against the rawTotal passed in (so it follows every cart change). A discount that is >= the
+    // order amount (i.e. 100%+) is invalid and yields 0 — never a ₹0 / negative payable.
+    function _customDiscountFor(rawTotal, spec = _customDiscount) {
+        if (!spec) return 0;
+        const raw = Number(rawTotal) || 0;
+        let amt;
+        if (spec.mode === 'percent') {
+            const p = Number(spec.percent);
+            if (!Number.isFinite(p) || p <= 0 || p >= 100) return 0;
+            amt = _percentToAmount(raw, p);
+        } else {
+            amt = Number(spec.amount);
+        }
         if (!Number.isFinite(amt) || amt <= 0) return 0;
-        if (Math.round(amt * 100) > Math.round((Number(rawTotal) || 0) * 100)) return 0;
+        if (Math.round(amt * 100) >= Math.round(raw * 100)) return 0;
         return +amt.toFixed(2);
     }
     // THE authoritative pricing calculation. rawTotal = pre-discount cart subtotal.
@@ -1147,9 +1194,11 @@ document.addEventListener('DOMContentLoaded', () => {
     //   couponDiscount  -> ₹ off from that coupon (0 if none)
     //   customDiscount  -> ₹ off from the custom instant discount (0 if none/invalid)
     //   total           -> final payable, never below 0
-    function _computePricing(rawTotal) {
+    // AI UPDATE [2026-09-20]: optional 2nd arg `spec` = a candidate custom discount (modal preview only);
+    // every real caller omits it and gets the stored discount, exactly as before.
+    function _computePricing(rawTotal, spec) {
         const raw = Number(rawTotal) || 0;
-        const customDiscount = _customDiscountFor(raw);
+        const customDiscount = _customDiscountFor(raw, spec);
         const coupon = customDiscount > 0 ? null : _getRedeemableCoupon(raw);
         const couponDiscount = coupon ? Math.min(coupon.amount, raw) : 0;
         const total = Math.max(0, +(raw - customDiscount - couponDiscount).toFixed(2));
@@ -1253,8 +1302,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (_customDiscount && pricing.customDiscount === 0) {
             if (rawTotal > 0) {
+                const _what = _customDiscount.mode === 'percent'
+                    ? `${_fmtPct(_customDiscount.percent)}%` : `₹${_fmtMoney(_customDiscount.amount)}`;
                 _customDiscountNotice =
-                    `⚠️ Custom discount ₹${_fmtMoney(_customDiscount.amount)} removed — it no longer fits the order amount.`;
+                    `⚠️ Custom discount ${_what} removed — it no longer fits the order amount.`;
             }
             _customDiscount = null;
             _saveCustomDiscount();
@@ -1264,6 +1315,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const active = !!_customDiscount;
         if (appliedEl) appliedEl.style.display = active ? 'block' : 'none';
         if (amtEl && active) amtEl.textContent = `-₹${_fmtMoney(pricing.customDiscount)}`;
+        // AI UPDATE [2026-09-20]: say "(10%)" on the applied row for a percent discount so staff can see
+        // why the ₹ figure moves with the cart. The ₹ amount shown/saved is still pricing.customDiscount.
+        const labelEl = document.getElementById('customDiscountLabel');
+        if (labelEl && active) {
+            labelEl.textContent = _customDiscount.mode === 'percent'
+                ? `Custom Discount (${_fmtPct(_customDiscount.percent)}%):` : 'Custom Discount:';
+        }
 
         if (btn) {
             btn.style.display = active ? 'none' : '';
@@ -1277,6 +1335,8 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (_customDiscountNotice) msgEl.innerHTML = `<span style="color:#d29922;">${_customDiscountNotice}</span>`;
             else msgEl.textContent = '';
         }
+        // AI UPDATE [2026-09-20]: if the modal is open while the cart changes, refresh its preview.
+        if (typeof _customDiscountModalRefresh === 'function') _customDiscountModalRefresh();
     }
 
     const getLocalCart = () => {
@@ -2083,7 +2143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ── Custom Instant Discount: modal + Edit / Remove wiring ──────────────────
-    // AI UPDATE [2026-09-20]: opens a small modal (₹ amount, CANCEL / APPLY DISCOUNT).
+    // AI UPDATE [2026-09-20]: opens a small modal (₹ CASH / % PERCENT toggle, value, live preview, CANCEL / APPLY DISCOUNT).
     // All rules live in _validateCustomDiscountInput() / _computePricing() (see the
     // CUSTOM INSTANT DISCOUNT block above) — this section is only DOM plumbing, so
     // there is exactly one validation path and one total calculation.
@@ -2097,10 +2157,76 @@ document.addEventListener('DOMContentLoaded', () => {
         const openBtn  = document.getElementById('customDiscountBtn');
         const editBtn  = document.getElementById('customDiscountEditBtn');
         const removeBtn= document.getElementById('customDiscountRemoveBtn');
+        // AI UPDATE [2026-09-20] Cash / % toggle + live preview elements
+        const cashBtn  = document.getElementById('cdModeCash');
+        const pctBtn   = document.getElementById('cdModePercent');
+        const prefixEl = document.getElementById('customDiscountPrefix');
+        const previewEl= document.getElementById('customDiscountPreview');
+        const prevDisc = document.getElementById('cdPrevDiscount');
+        const prevBasis= document.getElementById('cdPrevBasis');
+        const prevFinal= document.getElementById('cdPrevFinal');
         if (!modalEl || !inputEl || !applyBtn || !cancelBtn) return;
+
+        let mode = 'cash';   // 'cash' | 'percent' — which unit the input currently holds
 
         const showError = (msg) => { if (errEl) errEl.textContent = msg || ''; };
         const closeModal = () => { modalEl.classList.add('hidden'); showError(''); };
+
+        function paintMode() {
+            const isPct = mode === 'percent';
+            cashBtn?.classList.toggle('active', !isPct);
+            pctBtn?.classList.toggle('active', isPct);
+            cashBtn?.setAttribute('aria-pressed', String(!isPct));
+            pctBtn?.setAttribute('aria-pressed', String(isPct));
+            if (prefixEl) prefixEl.textContent = isPct ? '%' : '₹';
+            inputEl.placeholder = isPct ? 'Enter Percentage' : 'Enter Amount';
+        }
+
+        // Live validation + preview. Uses the SAME validator (_validateCustomDiscountInput) and the
+        // SAME pricing function (_computePricing with a candidate spec) as Apply / the cart — no
+        // separate maths here. Returns the validation result (or null while the input is still pending).
+        function refreshPreview() {
+            const rawTotal = _rawCartTotal();
+            if (hintEl) hintEl.textContent = `Order amount: ₹${_fmtMoney(rawTotal)}`;
+            const s = inputEl.value.trim();
+            const pending = s === '' || /^\d+\.$/.test(s) || /^0+(\.0*)?$/.test(s); // still typing — no noise
+            if (previewEl) previewEl.style.display = 'none';
+            if (pending) { showError(''); return null; }
+            const r = _validateCustomDiscountInput(s, rawTotal, mode);
+            if (!r.ok) { showError(r.error); return r; }
+            showError('');
+            const spec = mode === 'percent' ? { mode: 'percent', percent: r.percent } : { amount: r.amount };
+            const pricing = _computePricing(rawTotal, spec);
+            if (prevDisc)  prevDisc.textContent  = `Discount: ₹${_fmtMoney(pricing.customDiscount)}`;
+            if (prevBasis) prevBasis.textContent = mode === 'percent'
+                ? `${_fmtPct(r.percent)}% of ₹${_fmtMoney(rawTotal)}`
+                : `This is ${_fmtPct(r.percent)}% of the bill`;
+            if (prevFinal) prevFinal.textContent = `Final Total: ₹${_fmtMoney(pricing.total)}`;
+            if (previewEl) previewEl.style.display = 'block';
+            return r;
+        }
+        _customDiscountModalRefresh = () => { if (!modalEl.classList.contains('hidden')) refreshPreview(); };
+
+        // Cash <-> % switch: convert what is typed against the CURRENT order amount
+        // (₹25 on ₹500 -> 5 ; 10% on ₹500 -> 50). Unparseable text is cleared, empty stays empty.
+        function switchMode(next) {
+            if (next === mode) return;
+            const rawTotal = _rawCartTotal();
+            const s = inputEl.value.trim();
+            if (s !== '') {
+                if (/^\d+(\.\d{1,2})?$/.test(s)) {
+                    const n = Number(s);
+                    const conv = mode === 'cash' ? _amountToPercent(rawTotal, n) : _percentToAmount(rawTotal, n);
+                    inputEl.value = conv > 0 ? (next === 'percent' ? _fmtPct(conv) : _fmtMoney(conv)) : '';
+                } else {
+                    inputEl.value = '';
+                }
+            }
+            mode = next;
+            paintMode();
+            refreshPreview();
+            inputEl.focus();
+        }
 
         function openModal() {
             const rawTotal = _rawCartTotal();
@@ -2109,8 +2235,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (rawTotal <= 0) { renderCart(); return; }
             _customDiscountNotice = '';
             showError('');
-            inputEl.value = _customDiscount ? String(_customDiscount.amount) : '';
-            if (hintEl) hintEl.textContent = `Order amount: ₹${_fmtMoney(rawTotal)}`;
+            // Re-open in whichever unit the discount was entered in (Edit).
+            mode = _customDiscount && _customDiscount.mode === 'percent' ? 'percent' : 'cash';
+            inputEl.value = !_customDiscount ? ''
+                : (mode === 'percent' ? _fmtPct(_customDiscount.percent) : String(_customDiscount.amount));
+            paintMode();
+            refreshPreview();
             modalEl.classList.remove('hidden');
             setTimeout(() => { inputEl.focus(); inputEl.select(); }, 100);
         }
@@ -2118,9 +2248,13 @@ document.addEventListener('DOMContentLoaded', () => {
         function applyFromModal() {
             const rawTotal = _rawCartTotal();
             if (_appliedCoupon) { showError('Remove the coupon to use a custom discount.'); return; }
-            const result = _validateCustomDiscountInput(inputEl.value, rawTotal);
+            const result = _validateCustomDiscountInput(inputEl.value, rawTotal, mode);
             if (!result.ok) { showError(result.error); return; }
-            _customDiscount = { amount: result.value };
+            // Cash keeps the original { amount } shape; percent stores the % and is converted to ₹
+            // by _customDiscountFor() on every calculation (so it follows cart changes).
+            _customDiscount = result.mode === 'percent'
+                ? { mode: 'percent', percent: result.percent }
+                : { amount: result.amount };
             _customDiscountNotice = '';
             _saveCustomDiscount();
             closeModal();
@@ -2135,9 +2269,11 @@ document.addEventListener('DOMContentLoaded', () => {
             _saveCustomDiscount();
             renderCart(); // original total restored immediately
         });
+        cashBtn?.addEventListener('click', () => switchMode('cash'));
+        pctBtn?.addEventListener('click', () => switchMode('percent'));
         applyBtn.addEventListener('click', applyFromModal);
         cancelBtn.addEventListener('click', closeModal);
-        inputEl.addEventListener('input', () => showError(''));
+        inputEl.addEventListener('input', refreshPreview);
         inputEl.addEventListener('keydown', (ev) => {
             if (ev.key === 'Enter') { ev.preventDefault(); applyFromModal(); }
         });
