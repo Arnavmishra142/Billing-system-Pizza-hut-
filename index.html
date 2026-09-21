@@ -384,7 +384,7 @@
                     </div>
                     <div id="customDiscountApplied" style="display:none;">
                         <div class="total-row" id="customDiscountRow">
-                            <span>Custom Discount:</span>
+                            <span id="customDiscountLabel">Custom Discount:</span>
                             <span id="customDiscountAmount" style="color:#3fb950;font-weight:800;">-₹0</span>
                         </div>
                         <div class="custom-discount-actions">
@@ -510,11 +510,21 @@
 <div id="customDiscountModal" class="modal hidden">
     <div class="modal-content" style="max-width: 320px;">
         <h3>Custom Instant Discount</h3>
+        <!-- AI UPDATE [2026-09-20]: Cash / % toggle + live preview (logic in js/cart.js wireCustomDiscount) -->
+        <div class="cd-mode-toggle" role="group" aria-label="Discount type">
+            <button type="button" id="cdModeCash" class="cd-mode-btn active" aria-pressed="true">₹ CASH</button>
+            <button type="button" id="cdModePercent" class="cd-mode-btn" aria-pressed="false">% PERCENT</button>
+        </div>
         <p id="customDiscountHint" class="muted-note" style="margin-bottom: 5px; font-size: 0.9rem; text-align:center;"></p>
         <div style="position: relative;">
-            <span style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: #10b981; font-weight: bold; font-size: 1.2rem;">₹</span>
+            <span id="customDiscountPrefix" style="position: absolute; left: 15px; top: 50%; transform: translateY(-50%); color: #10b981; font-weight: bold; font-size: 1.2rem;">₹</span>
             <input type="text" inputmode="decimal" id="customDiscountInput" placeholder="Enter Amount" autocomplete="off"
                    style="width:100%; padding-left: 35px; font-size: 1.3rem; font-weight: bold; text-align: center;">
+        </div>
+        <div id="customDiscountPreview" class="cd-preview" style="display:none;">
+            <div id="cdPrevDiscount" class="cd-preview-main"></div>
+            <div id="cdPrevBasis" class="cd-preview-basis"></div>
+            <div id="cdPrevFinal" class="cd-preview-final"></div>
         </div>
         <div id="customDiscountError" role="alert" class="custom-discount-error"></div>
         <div class="modal-actions">

@@ -1,8 +1,46 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-20 (BUG FIX: online-customer Edit History stats; earlier same day: Custom Instant Discount — see below)
+> Last updated: 2026-09-20 (Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
 
 ---
+
+## [AI UPDATE 2026-09-20] — Custom Instant Discount modal: ₹ CASH / % PERCENT toggle + live preview
+
+### What changed
+The existing "Custom Instant Discount" modal now has a `[ ₹ CASH ] [ % PERCENT ]` toggle and a live preview under the
+input (`Discount: ₹50` / `10% of ₹500` (percent) or `This is 5% of the bill` (cash) / `Final Total: ₹450`).
+Modal design, Edit and Remove buttons, coupon mutual-exclusion and all printing/saving paths are unchanged.
+
+### Design rules (all inside the existing CUSTOM_DISCOUNT_CORE block of `js/cart.js` — no second pricing path)
+- Stored state (localStorage `customDiscount_<table>_<slot>`): cash = `{ amount }` (original shape, still what Edit History
+  restores); percent = `{ mode:'percent', percent }`. The percent is only INPUT — `_customDiscountFor(rawTotal, spec)` converts it
+  to ₹ on EVERY calculation, so it follows cart changes. `_computePricing()` is still the only total calculation; it gained an
+  optional 2nd arg `spec` used only by the modal preview. What is printed and saved (`sales_history` / `customer_order_history`
+  `customDiscount`, `subtotal`, `total`) is always the actual ₹ amount — no percent field is saved anywhere (no schema change).
+- Conversion is done in whole paise (`_percentToAmount`, `_amountToPercent`, `_fmtPct`): 7.5% of ₹1000 = ₹75 exactly.
+- Toggle converts the typed value against the current order amount (₹25 on ₹500 ↔ 5%; 10% ↔ ₹50); unparseable text is cleared.
+- Validation (`_validateCustomDiscountInput(raw, orderAmount, mode)`): empty / ≤0 / negative / non-numeric / >2 decimals rejected;
+  ≥100% (percent) or cash ≥ order amount rejected with "Discount cannot be 100% or more."; a percent that rounds to ₹0 is rejected
+  ("too small"). Errors show live while typing and on Apply.
+- **Behaviour change to be aware of:** a discount equal to the WHOLE bill (cash ₹500 on ₹500) used to be accepted (payable ₹0); it is now
+  rejected, and at runtime a stored discount `>=` the order amount is treated as invalid and auto-removed with the existing notice.
+- Cart change while a % discount is applied: ₹ amount and payable recalculate automatically; the applied row reads
+  "Custom Discount (10%): -₹60". A flat cash discount stays flat. If the modal is open while the cart changes, the preview refreshes.
+- Edit History: sales store only the ₹ amount, so an edited order's discount is restored as a flat ₹ discount (as before), not a percent.
+
+### Files / functions changed
+| File | Change |
+|---|---|
+| `js/cart.js` | CORE block: `_percentToAmount`, `_amountToPercent`, `_fmtPct`, `_CD_LIMIT_MSG`, `_customDiscountModalRefresh`; `_validateCustomDiscountInput` (new `mode` arg); `_customDiscountFor(rawTotal, spec)`; `_computePricing(rawTotal, spec)`; `_updateCustomDiscountUI` (percent label/notice + preview refresh); `wireCustomDiscount()` rewritten around `mode`, `refreshPreview()`, `switchMode()`, `openModal()`, `applyFromModal()` |
+| `index.html` | modal markup: toggle buttons `#cdModeCash` / `#cdModePercent`, `#customDiscountPrefix`, preview block `#customDiscountPreview`; `id="customDiscountLabel"` on the applied-row label |
+| `css/style.css` | `.cd-mode-toggle`, `.cd-mode-btn`, `.cd-preview*` (dark + light mode) |
+| `sw.js` | `pos-static-v51` → `v52` |
+Not touched: `js/order-edit.js`, receipts/KOT, coupon system, Firestore rules, Customer Panel (it already shows the saved ₹ `customDiscount`).
+
+### Tests performed (headless Chromium, Firebase stubbed — real Firestore NOT available)
+- 58/58 on the new toggle suite: ₹500 ₹25 → 5%; ₹500 10% → ₹50 / final ₹450; ₹1000 7.5% → ₹75; 100% / 110% / 0 / negative / letters / 3-dp rejected; cash ₹500 on ₹500 and ₹600 rejected; cart-change recalculation (₹500 → ₹600 → ₹500 → ₹533.33), preview refresh with modal open, Edit / Remove, online-customer Bill & Settle + Edit History (saved `customDiscount` 50, no percent field, stats (1,450) → (1,550)), plain cash flow unchanged, dark + light screenshots.
+- Earlier 68-assertion Edit-History suite still 68/68; manual-customer Firestore write log still identical to the original code.
+- NOT tested: real device / real Firestore / printer.
 
 ## [AI UPDATE 2026-09-20] — BUG FIX: ONLINE (QR) customer Edit History left Total Orders / Lifetime Spend stale
 
