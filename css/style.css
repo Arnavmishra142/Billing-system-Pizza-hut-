@@ -2185,3 +2185,24 @@ body {
 /* The cart drawer (.cart-panel) is z-index:10000 !important — the base .modal (1000) would open
    UNDER it on a phone, hiding the Apply button. Lift only this modal above the drawer/overlay. */
 #customDiscountModal { z-index: 10050; }
+
+/* =========================================
+   GOOGLE REVIEW QR CARD — AI UPDATE [2026-09-21]
+   Compact card at the top of the cart drawer (index.html #googleReviewCard). The QR keeps its own white
+   quiet zone inside the SVG so it scans on the dark UI. Never shrinks when the item list scrolls.
+   ========================================= */
+.cart-review-card {
+    display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    margin: 10px 15px 0; padding: 8px 12px 8px 8px;
+    background: #171921; border: 1px solid #262a35; border-radius: 12px;
+    text-decoration: none; color: #e6edf3; -webkit-tap-highlight-color: transparent;
+    transition: border-color 0.15s, transform 0.1s;
+}
+.cart-review-card:active { transform: scale(0.98); border-color: #34d399; }
+.cart-review-qr { width: 80px; height: 80px; flex-shrink: 0; border-radius: 8px; display: block; background: #fff; }
+.cart-review-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cart-review-title { font-size: 0.95rem; font-weight: 800; color: #e6edf3; }
+.cart-review-sub { font-size: 0.78rem; font-weight: 600; color: #8b949e; }
+.light-mode .cart-review-card { background: #f3f4f6; border-color: #e5e7eb; }
+.light-mode .cart-review-title { color: #111827; }
+.light-mode .cart-review-sub { color: #6b7280; }
