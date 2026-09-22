@@ -1,6 +1,88 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-21 (quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+> Last updated: 2026-09-22 (Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+
+---
+
+## [AI UPDATE 2026-09-22] — Push-to-Talk Voice Announcement mic (Recent Bills drawer)
+
+### What was added
+A small round mic button (`#voiceAnnounceBtn`) next to the **"📜 Recent Bills (24h)"** title in the history drawer header
+(opened via the 🕒 Recent Bills button on the home screen). It is a **staff push-to-talk announcement tool**, not a
+customer-facing voice assistant:
+
+- **Press and hold** the mic → opens the device microphone and relays the operator's voice **live, in real time**, to
+  whatever the browser/OS currently treats as the **default audio output** (e.g. a paired Bluetooth speaker at the counter).
+- **Release** → capture stops immediately and all audio resources are torn down.
+- While held, the button turns solid red with a pulsing glow and an adjacent **"Listening…"** label appears
+  (`#vaStatusText`); on release both revert to the idle state instantly.
+- Nothing is recorded, buffered to disk, uploaded, or sent to Firebase/any backend — audio flows
+  `mic → GainNode → DynamicsCompressorNode (soft limiter) → AudioContext.destination` entirely in memory via the Web
+  Audio API, for as long as the button is held, and is discarded the instant it's released.
+
+### Why these specific pieces
+- `getUserMedia({ audio: { echoCancellation, noiseSuppression, autoGainControl } })` — required because the tablet is
+  typically paired to a Bluetooth speaker sitting near the mic; these constraints reduce feedback/echo at the source.
+- A `DynamicsCompressorNode` used as a soft limiter sits between the mic and the output as an extra safety margin
+  against clipping/feedback spikes when relaying live audio next to a speaker — it does no recording, it's inline DSP only.
+- `AudioContext({ latencyHint: 'interactive' })` + a direct Web Audio graph (no `<audio>` element buffering) keeps
+  round-trip latency as low as reasonably achievable in a browser.
+- The code **never calls `setSinkId()`** with a specific device id — it deliberately always plays through
+  `audioCtx.destination`, i.e. whichever output the OS currently has set as default, so it automatically follows the
+  tablet's connected Bluetooth speaker without hardcoding any device.
+
+### Guardrails / edge cases handled
+- **One stream at a time**: `isListening` / `isStarting` flags plus a hard check at the top of `startListening()`
+  prevent a second `getUserMedia` call (e.g. rapid double-press, or a stray pointer event) from ever opening a second
+  mic stream while one is already active.
+- **Permission denied** (`NotAllowedError` / `SecurityError`) → button turns grey, "Mic permission denied" shows next
+  to it for ~2.5s, then resets to idle so the user can retry after granting permission in the browser's own UI.
+- **No microphone present** (`NotFoundError`) or any other `getUserMedia` failure → "No microphone found" /
+  "Mic unavailable" shown the same way; button never gets stuck in a broken "listening" state.
+- **Browser without `navigator.mediaDevices.getUserMedia`** → button is disabled up front with "Mic not supported".
+- **Cleanup**: every stop path (pointerup / pointercancel / pointerleave / lostpointercapture / touchend, plus
+  `visibilitychange` when the tab is hidden, and `pagehide` / `beforeunload`) runs the same `teardownAudio()`, which
+  stops every `MediaStreamTrack`, disconnects every Web Audio node, and calls `audioCtx.close()`. If the OS/Bluetooth
+  mic itself disconnects mid-hold, the track's own `ended` event also triggers a clean stop.
+- **Pointer Events** (`pointerdown` / `pointerup` / `pointercancel` / `pointerleave` / `lostpointercapture`) are used
+  instead of separate mouse/touch handlers so the same press-and-hold logic works correctly with touch on the POS
+  tablet, with mouse, and with a stylus; `touchend` is also bound as a belt-and-suspenders fallback. Space/Enter
+  keydown/keyup are wired the same way for keyboard accessibility. `touch-action: none` on the button stops the
+  page from scrolling/zooming under a held finger.
+
+### Files changed
+| File | Change |
+|---|---|
+| `index.html` | Recent Bills drawer header restructured into `.drawer-header-left` (title + new mic button + status text) and the existing close button, so `justify-content: space-between` still holds; new `<button id="voiceAnnounceBtn">` with an inline SVG mic icon and `<span id="vaStatusText">`; new `<script type="module" src="js/voice-announce.js">` after `js/discount-calc.js` |
+| `js/voice-announce.js` | NEW: entire feature — `getUserMedia` capture, Web Audio graph (gain → compressor/limiter → destination), press-and-hold wiring, visual state machine, permission/error handling, full resource cleanup. Zero imports, zero exports, only touches its own two DOM elements |
+| `css/style.css` | `.drawer-header-left`, `.va-mic-btn` (+ `.va-active` pulsing-glow keyframes, `.va-unsupported` / `.va-denied` states), `.va-status-text` (+ `.va-error-text`), and `.light-mode` overrides — appended after the `.cd-calc-btn` block |
+| `sw.js` | `pos-static-v55` → `pos-static-v56`; `/js/voice-announce.js` added to the precache list |
+
+**Not touched:** `js/cart.js`, billing/payment logic, `js/incoming-orders.js`, KOT printing, customer/CRM code, and the
+Recent Bills **data** (the drawer still lists bills exactly as before — only its header markup gained the mic control).
+
+### Browser / device limitations (read before relying on this in production)
+- **This is a live monitor relay, not a PA/intercom system.** It only works while the POS tab is open, foregrounded,
+  and not asleep; backgrounding/locking the tablet stops it (by design — see `visibilitychange` above).
+- **Acoustic feedback is still physically possible.** `echoCancellation` in `getUserMedia` is designed around a
+  browser's own call/media pipeline (e.g. video calls) and is not guaranteed to fully cancel feedback from an
+  arbitrary external Bluetooth speaker sitting near the mic. The gain/limiter stage helps but does not eliminate
+  howling if the mic is held too close to a loud speaker — keep a sensible physical distance between mic and speaker.
+- **Bluetooth audio adds latency.** Even with `latencyHint: 'interactive'`, A2DP Bluetooth speakers typically add
+  ~100–300ms of their own latency; this is a hardware/OS-level constraint the Web Audio API cannot remove.
+- **Output device selection follows the OS, not the page.** The feature intentionally never picks a specific
+  speaker — it always plays through the current system default output. If staff need it on the Bluetooth speaker,
+  that speaker must be selected as the tablet's default output at the OS level; the page cannot do this for them
+  and does not expose an in-page output picker (per the requirement to never hardcode a device).
+- **iOS Safari** requires the `AudioContext` to be created/resumed from a direct user gesture, which `pointerdown`
+  satisfies; if a future refactor moves `startListening()` behind an `await` before the context is created, iOS may
+  silently block audio output.
+- **HTTPS (or `localhost`) is required** for `getUserMedia` to be available at all — this already matches the rest
+  of the POS, which is served over HTTPS.
+- Manually verified in headless Chromium for: state transitions (idle → listening → idle), permission-denied path,
+  no-microphone path, rapid repeated press/release not creating overlapping streams, and full teardown on
+  pointerup/pointercancel/visibilitychange. **Not yet verified on a real Bluetooth-paired POS tablet** — recommend an
+  on-device check for feedback/latency before relying on this during service.
 
 ---
 

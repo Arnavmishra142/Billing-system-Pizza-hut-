@@ -741,6 +741,7 @@
     <script type="module" src="js/review-qr.js"></script>
     <!-- AI UPDATE [2026-09-21]: quick calculator for the Custom Instant Discount modal (standalone; does not touch cart.js) -->
     <script type="module" src="js/discount-calc.js"></script>
+    <script type="module" src="js/voice-announce.js"></script>
     <!-- AI UPDATE [2026-09-21]: "View History" in the Customer Offers modal (reuses
          js/customers.js's own data + rendering; see file header for details). -->
     <script type="module" src="js/pos-customer-history.js"></script>
@@ -1243,7 +1244,21 @@
     <div id="historyOverlay" class="drawer-overlay" onclick="closeHistoryDrawer()"></div>
     <div id="historyDrawer" class="history-drawer">
         <div class="drawer-header">
-            <h3 class="drawer-title-text" style="margin: 0;">📜 Recent Bills (24h)</h3>
+            <div class="drawer-header-left">
+                <h3 class="drawer-title-text" style="margin: 0;">📜 Recent Bills (24h)</h3>
+                <!-- AI UPDATE [2026-09-22]: Push-to-Talk Voice Announcement mic.
+                     Staff-only live mic → active speaker relay. See js/voice-announce.js
+                     and AI_HANDOFF.md. Does not touch bills/history data or logic. -->
+                <button id="voiceAnnounceBtn" type="button" class="va-mic-btn"
+                        title="Hold to announce (mic → speaker)"
+                        aria-label="Push to talk voice announcement">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M19 11a7 7 0 0 1-14 0M12 18v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <span id="vaStatusText" class="va-status-text" aria-live="polite"></span>
+            </div>
             <button onclick="closeHistoryDrawer()" class="close-btn">❌</button>
         </div>
         <div class="drawer-content" id="historyList">

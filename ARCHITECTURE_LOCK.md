@@ -576,6 +576,26 @@ Writes: admin/groq-key.generated.js  (git-ignored)
 // Known tradeoff: key is visible in page source — accepted by owner (see replit.md).
 ```
 
+### `js/voice-announce.js` — Push-to-Talk Voice Announcement (added 2026-09-22)
+```
+// Self-invoking module. No exports, no imports from any other POS module.
+// Touches only #voiceAnnounceBtn / #vaStatusText in the Recent Bills drawer header.
+```
+**Frozen constraints for this feature (preserve on any future change):**
+1. **No backend/API dependency, ever.** This is a local, real-time mic → speaker relay only. It must never call
+   Firestore, Cloud Functions, Cloudinary, Groq, or any other network endpoint, and must never persist/record audio
+   (no `MediaRecorder`, no upload, no localStorage of audio data).
+2. **Never hardcode an audio output device.** The audio graph must always terminate at `AudioContext.destination`
+   (the browser/OS's current default output). Do not add `HTMLMediaElement.setSinkId()` with a fixed device id —
+   that would defeat the "follow whatever Bluetooth speaker is currently the system default" requirement.
+3. **One mic stream at a time.** Any change to the press-and-hold logic must keep the `isListening` / `isStarting`
+   guard so a second `getUserMedia` call can never be issued while a stream is already open.
+4. **Full teardown on every stop path.** Every way the button can stop being held (pointerup/cancel/leave, tab
+   hidden, page unload, track ended) must stop all `MediaStreamTrack`s and close the `AudioContext`. Do not add a
+   stop path that skips `teardownAudio()`.
+5. **Isolated from billing/orders/customers/KOT/payments.** This module must not read or write any bill, order,
+   customer, KOT, or payment state, and no other module should import from or call into it.
+
 ### Realtime listener pattern (used by all modules)
 All Firestore `onSnapshot` listeners follow this pattern:
 1. Bootstrap `signInAnonymously()` at module top-level.
