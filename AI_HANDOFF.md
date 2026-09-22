@@ -1,6 +1,49 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-22 (Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+> Last updated: 2026-09-22 (fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+
+---
+
+## [AI UPDATE 2026-09-22] (fix) — Voice Announcement mic was silent on Bluetooth speaker
+
+### Bug report
+Pressing and holding the mic showed "Listening…" correctly, but no audio came out of the paired Bluetooth speaker
+(reported with a boAt speaker).
+
+### Root causes (both fixed in `js/voice-announce.js`)
+1. **`echoCancellation: true` forces Android into voice-call audio mode.** The moment a page requests
+   `echoCancellation` from `getUserMedia`, Chrome/Android switches the whole device's audio routing into
+   "communication" mode — the same mode used for a phone/VoIP call — instead of normal media playback mode.
+   Most consumer Bluetooth speakers (boAt included) only implement the **A2DP media profile**, not the
+   **HFP/call profile**, so when Android tries to send call-mode audio to them they simply receive nothing and
+   stay silent, even though the same speaker plays music fine. **Fix:** `echoCancellation` now defaults to
+   `false`. `noiseSuppression` and `autoGainControl` are unaffected by this behavior and are left on.
+2. **`AudioContext.resume()` was called after `await getUserMedia(...)` resolved.** On Android, a `resume()` call
+   is only reliably treated as "triggered by the user's tap" if it happens synchronously inside the gesture
+   handler. Awaiting the mic-permission promise first (which can take an arbitrary amount of time, especially on
+   the very first prompt) can make the browser silently keep the context suspended → no audio, even though
+   nothing throws an error. **Fix:** the `AudioContext` is now created and `resume()`d synchronously inside the
+   `pointerdown` handler, before `getUserMedia` is even called; the mic stream is attached to that already-running
+   context once permission resolves.
+
+### Trade-off to be aware of
+With `echoCancellation: false`, the browser does less automatic work to suppress feedback if the mic is held very
+close to the speaker. In practice, keeping a normal talking distance between the mic and the speaker (as staff
+naturally would) avoids audible feedback. If a future device is confirmed to support HFP properly and needs true
+AEC, this can be reconsidered — but it will re-introduce the "silent on A2DP-only speakers" bug, so don't flip it
+back without testing on the actual hardware in use.
+
+### Files changed
+| File | Change |
+|---|---|
+| `js/voice-announce.js` | `echoCancellation` default changed `true` → `false`; `AudioContext` creation + `resume()` moved to happen synchronously in the `pointerdown` handler instead of after `await getUserMedia(...)`; cleanup path updated to close the pre-created context if `getUserMedia` fails |
+| `sw.js` | `pos-static-v56` → `pos-static-v57` |
+
+### Note for whoever tests this next
+This app can be installed as a PWA ("⬇️ Install POS App") and is served through a Service Worker that precaches
+`js/voice-announce.js`. After deploying this fix, the device may need a hard refresh / reinstall of the PWA (or
+simply wait for the service worker's normal update-on-reload cycle) to pick up the new file — otherwise it will
+keep running the old, silent version.
 
 ---
 

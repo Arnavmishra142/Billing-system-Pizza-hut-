@@ -93,7 +93,11 @@
 // AI UPDATE [2026-09-22]: Bumped pos-static-v55 → pos-static-v56 (index.html, css/style.css changed; NEW
 // js/voice-announce.js precached below: Push-to-Talk Voice Announcement mic in the Recent Bills drawer
 // header — local mic-to-speaker relay only, no recording/upload — see AI_HANDOFF.md).
-const CACHE_NAME = 'pos-static-v56'; const STATIC_ASSETS = [
+// AI UPDATE [2026-09-22] (fix): Bumped pos-static-v56 → pos-static-v57 (js/voice-announce.js changed:
+// fixed silent Bluetooth output — echoCancellation was forcing Android into voice-call audio mode,
+// which most A2DP-only Bluetooth speakers don't support, and AudioContext.resume() was called too
+// late relative to the user gesture. See AI_HANDOFF.md).
+const CACHE_NAME = 'pos-static-v57'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
