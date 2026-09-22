@@ -2268,6 +2268,41 @@ body {
 .calc-actions .btn { padding: 11px 8px; }
 .calc-actions .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .light-mode .cd-calc-btn { background: #f3f4f6; border-color: #d1d5db; color: #6b7280; }
+
+/* =========================================
+   PUSH-TO-TALK VOICE ANNOUNCEMENT mic — AI UPDATE [2026-09-22]
+   Compact mic control in the "Recent Bills (24h)" drawer header (js/voice-announce.js).
+   Staff-only: live mic → active/default speaker relay. No recording, no upload, no backend.
+   ========================================= */
+.drawer-header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.va-mic-btn {
+    position: relative; flex-shrink: 0; width: 34px; height: 34px; padding: 0;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    background: rgba(255,255,255,0.06); border: 1px solid #30363d; border-radius: 50%; color: #8b949e;
+    -webkit-tap-highlight-color: transparent; touch-action: none; user-select: none;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.va-mic-btn svg { width: 18px; height: 18px; pointer-events: none; }
+.va-mic-btn:hover, .va-mic-btn:focus-visible { color: #34d399; border-color: #34d399; outline: none; }
+.va-mic-btn:active { transform: scale(0.94); }
+.va-mic-btn.va-active {
+    color: #fff; background: #ef4444; border-color: #ef4444;
+    animation: va-pulse 1.1s ease-in-out infinite;
+}
+.va-mic-btn.va-unsupported, .va-mic-btn.va-denied { color: #6b7280; border-color: #30363d; cursor: not-allowed; opacity: 0.6; }
+@keyframes va-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.55); }
+    50%      { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+}
+.va-status-text {
+    font-size: 0.75rem; font-weight: 700; color: #ef4444; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 40vw;
+    opacity: 0; transform: translateX(-4px); transition: opacity 0.15s, transform 0.15s;
+}
+.va-status-text.va-visible { opacity: 1; transform: translateX(0); }
+.va-status-text.va-error-text { color: #f59e0b; }
+.light-mode .va-mic-btn { background: #f3f4f6; border-color: #d1d5db; color: #6b7280; }
+.light-mode .va-mic-btn:hover, .light-mode .va-mic-btn:focus-visible { color: #059669; border-color: #059669; }
 .light-mode .calc-display { background: #f3f4f6; border-color: #d1d5db; }
 .light-mode .calc-main { color: #111827; }
 .light-mode .calc-key { background: #f3f4f6; border-color: #d1d5db; color: #111827; }
