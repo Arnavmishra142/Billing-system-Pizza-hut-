@@ -53,10 +53,10 @@
 // Billing records (sales_history) are intentionally NOT touched — they must
 // survive customer deletion per the architecture spec.
 
-import { showAlert } from './dialog.js';
+import { showAlert, showConfirm } from './dialog.js';
 import { db, auth } from './firebase-config.js';
 import {
-    collection, getDocs, getDoc, doc, writeBatch, updateDoc, setDoc, serverTimestamp, query, where
+    collection, getDocs, getDoc, doc, writeBatch, updateDoc, deleteDoc, setDoc, serverTimestamp, query, where
 } from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js';
 import { signInAnonymously, onAuthStateChanged }
     from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js';
@@ -313,12 +313,18 @@ async function _fetchCustomerCoupons(phone) {
     }
 }
 
-function _buildCouponsHtml(coupons) {
+// AI UPDATE [2026-09-22]: Admin coupon management — Mark as Used / Delete.
+// Controls render ONLY here (Customer Management panel, admin-only surface).
+// Buttons only appear on ACTIVE (cp.used === false) coupons per spec — a
+// used coupon is already a closed record and gets no action controls.
+// See window._custMarkCouponUsed / window._custDeleteCoupon below and
+// AI_HANDOFF.md "Admin Coupon Management" for the full design + data flow.
+function _buildCouponsHtml(coupons, phone) {
     if (!coupons || coupons.length === 0) {
         return `<div class="empty-state" style="padding:14px 0;">No coupons yet.</div>`;
     }
     return `<div class="bills-list">` + coupons.map(cp => `
-<div class="bill-card" style="flex-direction:column;align-items:stretch;gap:6px;border-left:3px solid ${cp.used ? '#8b949e' : '#3fb950'};">
+<div class="bill-card" style="flex-direction:column;align-items:stretch;gap:6px;border-left:3px solid ${cp.used ? '#8b949e' : '#3fb950'};" data-coupon-card="${_esc(cp.code)}">
     <div style="display:flex;justify-content:space-between;align-items:center;">
         <span style="font-family:monospace;font-weight:800;color:#58a6ff;font-size:0.95rem;">${_esc(cp.code)}</span>
         <span style="font-weight:800;color:#3fb950;">${_fmtRupee(cp.amount)}</span>
@@ -327,8 +333,115 @@ function _buildCouponsHtml(coupons) {
     <div style="font-size:0.72rem;font-weight:700;color:${cp.used ? '#8b949e' : '#3fb950'};text-transform:uppercase;letter-spacing:0.3px;">
         ${cp.used ? '✅ Used' : '🟢 Active'} ${cp.minOrder ? `· Min order ₹${cp.minOrder}` : ''} ${cp.type === 'loyalty' ? '· 🎖️ Loyalty' : ''}
     </div>
+    ${!cp.used ? `
+    <div style="display:flex;gap:8px;margin-top:2px;">
+        <button type="button" class="btn" data-coupon-action="used" data-coupon-code="${_esc(cp.code)}"
+            style="flex:1;padding:9px 8px;font-size:0.76rem;justify-content:center;background:#238636;color:#fff;border:none;font-weight:700;"
+            onclick="window._custMarkCouponUsed('${_esc(phone)}','${_esc(cp.code)}',this)">
+            ✅ Mark as Used
+        </button>
+        <button type="button" class="btn btn-danger" data-coupon-action="delete" data-coupon-code="${_esc(cp.code)}"
+            style="flex:1;padding:9px 8px;font-size:0.76rem;justify-content:center;"
+            onclick="window._custDeleteCoupon('${_esc(phone)}','${_esc(cp.code)}',this)">
+            🗑️ Delete
+        </button>
+    </div>` : ''}
 </div>`).join('') + `</div>`;
 }
+
+// In-flight guard, keyed by coupon code — prevents a double-click (or a
+// second click while the confirm dialog is open / the write is in progress)
+// from firing two mark-used or delete actions for the same coupon.
+const _couponActionBusy = new Set();
+
+// Re-fetches this customer's coupons and re-renders the coupons container in
+// the (still-open) detail overlay. Also drops the bulk coupons-by-phone cache
+// used by the Coupons filter (see _ensureCouponsLoaded) so a later filter
+// pass reflects the change instead of stale used/active data.
+async function _refreshCustomerCouponsUI(phone) {
+    _couponsByPhone = null;
+    const el = document.getElementById('custCouponsContainer');
+    if (!el) return;
+    const coupons = await _fetchCustomerCoupons(phone);
+    el.innerHTML = _buildCouponsHtml(coupons, phone);
+}
+
+// ── Admin: Mark coupon as used ──────────────────────────────────────────────
+// Manually flips an ACTIVE coupon to USED. Writes ONLY `used` + `usedAt` —
+// usedBillId/usedTable are intentionally left untouched (null), since no real
+// order/bill exists for this action. This is the exact same coupons/{code}
+// doc the POS redemption flow (js/cart.js) and loyalty issuer write to — no
+// second coupon system, no new collection.
+window._custMarkCouponUsed = async function(phone, code, btn) {
+    if (_couponActionBusy.has(code)) return; // duplicate-click guard
+    _couponActionBusy.add(code);
+
+    try {
+        const confirmed = await showConfirm(
+            `Mark coupon ${code} as used? This does not create an order and cannot be undone.`,
+            { title: 'Mark Coupon as Used', type: 'warning', confirmText: 'Mark as Used', danger: false }
+        );
+        if (!confirmed) return;
+
+        if (btn) { btn.disabled = true; btn.textContent = 'Marking…'; }
+        await _waitForAuth();
+
+        // Re-check current state right before writing — guards against the
+        // coupon having been redeemed at POS or already actioned by another
+        // admin session while this confirm dialog was open. A claimed/
+        // available coupon must never be silently flipped to used except by
+        // this explicit admin action or a real POS redemption.
+        const snap = await getDoc(doc(db, 'coupons', code));
+        if (!snap.exists() || snap.data().used) {
+            await showAlert('This coupon is no longer active — it may already be used.', 'info', 'Already Updated');
+            await _refreshCustomerCouponsUI(phone);
+            return;
+        }
+
+        await updateDoc(doc(db, 'coupons', code), {
+            used:   true,
+            usedAt: serverTimestamp(),
+            // usedBillId / usedTable intentionally NOT set — no fake order.
+        });
+
+        await _refreshCustomerCouponsUI(phone);
+    } catch (err) {
+        console.error('[customers] Mark coupon used failed:', err);
+        await showAlert('Failed to mark coupon as used: ' + err.message, 'error', 'Action Failed');
+        if (btn) { btn.disabled = false; btn.textContent = '✅ Mark as Used'; }
+    } finally {
+        _couponActionBusy.delete(code);
+    }
+};
+
+// ── Admin: Delete coupon ────────────────────────────────────────────────────
+// Deletes the coupons/{code} doc after confirmation. Only touches the
+// `coupons` collection — never customers/{phone} or customer_order_history,
+// so orders, lifetime spend, order count, and loyalty progress are untouched.
+window._custDeleteCoupon = async function(phone, code, btn) {
+    if (_couponActionBusy.has(code)) return; // duplicate-click guard
+    _couponActionBusy.add(code);
+
+    try {
+        const confirmed = await showConfirm(
+            `Delete coupon ${code}? This removes it from the customer's coupon records and cannot be undone.`,
+            { title: 'Delete Coupon', type: 'error', confirmText: 'Delete', danger: true }
+        );
+        if (!confirmed) return;
+
+        if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+        await _waitForAuth();
+        await deleteDoc(doc(db, 'coupons', code));
+
+        await _refreshCustomerCouponsUI(phone);
+    } catch (err) {
+        console.error('[customers] Delete coupon failed:', err);
+        await showAlert('Failed to delete coupon: ' + err.message, 'error', 'Action Failed');
+        if (btn) { btn.disabled = false; btn.textContent = '🗑️ Delete'; }
+    } finally {
+        _couponActionBusy.delete(code);
+    }
+};
 
 // Opens the "Send Coupon" form for a customer (amount, code, message).
 window._custOpenCouponForm = function(phone) {
@@ -886,7 +999,7 @@ window._custOpenDetail = async function(phone) {
     // Phase 3 — fetch this customer's coupons (loyalty + personalized)
     _fetchCustomerCoupons(c.id).then(coupons => {
         const el = document.getElementById('custCouponsContainer');
-        if (el) el.innerHTML = _buildCouponsHtml(coupons);
+        if (el) el.innerHTML = _buildCouponsHtml(coupons, c.id);
     });
 };
 
