@@ -15,6 +15,26 @@
 //   - Never reads or writes bills, orders, customers, KOT, or payment state.
 //   - Nothing is recorded, buffered to disk, or sent anywhere — the audio
 //     graph is mic → (optional) gain/limiter → speakers, in memory only.
+//
+// AI UPDATE [2026-09-22] (fix) — Two Android/Bluetooth-specific bugs fixed:
+//   1. `AudioContext.resume()` was being called AFTER awaiting getUserMedia().
+//      On Android, once you `await` (especially while the permission prompt
+//      is up), the browser can stop treating the resume() call as part of
+//      the original tap, and silently blocks audio output. Fix: create the
+//      AudioContext and call resume() SYNCHRONOUSLY inside the pointerdown
+//      handler, before anything is awaited.
+//   2. Requesting `echoCancellation: true` makes Chrome on Android switch
+//      the whole device into "voice call" audio mode (like an actual phone
+//      call) instead of normal media mode. Many Bluetooth speakers (most
+//      budget ones, e.g. boAt) only implement the A2DP MEDIA profile, not
+//      the HFP CALL profile — so when Android tries to route the call-mode
+//      audio to them, they simply get nothing and stay silent, even though
+//      the same speaker plays music/media audio fine. Fix: `echoCancellation`
+//      now defaults to `false` so audio stays on the normal media route that
+//      Bluetooth speakers actually support. `noiseSuppression` and
+//      `autoGainControl` are unaffected by this and are kept on. Trade-off:
+//      slightly less automatic echo suppression if the mic is held very
+//      close to the speaker — keep a little physical distance between them.
 // ─────────────────────────────────────────────────────────────────────────
 
 (function initVoiceAnnounce() {
@@ -105,10 +125,27 @@
         isStarting = true;
         setStatus('Starting…');
 
+        // Create + resume the AudioContext SYNCHRONOUSLY, still inside the
+        // pointerdown call stack, before anything is awaited. If this is
+        // created only after `await getUserMedia(...)` resolves (which can
+        // take a while the first time, while the permission prompt is up),
+        // some Android browsers no longer treat resume() as tied to the
+        // user's tap and silently keep the context — and therefore all
+        // output — suspended. Doing it first fixes that.
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        const ctx = new Ctx({ latencyHint: 'interactive' });
+        ctx.resume().catch(() => {});
+
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
-                    echoCancellation: true,
+                    // NOTE: kept OFF on purpose — see the fix note at the top
+                    // of this file. Requesting echoCancellation makes Android
+                    // switch to voice-call audio mode, which many Bluetooth
+                    // speakers (media/A2DP-only, e.g. most boAt speakers)
+                    // don't support, so the speaker goes silent. Turning it
+                    // off keeps audio on the normal media route.
+                    echoCancellation: false,
                     noiseSuppression: true,
                     autoGainControl: true
                 },
@@ -119,15 +156,12 @@
             // second press slipped through, discard this stream immediately.
             if (!isStarting) {
                 stream.getTracks().forEach((t) => { try { t.stop(); } catch (_) {} });
+                ctx.close().catch(() => {});
                 return;
             }
 
             activeStream = stream;
-
-            // 'interactive' hints the browser to minimize output latency,
-            // which matters for a live push-to-talk relay.
-            const Ctx = window.AudioContext || window.webkitAudioContext;
-            audioCtx = new Ctx({ latencyHint: 'interactive' });
+            audioCtx = ctx;
             if (audioCtx.state === 'suspended') {
                 await audioCtx.resume().catch(() => {});
             }
@@ -170,6 +204,10 @@
             isStarting = false;
             isListening = false;
             teardownAudio();
+            // teardownAudio() only closes `audioCtx` if it was assigned to the
+            // module-level variable (i.e. getUserMedia succeeded first). If
+            // getUserMedia itself failed, close the pre-created context here.
+            if (ctx && ctx.state !== 'closed') { ctx.close().catch(() => {}); }
 
             if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
                 setVisualState('denied');
