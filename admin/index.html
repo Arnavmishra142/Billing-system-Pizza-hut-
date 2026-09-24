@@ -27,6 +27,10 @@
     <header class="topbar">
         <span class="topbar-title">⚙️ Admin</span>
         <div class="topbar-actions">
+            <!-- AI UPDATE [2026-09-23]: Download Report feature. Isolated — only
+                 reads sales_history / daily_expenses / customers. Does not touch
+                 loginBtn/logoutBtn logic. See js/report.js + AI_HANDOFF.md. -->
+            <button class="btn btn-sm btn-report" id="downloadReportBtn" title="Download Report">📥 Report</button>
             <button class="btn btn-sm btn-lock" id="logoutBtn">🔒</button>
         </div>
     </header>
@@ -518,6 +522,57 @@
         </div>
     </div>
 </div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     AI UPDATE [2026-09-23]: DOWNLOAD REPORT FEATURE
+     Modal (date range picker) + off-screen print area used only to
+     render the PDF via html2canvas. Markup only — all logic lives in
+     js/report.js. Does not touch any existing section/modal/id above.
+     ══════════════════════════════════════════════════════════════ -->
+<div id="reportModalOverlay" class="modal-overlay hidden">
+    <div class="modal-box" style="max-width:420px;">
+        <div class="modal-header">
+            <h2>📥 Download Report</h2>
+            <button class="modal-close-x" id="reportModalCloseBtn">✕</button>
+        </div>
+
+        <div class="report-range-options">
+            <button class="filter-pill report-range-btn active" data-range="today">Today</button>
+            <button class="filter-pill report-range-btn" data-range="yesterday">Yesterday</button>
+            <button class="filter-pill report-range-btn" data-range="7days">Last 7 Days</button>
+            <button class="filter-pill report-range-btn" data-range="custom">Custom Dates</button>
+        </div>
+
+        <div id="reportCustomDates" class="form-row hidden" style="margin-top:14px;">
+            <div class="form-group">
+                <label>Start Date</label>
+                <input type="date" id="reportStartDate">
+            </div>
+            <div class="form-group">
+                <label>End Date</label>
+                <input type="date" id="reportEndDate">
+            </div>
+        </div>
+        <p id="reportRangeError" class="report-error hidden">End date can't be before the start date.</p>
+
+        <div id="reportStatusMsg" class="report-status hidden"></div>
+
+        <div class="modal-actions">
+            <button class="btn btn-cancel" id="reportCancelBtn">Cancel</button>
+            <button class="btn btn-primary" id="reportGenerateBtn">Generate PDF</button>
+        </div>
+    </div>
+</div>
+
+<!-- Off-screen report render target for html2canvas. Not display:none (html2canvas
+     can't rasterize that) — pushed off-screen with a fixed A4-ish width instead. -->
+<div id="reportPrintArea"></div>
+
+<!-- Report feature third-party libs — isolated to this feature only. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script type="module" src="../js/report.js?v=1"></script>
 
 <script type="module" src="../js/admin.js?v=23"></script>
 <script type="module" src="../js/customers.js?v=3"></script>
