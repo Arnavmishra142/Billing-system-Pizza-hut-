@@ -1104,3 +1104,80 @@ input:checked + .slider::before { transform: translateX(18px); }
     cursor: grabbing;
 }
 
+
+/* =========================================
+   AI UPDATE [2026-09-23]: DOWNLOAD REPORT FEATURE
+   Isolated block — button, modal range-picker, status text, and the
+   off-screen A4 report used only as a source for html2canvas + jsPDF.
+   Does not modify any rule above this block.
+   ========================================= */
+.btn-report { background: #1f6feb; color: #fff; font-size: 0.85rem; }
+.btn-report:hover { background: #388bfd; }
+.btn-report:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.report-range-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+.report-range-btn { width: 100%; justify-content: center; }
+
+.report-error {
+    color: #f85149;
+    font-size: 0.82rem;
+    margin-top: 8px;
+}
+.report-status {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 0.86rem;
+    text-align: center;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    color: #8b949e;
+}
+.report-status.report-status--error { color: #f85149; border-color: #f85149; }
+.report-status.report-status--success { color: #3fb950; border-color: #3fb950; }
+
+/* Off-screen render target — pushed off-canvas rather than display:none
+   because html2canvas cannot rasterize a display:none subtree. */
+#reportPrintArea {
+    position: fixed;
+    top: 0;
+    left: -99999px;
+    width: 794px; /* ~A4 width at 96dpi */
+    background: #ffffff;
+    color: #111827;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+.rpt-page { padding: 36px 40px; }
+.rpt-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #da3633; padding-bottom: 16px; margin-bottom: 20px; }
+.rpt-header h1 { font-size: 1.5rem; color: #111827; margin: 0 0 4px; }
+.rpt-header .rpt-sub { color: #6b7280; font-size: 0.85rem; }
+.rpt-header .rpt-period { text-align: right; font-size: 0.85rem; color: #374151; }
+.rpt-header .rpt-period strong { display: block; font-size: 1rem; color: #111827; }
+
+.rpt-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+.rpt-card { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px; }
+.rpt-card .rpt-card-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px; color: #6b7280; font-weight: 700; }
+.rpt-card .rpt-card-value { font-size: 1.25rem; font-weight: 800; color: #111827; margin-top: 4px; }
+.rpt-card.rpt-card--net .rpt-card-value { color: #15803d; }
+.rpt-card.rpt-card--net.rpt-card--negative .rpt-card-value { color: #b91c1c; }
+
+.rpt-section-title { font-size: 1rem; font-weight: 800; color: #111827; margin: 22px 0 10px; padding-bottom: 6px; border-bottom: 1px solid #e5e7eb; }
+
+.rpt-chart-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; margin-bottom: 18px; }
+.rpt-chart-box canvas { width: 100% !important; }
+
+.rpt-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 6px; }
+.rpt-table th { text-align: left; background: #f3f4f6; padding: 8px 10px; font-size: 0.72rem; text-transform: uppercase; color: #6b7280; }
+.rpt-table td { padding: 7px 10px; border-bottom: 1px solid #f0f1f3; color: #1f2937; }
+.rpt-table tr:last-child td { border-bottom: none; }
+.rpt-table td.rpt-num, .rpt-table th.rpt-num { text-align: right; }
+
+.rpt-footer { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 0.72rem; color: #9ca3af; text-align: center; }
+
+@media (max-width: 480px) {
+    .report-range-options { grid-template-columns: 1fr 1fr; }
+}
