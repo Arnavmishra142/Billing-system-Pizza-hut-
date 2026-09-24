@@ -503,7 +503,14 @@ async function handleGenerate() {
         setStatus('Report downloaded successfully.', 'success');
     } catch (err) {
         console.error('[Report] generation failed:', err);
-        setStatus('Unable to generate report. Please try again.', 'error');
+        // AI UPDATE [2026-09-24]: surface the real error text in the modal itself
+        // (not just console.error) — most people testing this on a phone have no
+        // easy way to open devtools, so a silent generic message makes the actual
+        // cause (permission-denied, missing index, blocked CDN script, etc.)
+        // impossible to diagnose. Still falls back to a friendly line if the
+        // error has no message.
+        const detail = (err && err.message) ? err.message : 'Please try again.';
+        setStatus(`Unable to generate report: ${detail}`, 'error');
     } finally {
         _generating = false;
         genBtn.disabled = false;
