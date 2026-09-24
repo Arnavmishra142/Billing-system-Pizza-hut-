@@ -1181,3 +1181,41 @@ input:checked + .slider::before { transform: translateX(18px); }
 @media (max-width: 480px) {
     .report-range-options { grid-template-columns: 1fr 1fr; }
 }
+
+/* =========================================
+   SEASONAL EFFECTS (Effects tab) — AI UPDATE [2026-09-24]
+   Rendered by js/effects-admin.js. Reuses section-action-bar / section-page-title.
+   ========================================= */
+.fx-intro { color: #8b949e; font-size: 0.85rem; line-height: 1.5; margin: -6px 0 16px; }
+.fx-list { display: flex; flex-direction: column; gap: 10px; }
+.fx-card {
+    display: flex; align-items: center; gap: 14px;
+    background: #161b22; border: 1px solid #30363d; border-radius: 16px;
+    padding: 14px 16px; transition: border-color .2s, box-shadow .2s;
+}
+.fx-card.fx-on { border-color: #d29922; box-shadow: 0 0 0 1px rgba(210,153,34,.25), 0 6px 18px rgba(0,0,0,.35); }
+.fx-icon { font-size: 1.7rem; line-height: 1; flex-shrink: 0; }
+.fx-info { flex: 1; min-width: 0; }
+.fx-name { font-weight: 800; font-size: 1rem; color: #e6edf3; }
+.fx-desc { font-size: 0.78rem; color: #8b949e; margin-top: 2px; line-height: 1.35; }
+.fx-state { font-size: 0.72rem; font-weight: 800; letter-spacing: .6px; color: #8b949e; }
+.fx-on .fx-state { color: #e3b341; }
+.fx-switch {
+    position: relative; width: 50px; height: 28px; flex-shrink: 0;
+    border-radius: 14px; border: none; background: #30363d; cursor: pointer;
+    transition: background .2s;
+}
+.fx-switch.on { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.fx-switch:disabled { opacity: .5; cursor: default; }
+.fx-knob {
+    position: absolute; top: 3px; left: 3px; width: 22px; height: 22px;
+    border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4);
+    transition: transform .2s;
+}
+.fx-switch.on .fx-knob { transform: translateX(22px); }
+.fx-soon { opacity: .55; }
+.fx-soon .fx-icon { filter: grayscale(.6); }
+.fx-badge {
+    font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;
+    color: #8b949e; border: 1px dashed #484f58; border-radius: 999px; padding: 4px 10px; white-space: nowrap;
+}
