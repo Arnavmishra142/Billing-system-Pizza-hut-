@@ -304,6 +304,18 @@ Read by the Customer Panel (`js/restaurant-status.js` via `onSnapshot`).
 When this document does not yet exist, the default is **ON** (backward compatible).
 **Do NOT store menu-item availability in this document.** This is global restaurant status only.
 
+#### `settings/seasonal_effects` — Seasonal Effects switches (added 2026-09-24)
+```
+{
+  effects: { rain: boolean, /* future: christmas, diwali, newyear, holi, valentine */ },
+  updatedAt: number
+}
+```
+Written by the Billing/Admin Panel (`js/effects-admin.js`, "✨ Effects" tab, `setDoc(..., {merge:true})`).
+Read by the Customer Panel (`js/effects/seasonal-effects-manager.js` via `onSnapshot`).
+Missing doc / missing key = effect **OFF**. Rules: covered by the existing `settings/{docId}` rule (public read, operator write).
+**Do NOT store anything except effect on/off flags here.**
+
 #### `settings/system` — Global notification setting (added 2026-08-01)
 ```
 {
@@ -640,6 +652,8 @@ Every future AI agent working on this repository MUST follow all of these rules:
 14. **The `syncCustomerOrderCompletion()` function must remain fire-and-forget.** The billing operator must never wait on Customer Panel sync. If the sync fails, billing must still succeed.
 
 15. **Auth bootstrapping is mandatory.** Any new module that reads from or writes to Firestore must call `signInAnonymously()` at module top-level and gate all Firestore operations behind `onAuthStateChanged`.
+
+16. **Seasonal Effects are registry-driven (added 2026-09-24).** Every seasonal effect is a self-contained module exposing `{ start(), stop() }` that is registered in `SeasonalEffectsManager`'s `REGISTRY` (Customer Panel `js/effects/seasonal-effects-manager.js`) and listed in `EFFECTS` in the Admin `js/effects-admin.js`. Never hard-code an effect into the Customer Panel's app/menu/cart code. Effect layers must be `pointer-events:none`, sit behind the UI (`z-index:-1`), use canvas/CSS (no per-particle DOM), honour `prefers-reduced-motion`, pause when the tab is hidden, and fully release rAF/timers/listeners/DOM in `stop()`. The Firestore contract is `settings/seasonal_effects.effects.<key>` (boolean); keys must match between Admin and Customer Panel.
 
 ---
 
