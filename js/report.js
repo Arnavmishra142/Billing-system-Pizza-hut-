@@ -67,9 +67,18 @@ const BUSINESS_NAME = 'New Pizza Hut & Live Cake';
 // report.js now loads its own dependencies on demand and only proceeds once
 // they're confirmed present.
 const CDN_URLS = {
-    Chart: 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js',
-    html2canvas: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
-    jspdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+    Chart: [
+        'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js',
+        'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js'
+    ],
+    html2canvas: [
+        'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+        'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'
+    ],
+    jspdf: [
+        'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+        'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'
+    ]
 };
 
 function loadScriptOnce(url) {
@@ -106,11 +115,29 @@ function withTimeout(promise, ms, label) {
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+// Tries each candidate URL for a library in order until one loads. This
+// protects against a single CDN (e.g. cdnjs) being blocked by a network
+// filter or ad-blocker on the viewer's device — a different provider
+// (jsdelivr) is tried next rather than failing outright.
+async function loadFirstWorkingScript(urls, label) {
+    let lastErr;
+    for (const url of urls) {
+        try {
+            await withTimeout(loadScriptOnce(url), 10000, `${label} from ${new URL(url).hostname}`);
+            return;
+        } catch (err) {
+            lastErr = err;
+            console.warn(`[Report] ${label} failed from ${url}:`, err.message);
+        }
+    }
+    throw new Error(`${label}: all sources failed (${lastErr ? lastErr.message : 'unknown error'})`);
+}
+
 async function ensureReportLibsLoaded() {
     const tasks = [];
-    if (typeof window.Chart === 'undefined') tasks.push(withTimeout(loadScriptOnce(CDN_URLS.Chart), 15000, 'Chart.js to load'));
-    if (typeof window.html2canvas === 'undefined') tasks.push(withTimeout(loadScriptOnce(CDN_URLS.html2canvas), 15000, 'html2canvas to load'));
-    if (typeof window.jspdf === 'undefined') tasks.push(withTimeout(loadScriptOnce(CDN_URLS.jspdf), 15000, 'jsPDF to load'));
+    if (typeof window.Chart === 'undefined') tasks.push(loadFirstWorkingScript(CDN_URLS.Chart, 'Chart.js'));
+    if (typeof window.html2canvas === 'undefined') tasks.push(loadFirstWorkingScript(CDN_URLS.html2canvas, 'html2canvas'));
+    if (typeof window.jspdf === 'undefined') tasks.push(loadFirstWorkingScript(CDN_URLS.jspdf, 'jsPDF'));
     if (tasks.length) await Promise.all(tasks);
 
     // Final check — surface a clear, specific error rather than a bare
