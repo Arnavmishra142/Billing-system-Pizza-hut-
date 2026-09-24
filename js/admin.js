@@ -13,6 +13,8 @@ import { uploadMenuImage, deleteMenuImage, extractCloudinaryPublicId } from './c
 import { initAdminMenu, destroyAdminMenu } from './admin-menu.js';
 // AI UPDATE [2026-09-15]: New Staff Management admin module (Staff tab).
 import { initStaffManagement } from './staff-admin.js';
+// AI UPDATE [2026-09-24]: Seasonal Effects admin module (Effects tab).
+import { initEffectsAdmin } from './effects-admin.js';
 import {
     collection, getDocs, doc, deleteDoc, addDoc, updateDoc,
     getDocsFromCache, getDocsFromServer, enableNetwork, onSnapshot,
@@ -152,6 +154,8 @@ window.switchTab = function(tabName, navBtn) {
     // AI UPDATE [2026-09-15]: Staff Management tab — always re-fetches the
     // staff list on open (small dataset), same as the Sales tab above.
     if (tabName === 'staff') initStaffManagement();
+    // AI UPDATE [2026-09-24]: Effects tab — realtime listener on settings/seasonal_effects.
+    if (tabName === 'effects') initEffectsAdmin();
 };
 
 // ==========================================
