@@ -231,6 +231,13 @@
             <div id="staffCardGrid"></div>
         </div><!-- /staffSection -->
 
+        <!-- ══ EFFECTS SECTION ══ -->
+        <!-- AI UPDATE [2026-09-24]: NEW — Seasonal Effects. Rendered by js/effects-admin.js
+             into #effectsCardGrid. Writes settings/seasonal_effects (read by Customer Panel). -->
+        <div id="effectsSection" class="section">
+            <div id="effectsCardGrid"></div>
+        </div><!-- /effectsSection -->
+
     </main>
 
     <!-- BOTTOM NAV -->
@@ -256,6 +263,11 @@
         <button class="bnav-btn" id="bnav-staff" onclick="switchTab('staff', this)">
             <span class="bnav-icon">🧑‍🍳</span>
             <span class="bnav-label">Staff</span>
+        </button>
+        <!-- AI UPDATE [2026-09-24]: Added Effects tab (Seasonal Effects) -->
+        <button class="bnav-btn" id="bnav-effects" onclick="switchTab('effects', this)">
+            <span class="bnav-icon">✨</span>
+            <span class="bnav-label">Effects</span>
         </button>
     </nav>
 
@@ -574,7 +586,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 <script type="module" src="../js/report.js?v=1"></script>
 
-<script type="module" src="../js/admin.js?v=23"></script>
+<script type="module" src="../js/admin.js?v=24"></script>
 <script type="module" src="../js/customers.js?v=3"></script>
 <!-- AI UPDATE [2026-09-16]: Edit History feature (Sales tab bill card button). -->
 <script type="module" src="../js/order-edit.js"></script>

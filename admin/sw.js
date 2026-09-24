@@ -30,7 +30,9 @@
 // but, per the note above, are not in PRECACHE — the version bump still
 // invalidates any previously-cached copy of them via the network-first
 // fetch handler below.
-const CACHE = 'admin-pos-v13';
+// AI UPDATE [2026-09-24]: v13→v14 — bust cached admin/index.html, js/admin.js, css/admin.css
+// after adding the Effects tab (js/effects-admin.js is network-first, not precached).
+const CACHE = 'admin-pos-v14';
 const PRECACHE = [
     '/admin/index.html',
     '/css/admin.css',
