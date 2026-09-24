@@ -6904,3 +6904,91 @@ daily-record data (aggregates from `dailyRecords` will read as empty, not
 error out loud everywhere — only the chat's own diagnostic bubble shows it).
 
 Files changed: `firestore.rules` only.
+
+---
+
+## AI UPDATE [2026-09-23]: Download Report feature (Admin dashboard)
+
+**Summary:** Added a "📥 Report" button next to the existing 🔒 lock button in
+the Admin top bar. Opens a small modal to pick a date range (Today /
+Yesterday / Last 7 Days / Custom Dates) and generates a professional
+multi-page A4 PDF business report, downloaded automatically.
+
+**Why Recharts wasn't used:** The original spec assumed a Next.js/React app.
+This project is a static vanilla-JS site (plain HTML + `<script type="module">`
+ES modules, no React, no bundler — see `js/firebase-config.js` and the
+`<script type="module">` tags at the bottom of `admin/index.html`). Recharts
+requires React. Chart.js (loaded via CDN `<script>` tag, no React needed) was
+used instead — it draws straight onto a `<canvas>`, which `html2canvas`
+captures the same way it would capture an SVG chart.
+
+**Date range / IST logic:** `js/report.js` computes business-day boundaries
+in Asia/Kolkata (fixed UTC+5:30, no DST) purely with `Intl.DateTimeFormat`
+and manual ms math — no date library needed.
+- Today: 00:00 IST → now
+- Yesterday: 00:00 IST → 23:59:59.999 IST
+- Last 7 Days: (today − 6 days) 00:00 IST → now
+- Custom: start date 00:00 IST → end date 23:59:59.999 IST
+- The UI disables/blocks Generate if the custom end date is before the start
+  date.
+
+**Firestore data sources (read-only, no new collections, no writes):**
+- `sales_history` — `timestamp` (ISO string, UTC), `total`, `table`,
+  `items[]`, `couponDiscount`, `customDiscount`, `subtotal`. Every doc here
+  is already a completed/settled sale (it's only written from Bill & Settle
+  in `js/cart.js`), so there's no separate status field to filter on — this
+  matches "only count valid/completed orders" without inventing a status
+  field that doesn't exist in the schema.
+- `daily_expenses` — `timestamp` (ISO string, UTC), `amount`, `note`.
+- `customers` — `createdAt` (Firestore `Timestamp`), used only to count new
+  customers in the range.
+- Because `sales_history`/`daily_expenses` timestamps are ISO-8601 UTC
+  strings, they sort correctly with plain string `>=`/`<=` comparisons, so
+  `js/report.js` runs a server-side Firestore range query on `timestamp`
+  (and on `createdAt` for `customers`) instead of downloading the whole
+  collection. No new Firestore index was required (single-field range
+  queries don't need a composite index).
+- No payment-method breakdown is shown — there is no payment-method field
+  anywhere in this schema (confirmed by inspection), so that section was
+  deliberately omitted rather than invented.
+
+**Report content:** Total Sales, Total Orders, Total Expenses, Net Amount
+(Sales − Expenses), New Customers, Total Discounts, a Sales-vs-Expenses
+chart, an Orders trend chart, a Top-Selling-Items chart (when item data
+exists), a Table/Parcel/Quick-Sale breakdown table, and an item breakdown
+table. All numbers come from the exact same fields/rules as the existing
+Sales tab in `js/admin.js` (`loadSalesData()` — same `table === 'Direct
+Entry'` ⇒ Quick Sale convention, same item-qty/revenue rollup).
+
+**PDF generation flow:** `js/report.js` renders the report into an
+off-screen `#reportPrintArea` div (pushed off-canvas with `left:-99999px`,
+not `display:none`, since `html2canvas` cannot rasterize a hidden subtree),
+draws the Chart.js charts with `animation:false`, waits a couple of animation
+frames for layout to settle, then:
+`html2canvas(printArea) → canvas.toDataURL('image/png') → jsPDF.addImage()`,
+slicing the canvas into additional A4 pages if the content is taller than
+one page. Filename: `Business-Report-YYYY-MM-DD.pdf` for a single day, or
+`Business-Report-YYYY-MM-DD-to-YYYY-MM-DD.pdf` for a range.
+
+**Loading/error states:** "Preparing report..." while fetching/rendering,
+"Report downloaded successfully." on success, "Unable to generate report.
+Please try again." on any failure (network, empty canvas, missing CDN
+libs). A `_generating` flag blocks concurrent report requests and the modal
+can't be closed mid-generation.
+
+**Files changed:**
+
+| File | Change |
+|---|---|
+| `admin/index.html` | Added "📥 Report" button beside the lock button (lock button/logic untouched); added the date-range modal markup; added off-screen `#reportPrintArea`; added CDN `<script>` tags for html2canvas, jsPDF, Chart.js; added `<script type="module" src="../js/report.js">`. |
+| `css/admin.css` | Appended a new isolated block of rules for `.btn-report`, `.report-*` (modal/status), and `.rpt-*` (the printable A4 report layout). No existing rules were modified. |
+| `js/report.js` | **New file.** All Download Report logic: IST date math, Firestore reads, aggregation, report HTML render, Chart.js charts, html2canvas/jsPDF export, and the modal's event wiring. |
+
+**Not touched (per architecture rule):** POS billing, KOT, Incoming Orders,
+Coupons, Staff Management, customer ordering flow, Admin PIN/auth, or any
+existing dashboard calculation code in `js/admin.js`/`js/cart.js`/
+`js/expense.js`/`js/customers.js`.
+
+**Known limitation:** If a business day has zero sales/expenses, the report
+still generates and simply shows ₹0 / 0 for that period — this is expected,
+not a bug.
