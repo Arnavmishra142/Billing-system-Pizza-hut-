@@ -1,6 +1,60 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-22 (fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+> Last updated: 2026-09-24 (Seasonal Effects: Admin ✨ Effects tab + Rainy Days; earlier: 2026-09-22 fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+
+---
+
+## [AI UPDATE 2026-09-24] — Seasonal Effects system + 🌧️ Rainy Days
+
+### What was added
+Admin bottom nav now has **✨ Effects** (after Staff). It lists 🌧️ Rainy Days (ON/OFF switch, functional) and
+🎄 Christmas / 🪔 Diwali / 🎆 New Year / 🎨 Holi / ❤️ Valentine's Day as disabled "Coming Soon" cards.
+Turning Rainy Days ON shows a subtle rain atmosphere on the **Customer Panel**, live (no refresh).
+
+### Architecture
+```
+Admin  js/effects-admin.js ──setDoc merge──►  Firestore settings/seasonal_effects { effects:{ rain:true }, updatedAt }
+                                                        │ onSnapshot
+Customer Panel  js/effects/seasonal-effects-manager.js ◄┘
+   SeasonalEffectsManager (REGISTRY: key → factory)
+        └─ rain → js/effects/rain-effect.js  createRainEffect() → { start(), stop() }
+        └─ (future) christmas / diwali / newyear / holi
+```
+- **Config source:** existing shared Firebase project (`js/firebase-config.js` `db` on both sides). No new Firebase config,
+  no rules change (`settings/{docId}`: public read, operator write). Missing doc/key ⇒ OFF.
+- **Rain implementation:** one fixed host div (`z-index:-1; pointer-events:none`) containing a CSS haze + two drifting cloud
+  banks (GPU transforms), ONE canvas with 3 rain layers (far/mid/near, typed arrays, one path+stroke per layer, ~40fps cap,
+  DPR capped 1.5, drop counts scale with viewport), and a rare (14–38 s) ultra-faint lightning glow via Web Animations API.
+  Pauses when the tab is hidden; `prefers-reduced-motion` ⇒ haze only (no rain, no lightning), reacts live to changes;
+  `stop()` fades out and releases rAF, timers, listeners, animation and DOM.
+
+### Files changed (Billing/Admin repo — this repo)
+| File | Change |
+|---|---|
+| `js/effects-admin.js` | NEW — Effects tab UI, realtime listener, optimistic toggle with rollback |
+| `admin/index.html` | `#effectsSection` + `✨ Effects` nav button; `admin.js?v=23→24` |
+| `js/admin.js` | import `initEffectsAdmin`; `switchTab('effects')` hook (2 small additions) |
+| `css/admin.css` | appended `.fx-*` styles (matching dark theme, amber accent) |
+| `admin/sw.js` | `admin-pos-v13 → v14` |
+| `order-panel-updates/js/effects/seasonal-effects-manager.js` | NEW staging file for Customer Panel |
+| `order-panel-updates/js/effects/rain-effect.js` | NEW staging file for Customer Panel |
+
+Billing, Orders, KOT, Customers, Coupons, Staff, Login, QR/table detection were **not** touched.
+
+### ⚠️ Customer Panel Integration Status — REQUIRED in `teamdovolve-hue/Order-` (not yet applied)
+1. Copy `order-panel-updates/js/effects/` → `js/effects/` in the Customer Panel repo (imports `../firebase-config.js`, which already exports `db`).
+2. In Customer Panel `app.js`, once at startup: `import { initSeasonalEffects } from "./effects/seasonal-effects-manager.js"; initSeasonalEffects();`
+3. **Background requirement:** the effect sits at `z-index:-1`, so it is visible only where the page's own backgrounds are
+   transparent. Keep the colour on `html`/`body` (or make the main wrapper backgrounds transparent / semi-transparent). If
+   the panel paints an opaque background on `#appRoot`/wrappers, the rain will be hidden — change that background to
+   `transparent` (or `rgba`). Also make sure `body`/`html` do not create their own stacking context with an opaque bg
+   (`isolation`, `transform`, `z-index` on body). Cards/modals keep their own backgrounds, so readability is unaffected.
+4. Add the file paths to the Customer Panel service worker precache only if it uses one (network-first is fine).
+I could not run the Customer Panel (separate repo), so step 3 is the one thing to eyeball first after deploying.
+
+### How to add a future effect
+See header of `seasonal-effects-manager.js`: (1) new `js/effects/<name>-effect.js` exporting a factory → `{start(), stop()}`;
+(2) add to `REGISTRY`; (3) flip `soon:true → false` for its entry in `EFFECTS` in `js/effects-admin.js` (same `key`).
 
 ---
 
