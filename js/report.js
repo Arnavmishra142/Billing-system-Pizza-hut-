@@ -56,6 +56,60 @@ const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000; // Asia/Kolkata is fixed UTC+5:
 const BUSINESS_NAME = 'New Pizza Hut & Live Cake';
 
 // --------------------------------------------------------------------------
+// AI UPDATE [2026-09-24]: SELF-LOADING DEPENDENCIES
+// --------------------------------------------------------------------------
+// Root cause of "Chart is not defined": the CDN <script> tags for Chart.js /
+// html2canvas / jsPDF live in admin/index.html, not in this file. If the
+// deployed admin/index.html doesn't have those three <script> tags (e.g. only
+// this file got redeployed, or a different copy of admin/index.html is live),
+// window.Chart never exists and the bare `Chart` reference throws a
+// ReferenceError. To make this feature work regardless of what's in the HTML,
+// report.js now loads its own dependencies on demand and only proceeds once
+// they're confirmed present.
+const CDN_URLS = {
+    Chart: 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js',
+    html2canvas: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+    jspdf: 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'
+};
+
+function loadScriptOnce(url) {
+    return new Promise((resolve, reject) => {
+        // Already present (e.g. admin/index.html already loaded it) — skip.
+        const existing = document.querySelector(`script[src="${url}"]`);
+        if (existing) {
+            if (existing.dataset.loaded === 'true') return resolve();
+            existing.addEventListener('load', () => resolve());
+            existing.addEventListener('error', () => reject(new Error(`Failed to load ${url}`)));
+            return;
+        }
+        const s = document.createElement('script');
+        s.src = url;
+        s.async = false; // preserve execution order relative to other calls
+        s.onload = () => { s.dataset.loaded = 'true'; resolve(); };
+        s.onerror = () => reject(new Error(`Failed to load ${url} (blocked by network/ad-blocker?)`));
+        document.head.appendChild(s);
+    });
+}
+
+async function ensureReportLibsLoaded() {
+    const tasks = [];
+    if (typeof window.Chart === 'undefined') tasks.push(loadScriptOnce(CDN_URLS.Chart));
+    if (typeof window.html2canvas === 'undefined') tasks.push(loadScriptOnce(CDN_URLS.html2canvas));
+    if (typeof window.jspdf === 'undefined') tasks.push(loadScriptOnce(CDN_URLS.jspdf));
+    if (tasks.length) await Promise.all(tasks);
+
+    // Final check — surface a clear, specific error rather than a bare
+    // "Chart is not defined" ReferenceError further down the pipeline.
+    const missing = [];
+    if (typeof window.Chart === 'undefined') missing.push('Chart.js');
+    if (typeof window.html2canvas === 'undefined') missing.push('html2canvas');
+    if (typeof window.jspdf === 'undefined') missing.push('jsPDF');
+    if (missing.length) {
+        throw new Error(`Could not load: ${missing.join(', ')}. Check your internet connection or ad-blocker.`);
+    }
+}
+
+// --------------------------------------------------------------------------
 // IST DATE HELPERS
 // --------------------------------------------------------------------------
 
@@ -486,6 +540,8 @@ async function handleGenerate() {
     const printArea = document.getElementById('reportPrintArea');
 
     try {
+        await ensureReportLibsLoaded();
+
         const range = resolveRange(_selectedRange, customStart, customEnd);
         const { sales, expenses, newCustomers } = await fetchRangeData(range.startMs, range.endMs);
         const data = buildReportData(sales, expenses, newCustomers, range);
