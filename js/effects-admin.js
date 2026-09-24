@@ -25,6 +25,7 @@ import { onAuthStateChanged }
 
 const EFFECTS = [
     { key: 'rain',      icon: '🌧️', name: 'Rainy Days',     desc: 'Soft animated rain and moody sky on the customer app.', soon: false },
+    { key: 'rainSound', icon: '🔊', name: 'Rain Sound',     desc: 'Optional soft rain + distant thunder. Customers see a small 🔊 button and choose to turn it on (off by default). Works only when Rainy Days is ON.', soon: false },
     { key: 'christmas', icon: '🎄', name: 'Christmas',      soon: true },
     { key: 'diwali',    icon: '🪔', name: 'Diwali',         soon: true },
     { key: 'newyear',   icon: '🎆', name: 'New Year',       soon: true },
