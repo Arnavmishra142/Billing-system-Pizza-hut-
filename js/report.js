@@ -91,11 +91,26 @@ function loadScriptOnce(url) {
     });
 }
 
+// AI UPDATE [2026-09-24]: HANG PROTECTION
+// A silently-stuck "Preparing report..." (no error, no success) means some
+// async step neither resolved nor rejected — e.g. a script tag whose request
+// was silently dropped (some ad-blockers/proxies never fire error or load),
+// or a Firestore call stalled on a bad connection. Every awaited step below
+// is now wrapped with a hard timeout so the UI always ends in success or a
+// specific, actionable error instead of hanging forever.
+function withTimeout(promise, ms, label) {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Timed out waiting for: ${label}`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function ensureReportLibsLoaded() {
     const tasks = [];
-    if (typeof window.Chart === 'undefined') tasks.push(loadScriptOnce(CDN_URLS.Chart));
-    if (typeof window.html2canvas === 'undefined') tasks.push(loadScriptOnce(CDN_URLS.html2canvas));
-    if (typeof window.jspdf === 'undefined') tasks.push(loadScriptOnce(CDN_URLS.jspdf));
+    if (typeof window.Chart === 'undefined') tasks.push(withTimeout(loadScriptOnce(CDN_URLS.Chart), 15000, 'Chart.js to load'));
+    if (typeof window.html2canvas === 'undefined') tasks.push(withTimeout(loadScriptOnce(CDN_URLS.html2canvas), 15000, 'html2canvas to load'));
+    if (typeof window.jspdf === 'undefined') tasks.push(withTimeout(loadScriptOnce(CDN_URLS.jspdf), 15000, 'jsPDF to load'));
     if (tasks.length) await Promise.all(tasks);
 
     // Final check — surface a clear, specific error rather than a bare
@@ -195,9 +210,11 @@ async function fetchRangeData(startMs, endMs) {
         where('createdAt', '<=', endTs)
     );
 
-    const [salesSnap, expSnap, custSnap] = await Promise.all([
-        getDocs(salesQ), getDocs(expQ), getDocs(custQ)
-    ]);
+    const [salesSnap, expSnap, custSnap] = await withTimeout(
+        Promise.all([getDocs(salesQ), getDocs(expQ), getDocs(custQ)]),
+        20000,
+        'Firestore data (sales/expenses/customers)'
+    );
 
     const sales = [];
     salesSnap.forEach(d => sales.push({ ...d.data(), id: d.id }));
@@ -448,7 +465,11 @@ async function buildPdf(range) {
     const libsLoaded = window.html2canvas && window.jspdf;
     if (!libsLoaded) throw new Error('PDF libraries failed to load. Check your connection.');
 
-    const canvas = await html2canvas(printArea, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+    const canvas = await withTimeout(
+        html2canvas(printArea, { scale: 2, useCORS: true, backgroundColor: '#ffffff' }),
+        30000,
+        'rendering the report to an image'
+    );
     if (!canvas || canvas.width === 0 || canvas.height === 0) {
         throw new Error('Report render was empty.');
     }
@@ -540,12 +561,15 @@ async function handleGenerate() {
     const printArea = document.getElementById('reportPrintArea');
 
     try {
+        setStatus('Preparing report... (loading libraries)', null);
         await ensureReportLibsLoaded();
 
+        setStatus('Preparing report... (fetching data)', null);
         const range = resolveRange(_selectedRange, customStart, customEnd);
         const { sales, expenses, newCustomers } = await fetchRangeData(range.startMs, range.endMs);
         const data = buildReportData(sales, expenses, newCustomers, range);
 
+        setStatus('Preparing report... (drawing charts)', null);
         destroyCharts();
         printArea.innerHTML = renderReportHTML(data, range);
 
@@ -554,6 +578,7 @@ async function handleGenerate() {
         drawCharts(data);
         await waitFrames(3); // charts are drawn with animation:false, but give layout a moment to settle
 
+        setStatus('Preparing report... (building PDF)', null);
         await buildPdf(range);
 
         setStatus('Report downloaded successfully.', 'success');
