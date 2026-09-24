@@ -4,6 +4,13 @@
 
 ---
 
+## [AI UPDATE 2026-09-24] — 🔊 Rain Sound switch (Effects tab)
+
+`js/effects-admin.js`: new EFFECTS row `rainSound` ("Rain Sound"), stored as `settings/seasonal_effects.effects.rainSound` (same doc, same merge-write; missing = OFF).
+Customer Panel shows a small opt-in 🔊 button only when `rain` AND `rainSound` are ON. Sound is synthesized (Web Audio) — no files, no rules change.
+
+---
+
 ## [AI UPDATE 2026-09-24] — Seasonal Effects system + 🌧️ Rainy Days
 
 ### What was added
