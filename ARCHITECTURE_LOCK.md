@@ -700,3 +700,38 @@ This document is the **permanent source of truth** for all future AI agents.
 **The test:** If a change risks breaking compatibility with the Customer Panel at `https://github.com/teamdovolve-hue/Order-`, document it first. Implement only after explicit user approval.
 
 **When in doubt:** Preserve the existing implementation and ask the user.
+
+---
+
+## 11. Download Report feature — architectural rule (added 2026-09-23)
+
+The Admin "📥 Download Report" feature (`js/report.js`, plus markup in
+`admin/index.html` and styles in `css/admin.css`) is a **read-only, isolated
+reporting layer**. Future agents must preserve these rules:
+
+1. **No second source of truth.** The report must always read directly from
+   `sales_history`, `daily_expenses`, and `customers` using the same field
+   names and the same business rules already used by the Admin dashboard
+   (`table === 'Direct Entry'` ⇒ Quick Sale, `table` containing `"Parcel"` ⇒
+   parcel order, everything else ⇒ dine-in table). Do not duplicate revenue
+   math into a separate calculation path — if the dashboard's calculation
+   logic changes, `js/report.js` must be updated to match, not left to drift.
+2. **Read-only.** This feature must never write to Firestore. It only calls
+   `getDocs`/`query`/`where` against existing collections.
+3. **IST is the business-day boundary**, not UTC midnight and not the
+   browser's local timezone. Any future date-range logic added to this
+   feature must go through the same `Asia/Kolkata` (fixed UTC+5:30, no DST)
+   boundary helpers in `js/report.js`, not `new Date().setHours(0,0,0,0)` or
+   similar local/UTC shortcuts.
+4. **No invented metrics.** Do not add a payment-method breakdown or any
+   other metric unless a corresponding field actually exists in Firestore —
+   confirm by inspecting real documents first.
+5. **Isolation.** This feature must not import from or alter POS billing,
+   KOT, Incoming Orders, Coupons, Staff Management, customer ordering flow,
+   or the existing Admin PIN/auth flow. It also must not remove or rename
+   the existing `logoutBtn`/lock button behavior.
+6. **No React/bundler dependency.** This project is a static vanilla-JS site
+   with no build step. Any UI library added for this feature (charts, PDF,
+   etc.) must work as a plain `<script>` CDN include with no React runtime —
+   do not introduce Recharts, a JSX build step, or npm bundling as a
+   prerequisite for this feature.
