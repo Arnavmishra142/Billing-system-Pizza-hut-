@@ -7053,3 +7053,47 @@ existing dashboard calculation code in `js/admin.js`/`js/cart.js`/
 **Known limitation:** If a business day has zero sales/expenses, the report
 still generates and simply shows ₹0 / 0 for that period — this is expected,
 not a bug.
+
+## Weather + Manual Effect Engine — Admin side [AI UPDATE 2026-09-24]
+
+Upgraded the "✨ Effects" tab from a flat list of on/off effect toggles into
+the Admin controls for the Customer Panel's new Weather + Manual Effect
+engine (full architecture documented in the Customer Panel repo's
+`AI_HANDOFF.md`, section "Weather + Manual Effect Engine").
+
+**Files changed:**
+
+| File | Change |
+|---|---|
+| `js/effects-admin.js` | Rewritten. Renders: (1) a master "All Effects" ON/OFF switch, (2) an "Automatic Weather Effects" switch (disabled when All Effects is OFF), (3) a Restaurant Location lat/lon input used for the weather lookup, (4) a "Weather Effects" list (Sunny, Cloudy, Rain/Thunderstorm, Snow, Mist/Fog/Haze) each showing an `AUTO`/`OFF`/`ON (forced)` status badge and a switch to force that one effect on regardless of weather, (5) the existing Rain Sound toggle, (6) the existing "Festival / Seasonal Effects" list (still all `Coming Soon`) with the same forced-effect switch mechanism. |
+| `css/admin.css` | Appended `.fx-master`, `.fx-master-row`, `.fx-section-title`, `.fx-subintro`, `.fx-location*` rules. No existing `.fx-*` rules were modified — the original card/switch styling is reused as-is for the effect rows. |
+
+**Firestore (no rules change — both docs match the existing
+`match /settings/{docId}` rule):**
+- `settings/seasonal_effects` — added `effectsEnabled` (master switch),
+  `automaticWeatherEnabled`, and `manualEffectId` fields alongside the
+  existing `effects.rainSound` field. The old `effects.rain` boolean is no
+  longer written by the Admin panel (Rain is now selected the same way as
+  every other effect: automatically by weather, or forced via
+  `manualEffectId: "rain"`).
+- `settings/restaurant_location` (new doc) — `{ lat, lon, updatedAt }`, saved
+  from the new Location fields.
+
+**Only one manual effect can be forced at a time** — clicking a row's switch
+sets `manualEffectId` to that key and implicitly un-forces whatever was
+forced before (this is enforced by `manualEffectId` being a single string
+field, not a per-effect boolean map — see the resolver priority rule in the
+Customer Panel's `ARCHITECTURE_LOCK.md`).
+
+**Not touched:** POS billing, KOT, Incoming Orders, Coupons, Staff
+Management, Admin PIN/auth, or any other admin tab.
+
+**Customer Panel changes required:** Yes — this is a companion change to the
+Customer Panel's new `js/effects/` Weather + Effect engine and `api/weather.js`
+serverless function (separate repo). The Admin panel writes config; the
+Customer Panel reads and resolves it.
+
+**Still to be done by the project owner:** add `OPENWEATHER_API_KEY` to the
+Customer Panel's Vercel Environment Variables, and enter the restaurant's
+real coordinates in the new Location field (defaults to a placeholder
+location on the server until set).

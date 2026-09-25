@@ -749,3 +749,32 @@ reporting layer**. Future agents must preserve these rules:
    etc.) must work as a plain `<script>` CDN include with no React runtime —
    do not introduce Recharts, a JSX build step, or npm bundling as a
    prerequisite for this feature.
+
+## 12. Weather + Manual Effect Engine — Admin controls (added 2026-09-24)
+
+The "✨ Effects" tab (`js/effects-admin.js`) is the Admin-side control panel
+for the Customer Panel's Weather + Manual Effect engine. Future agents must
+preserve these rules:
+
+1. **`manualEffectId` is a single field, not a per-effect boolean map.** Only
+   one effect can ever be manually forced at a time. Do not reintroduce a
+   `{ effects: { rain: true, snow: true, ... } }` multi-boolean shape for
+   effect selection — that was the pre-2026-09-24 design and it allowed
+   multiple effects to be considered "on" simultaneously, which the Customer
+   Panel's resolver no longer supports (see the Customer Panel's
+   `ARCHITECTURE_LOCK.md`, "Weather + Manual Effect Engine").
+2. **`effects.rainSound` is the one remaining boolean flag** kept in that
+   shape — it is not an effect selector, it's a secondary option that only
+   matters while the `rain` effect happens to be active.
+3. **The master "All Effects" switch (`effectsEnabled`) must always render
+   above and gate the "Automatic Weather Effects" switch and every effect
+   row.** Do not let a per-row switch be enabled while `effectsEnabled` is
+   false.
+4. **This tab must never call OpenWeather directly or read/write an API
+   key.** It only writes small config documents (`settings/seasonal_effects`,
+   `settings/restaurant_location`); the Customer Panel's `api/weather.js`
+   (separate repo) is the only place that talks to OpenWeather.
+5. **New effects are added the same way as before:** flip an entry from
+   `soon:true` to `soon:false` in `WEATHER_EFFECTS`/`FESTIVAL_EFFECTS`, with a
+   `key` matching the Customer Panel's effect registry. Do not add a new
+   per-effect data shape.
