@@ -1,31 +1,55 @@
 // js/effects-admin.js
-// AI UPDATE [2026-09-24]: NEW FILE — Admin Panel side of the Seasonal Effects
-// system ("✨ Effects" tab in admin/index.html bottom nav).
+// [AI UPDATE 2026-09-24] REWRITTEN -- Admin Panel side of the Weather + Manual
+// Effect engine ("Effects" tab in admin/index.html bottom nav).
 //
-// Storage: Firestore doc  settings/seasonal_effects  { effects: { rain: boolean } }
-//   - Reuses the shared `db` from js/firebase-config.js (no second Firebase config).
-//   - `settings/*` is already `read: if true` / `write: if isOperator()` — no rules change.
-//   - Missing doc / missing key => effect OFF (an effect never appears unless Admin enabled it).
-// The Customer Panel (separate repo) listens to the same doc with onSnapshot, so toggling
-// here shows/hides the effect live on every customer device.
+// Storage: two Firestore docs (both public-read / operator-write, same rules
+// as before -- no rules change needed):
+//   settings/seasonal_effects
+//     { effectsEnabled: boolean,          // global master switch
+//       automaticWeatherEnabled: boolean, // OpenWeather drives the effect
+//       manualEffectId: string|null,      // explicit override, wins over weather
+//       effects: { rainSound: boolean },  // kept: rain-effect's optional sound
+//       updatedAt: number }
+//   settings/restaurant_location
+//     { lat: number, lon: number, updatedAt: number }
 //
-// ADDING A FUTURE EFFECT: change its entry in EFFECTS below from `soon: true` to
-// `soon: false`. The `key` is the field name under `effects` in the Firestore doc and
-// must match the key registered in the Customer Panel's SeasonalEffectsManager.
+// The Customer Panel (separate repo) listens to seasonal_effects with
+// onSnapshot and resolves the active effect via effect-resolver.js -- see
+// AI_HANDOFF.md "Weather + Effect Engine" for the full architecture.
+//
+// Priority (must match js/effects/effect-resolver.js in the Customer Panel):
+//   1. effectsEnabled === false        -> no effect, overrides everything
+//   2. manualEffectId set              -> that exact effect, overrides weather
+//   3. automaticWeatherEnabled === true -> weather-mapped effect
+//   4. otherwise                       -> no effect
+//
+// ADDING A FUTURE EFFECT: add it to WEATHER_EFFECTS or FESTIVAL_EFFECTS below
+// with `soon:false`. The `key` must equal the key registered in the Customer
+// Panel's seasonal-effects-manager.js REGISTRY.
 //
 // Exports: initEffectsAdmin(), destroyEffectsAdmin()
 // Called from: js/admin.js switchTab('effects', ...)
 
 import { db, auth } from './firebase-config.js';
 import {
-    doc, onSnapshot, setDoc
+    doc, onSnapshot, setDoc, getDoc
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { onAuthStateChanged }
     from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 
-const EFFECTS = [
-    { key: 'rain',      icon: '🌧️', name: 'Rainy Days',     desc: 'Soft animated rain and moody sky on the customer app.', soon: false },
-    { key: 'rainSound', icon: '🔊', name: 'Rain Sound',     desc: 'Optional soft rain + distant thunder. Customers see a small 🔊 button and choose to turn it on (off by default). Works only when Rainy Days is ON.', soon: false },
+// Weather-driven effects -- resolved automatically from real weather when
+// "Automatic Weather Effects" is ON. Rows are status-only (no per-row
+// switch): use the master toggles above to control the mode, and the
+// "Force a specific look" switch on any row to override with that one effect.
+const WEATHER_EFFECTS = [
+    { key: 'sunny',   icon: '☀️', name: 'Sunny / Clear',   desc: 'Warm subtle sunlight atmosphere.' },
+    { key: 'cloudy',  icon: '☁️', name: 'Cloudy',          desc: 'Soft moving cloud atmosphere.' },
+    { key: 'rain',    icon: '🌧️', name: 'Rain / Thunderstorm', desc: 'Existing Rainy Days effect -- also covers drizzle and thunderstorms (with lightning).' },
+    { key: 'snow',    icon: '❄️', name: 'Snow',            desc: 'Animated snow particles, winter atmosphere.' },
+    { key: 'fog',     icon: '🌫️', name: 'Mist / Fog / Haze', desc: 'Soft low-opacity haze -- also covers smoke, dust, sand and ash.' },
+];
+
+const FESTIVAL_EFFECTS = [
     { key: 'christmas', icon: '🎄', name: 'Christmas',      soon: true },
     { key: 'diwali',    icon: '🪔', name: 'Diwali',         soon: true },
     { key: 'newyear',   icon: '🎆', name: 'New Year',       soon: true },
@@ -33,19 +57,22 @@ const EFFECTS = [
     { key: 'valentine', icon: '❤️', name: "Valentine's Day", soon: true },
 ];
 
-let _state  = {};          // { rain: true, ... } mirrors Firestore `effects`
+let _config = {};          // mirrors settings/seasonal_effects
+let _location = null;      // mirrors settings/restaurant_location
 let _unsub  = null;
 let _saving = new Set();
 let _loaded = false;
 
 const _ref = () => doc(db, 'settings', 'seasonal_effects');
+const _locRef = () => doc(db, 'settings', 'restaurant_location');
 const _root = () => document.getElementById('effectsCardGrid');
 
 export function initEffectsAdmin() {
     _render();
+    _loadLocation();
     if (_unsub) return;
     _unsub = onSnapshot(_ref(), (snap) => {
-        _state  = (snap.exists() && snap.data().effects) || {};
+        _config = snap.exists() ? snap.data() : {};
         _loaded = true;
         _render();
     }, (err) => {
@@ -60,23 +87,93 @@ export function destroyEffectsAdmin() {
     _loaded = false;
 }
 
+async function _loadLocation() {
+    try {
+        const snap = await getDoc(_locRef());
+        _location = snap.exists() ? snap.data() : null;
+    } catch (e) {
+        console.error('[effects-admin] location load failed:', e);
+        _location = null;
+    }
+    _renderLocation();
+}
+
+function _effectsEnabled() { return _config.effectsEnabled !== false; }         // default true
+function _autoWeather()    { return _config.automaticWeatherEnabled === true; } // default false
+function _manualId()       { return typeof _config.manualEffectId === 'string' ? _config.manualEffectId : null; }
+
 function _render() {
     const root = _root();
     if (!root) return;
+    const enabled = _effectsEnabled();
+    const auto = _autoWeather();
+    const manual = _manualId();
+
     root.innerHTML = `
         <div class="section-action-bar">
-            <div class="section-page-title">✨ Seasonal Effects</div>
+            <div class="section-page-title">Effects</div>
         </div>
-        <p class="fx-intro">Turn on an atmosphere for the customer app. Changes appear live on customers' phones.</p>
+        <p class="fx-intro">Control the atmosphere shown on the customer app. Changes appear live on customers' phones.</p>
+
+        <div class="fx-master${enabled ? '' : ' fx-off'}">
+            <div class="fx-master-row">
+                <div class="fx-info">
+                    <div class="fx-name">All Effects</div>
+                    <div class="fx-desc">Master switch. OFF disables every effect below, no matter what else is configured.</div>
+                </div>
+                <span class="fx-state">${enabled ? 'ON' : 'OFF'}</span>
+                <button type="button" class="fx-switch${enabled ? ' on' : ''}" data-master
+                        role="switch" aria-checked="${enabled}" aria-label="All Effects"
+                        ${_loaded ? '' : 'disabled'}><span class="fx-knob"></span></button>
+            </div>
+            <div class="fx-master-row${enabled ? '' : ' fx-disabled'}">
+                <div class="fx-info">
+                    <div class="fx-name">Automatic Weather Effects</div>
+                    <div class="fx-desc">When ON, real current weather (OpenWeather) picks the effect automatically. When OFF, only a manually forced effect below will show.</div>
+                </div>
+                <span class="fx-state">${auto ? 'ON' : 'OFF'}</span>
+                <button type="button" class="fx-switch${auto ? ' on' : ''}" data-auto
+                        role="switch" aria-checked="${auto}" aria-label="Automatic Weather Effects"
+                        ${_loaded && enabled ? '' : 'disabled'}><span class="fx-knob"></span></button>
+            </div>
+        </div>
+
+        <div class="fx-location">
+            <div class="fx-name">Restaurant Location</div>
+            <div class="fx-desc">Coordinates used to look up the current weather. Needed only when Automatic Weather Effects is used.</div>
+            <div class="fx-location-row">
+                <input type="text" id="fxLat" class="fx-loc-input" placeholder="Latitude" inputmode="decimal">
+                <input type="text" id="fxLon" class="fx-loc-input" placeholder="Longitude" inputmode="decimal">
+                <button type="button" id="fxLocSave" class="fx-loc-save">Save</button>
+            </div>
+            <div id="fxLocStatus" class="fx-loc-status"></div>
+        </div>
+
+        <div class="fx-section-title">Weather Effects</div>
+        <p class="fx-subintro">${auto && !manual
+            ? 'Automatic mode is on -- the effect matching current weather runs by itself.'
+            : 'Automatic mode is off (or a manual effect is forced) -- these will not run on their own. Use "Force this" to show one anyway.'}</p>
         <div class="fx-list">
-            ${EFFECTS.map(_rowHtml).join('')}
+            ${WEATHER_EFFECTS.map((e) => _rowHtml(e, { manual, auto, enabled })).join('')}
+            ${_rainSoundRowHtml({ enabled })}
+        </div>
+
+        <div class="fx-section-title">Festival / Seasonal Effects</div>
+        <div class="fx-list">
+            ${FESTIVAL_EFFECTS.map((e) => _rowHtml(e, { manual, auto, enabled })).join('')}
         </div>`;
-    root.querySelectorAll('.fx-switch[data-key]').forEach(btn => {
-        btn.addEventListener('click', () => _toggle(btn.dataset.key));
+
+    root.querySelector('[data-master]')?.addEventListener('click', () => _toggleMaster());
+    root.querySelector('[data-auto]')?.addEventListener('click', () => _toggleAuto());
+    root.querySelector('[data-rainsound]')?.addEventListener('click', () => _toggleRainSound());
+    root.querySelectorAll('.fx-switch[data-key]').forEach((btn) => {
+        btn.addEventListener('click', () => _toggleManual(btn.dataset.key));
     });
+    root.querySelector('#fxLocSave')?.addEventListener('click', _saveLocation);
+    _renderLocation();
 }
 
-function _rowHtml(e) {
+function _rowHtml(e, { manual, auto, enabled }) {
     if (e.soon) {
         return `
         <div class="fx-card fx-soon">
@@ -85,45 +182,161 @@ function _rowHtml(e) {
             <span class="fx-badge">Coming Soon</span>
         </div>`;
     }
-    const on = _state[e.key] === true;
+    const isManual = manual === e.key;
+    const isAutoStatus = !isManual && auto; // weather rows only: "governed by automatic mode" indicator
+    const isWeatherRow = WEATHER_EFFECTS.some((w) => w.key === e.key);
+    let badge;
+    if (isManual) badge = 'ON (forced)';
+    else if (isWeatherRow && isAutoStatus) badge = 'AUTO';
+    else badge = 'OFF';
+
     return `
-        <div class="fx-card${on ? ' fx-on' : ''}">
+        <div class="fx-card${isManual ? ' fx-on' : ''}">
             <div class="fx-icon">${e.icon}</div>
             <div class="fx-info">
                 <div class="fx-name">${e.name}</div>
-                <div class="fx-desc">${e.desc}</div>
+                ${e.desc ? `<div class="fx-desc">${e.desc}</div>` : ''}
+            </div>
+            <span class="fx-state">${badge}</span>
+            <button type="button" class="fx-switch${isManual ? ' on' : ''}" data-key="${e.key}"
+                    role="switch" aria-checked="${isManual}" aria-label="Force ${e.name}"
+                    title="${isManual ? 'Stop forcing this effect' : 'Force this effect on, overriding weather'}"
+                    ${_loaded && enabled ? '' : 'disabled'}><span class="fx-knob"></span></button>
+        </div>`;
+}
+
+function _rainSoundRowHtml({ enabled }) {
+    const on = _config.effects && _config.effects.rainSound === true;
+    return `
+        <div class="fx-card">
+            <div class="fx-icon">🔊</div>
+            <div class="fx-info">
+                <div class="fx-name">Rain Sound</div>
+                <div class="fx-desc">Optional soft rain + distant thunder. Customers see a small button and choose to turn it on (off by default). Only has an effect while Rain is showing.</div>
             </div>
             <span class="fx-state">${on ? 'ON' : 'OFF'}</span>
-            <button type="button" class="fx-switch${on ? ' on' : ''}" data-key="${e.key}"
-                    role="switch" aria-checked="${on}" aria-label="${e.name}"
-                    ${_loaded ? '' : 'disabled'}><span class="fx-knob"></span></button>
+            <button type="button" class="fx-switch${on ? ' on' : ''}" data-rainsound
+                    role="switch" aria-checked="${on}" aria-label="Rain Sound"
+                    ${_loaded && enabled ? '' : 'disabled'}><span class="fx-knob"></span></button>
         </div>`;
+}
+
+function _renderLocation() {
+    const latEl = document.getElementById('fxLat');
+    const lonEl = document.getElementById('fxLon');
+    const statusEl = document.getElementById('fxLocStatus');
+    if (!latEl || !lonEl) return;
+    if (_location && typeof _location.lat === 'number' && typeof _location.lon === 'number') {
+        latEl.value = String(_location.lat);
+        lonEl.value = String(_location.lon);
+        if (statusEl) statusEl.textContent = 'Saved.';
+    } else if (statusEl) {
+        statusEl.textContent = 'Not set yet -- weather effects will use a default location until this is saved.';
+    }
 }
 
 function _waitForAuth(ms = 5000) {
     if (auth.currentUser) return Promise.resolve(auth.currentUser);
-    return new Promise(resolve => {
-        const off = onAuthStateChanged(auth, u => { if (u) { off(); resolve(u); } });
+    return new Promise((resolve) => {
+        const off = onAuthStateChanged(auth, (u) => { if (u) { off(); resolve(u); } });
         setTimeout(() => { off(); resolve(null); }, ms);
     });
 }
 
-async function _toggle(key) {
-    if (_saving.has(key)) return;
-    if (!(await _waitForAuth())) {
-        alert('Could not sign in. Please reload the page and try again.');
+async function _saveLocation() {
+    const latEl = document.getElementById('fxLat');
+    const lonEl = document.getElementById('fxLon');
+    const statusEl = document.getElementById('fxLocStatus');
+    const lat = parseFloat(latEl?.value);
+    const lon = parseFloat(lonEl?.value);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        if (statusEl) statusEl.textContent = 'Enter valid coordinates (e.g. 28.6139, 77.2090).';
         return;
     }
-    const was = _state[key] === true;
-    _saving.add(key);
-    _state = { ..._state, [key]: !was };   // optimistic
+    if (!(await _waitForAuth())) { alert('Could not sign in. Please reload the page and try again.'); return; }
+    try {
+        await setDoc(_locRef(), { lat, lon, updatedAt: Date.now() }, { merge: true });
+        _location = { lat, lon };
+        if (statusEl) statusEl.textContent = 'Saved.';
+    } catch (e) {
+        console.error('[effects-admin] location save failed:', e);
+        if (statusEl) statusEl.textContent = 'Could not save. Please try again.';
+    }
+}
+
+async function _toggleMaster() {
+    if (_saving.has('__master')) return;
+    if (!(await _waitForAuth())) { alert('Could not sign in. Please reload the page and try again.'); return; }
+    const was = _effectsEnabled();
+    _saving.add('__master');
+    _config = { ..._config, effectsEnabled: !was };
     _render();
     try {
-        // merge:true creates the doc on first use and leaves other effects untouched.
-        await setDoc(_ref(), { effects: { [key]: !was }, updatedAt: Date.now() }, { merge: true });
+        await setDoc(_ref(), { effectsEnabled: !was, updatedAt: Date.now() }, { merge: true });
     } catch (e) {
-        console.error('[effects-admin] toggle failed:', e);
-        _state = { ..._state, [key]: was }; // roll back
+        console.error('[effects-admin] master toggle failed:', e);
+        _config = { ..._config, effectsEnabled: was };
+        _render();
+        alert('Could not update Effects. Please try again.');
+    } finally {
+        _saving.delete('__master');
+    }
+}
+
+async function _toggleAuto() {
+    if (_saving.has('__auto') || !_effectsEnabled()) return;
+    if (!(await _waitForAuth())) { alert('Could not sign in. Please reload the page and try again.'); return; }
+    const was = _autoWeather();
+    _saving.add('__auto');
+    _config = { ..._config, automaticWeatherEnabled: !was };
+    _render();
+    try {
+        await setDoc(_ref(), { automaticWeatherEnabled: !was, updatedAt: Date.now() }, { merge: true });
+    } catch (e) {
+        console.error('[effects-admin] auto toggle failed:', e);
+        _config = { ..._config, automaticWeatherEnabled: was };
+        _render();
+        alert('Could not update Automatic Weather Effects. Please try again.');
+    } finally {
+        _saving.delete('__auto');
+    }
+}
+
+async function _toggleRainSound() {
+    if (_saving.has('__rainsound') || !_effectsEnabled()) return;
+    if (!(await _waitForAuth())) { alert('Could not sign in. Please reload the page and try again.'); return; }
+    const was = _config.effects && _config.effects.rainSound === true;
+    _saving.add('__rainsound');
+    _config = { ..._config, effects: { ..._config.effects, rainSound: !was } };
+    _render();
+    try {
+        await setDoc(_ref(), { effects: { rainSound: !was }, updatedAt: Date.now() }, { merge: true });
+    } catch (e) {
+        console.error('[effects-admin] rain sound toggle failed:', e);
+        _config = { ..._config, effects: { ..._config.effects, rainSound: was } };
+        _render();
+        alert('Could not update Rain Sound. Please try again.');
+    } finally {
+        _saving.delete('__rainsound');
+    }
+}
+
+async function _toggleManual(key) {
+    if (_saving.has(key) || !_effectsEnabled()) return;
+    if (!(await _waitForAuth())) { alert('Could not sign in. Please reload the page and try again.'); return; }
+    const was = _manualId() === key;
+    const nextManual = was ? null : key; // only one manual effect at a time -- picking one clears any other
+    _saving.add(key);
+    _config = { ..._config, manualEffectId: nextManual };
+    _render();
+    try {
+        // Firestore does not support writing `null` via a plain merge field the same
+        // way as a value -- setDoc with merge:true DOES support null (clears/sets the
+        // field), so this is safe.
+        await setDoc(_ref(), { manualEffectId: nextManual, updatedAt: Date.now() }, { merge: true });
+    } catch (e) {
+        console.error('[effects-admin] manual toggle failed:', e);
+        _config = { ..._config, manualEffectId: was ? key : (_manualId() === null ? null : _manualId()) };
         _render();
         alert('Could not update the effect. Please try again.');
     } finally {
