@@ -1,6 +1,99 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-24 (Seasonal Effects: Admin ✨ Effects tab + Rainy Days; earlier: 2026-09-22 fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+> Last updated: 2026-09-25 (Effects tab: Live Status card — real current weather + what the customer app is actually showing; earlier: 2026-09-24 Seasonal Effects: Admin ✨ Effects tab + Rainy Days; earlier: 2026-09-22 fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+
+---
+
+## [AI UPDATE 2026-09-25] — Effects tab: "Live Status" card (real weather + what customers actually see)
+
+### Problem
+The operator had no way to tell, from the Admin Panel, (1) what the real
+current weather is at the restaurant, or (2) whether "Automatic Weather
+Effects" is actually resolving to anything on the Customer Panel right now.
+The Effects tab only showed config toggles (ON/OFF/AUTO/FORCED badges), never
+a live reading.
+
+### What was added
+A "Live Status" card at the top of the Effects tab (`js/effects-admin.js`,
+above the existing "All Effects" / "Automatic Weather Effects" master
+switches), with two lines:
+- **Weather** — the restaurant's current real-world condition (icon, temp °C,
+  condition name, day/night), labelled with the location name if one is
+  saved (e.g. "☀️ 31°C, Sunny / Clear in Salempur"), or a clear "not
+  configured" / "couldn't reach the weather service" message otherwise. A
+  "↻ Refresh" button forces an immediate re-check; otherwise it polls every 2
+  minutes (the underlying data itself only changes ~10 minutes upstream, so
+  this is just UI freshness, not extra OpenWeather calls — see below).
+- **Customer app is showing** — the effect actually resolved from the CURRENT
+  `settings/seasonal_effects` config + the live weather reading above, with
+  the reason (`forced manually` / `from automatic weather` / nothing, and
+  why: master switch off vs. automatic off vs. no manual override).
+
+### Also added: named location
+`settings/restaurant_location` gets a new optional field, `locationName`
+(free text, e.g. "Salempur") — a new text input above the existing lat/lon
+fields in the same "Restaurant Location" card. Display-only; the weather
+lookup itself still uses lat/lon exactly as before. No Firestore rules change
+needed (`match /settings/{docId}` already allows any operator write).
+
+### How "what customers are seeing" is computed (no cross-repo dependency)
+New `js/effects/weather-status.js` — a deliberate, documented **duplicate**
+(not a shared import — Admin and Customer Panel are separate repos/
+deployments) of the Customer Panel's `weather-normalizer.js` (condition-id →
+effect mapping) and `effect-resolver.js` (manual > automatic > off priority)
+pure functions. This lets the Admin Panel independently predict the same
+result the Customer Panel's `seasonal-effects-manager.js` would produce from
+the same two inputs (live config doc + live weather reading), without
+depending on the Customer Panel's own deployment being reachable. **⚠️ Kept
+in sync deliberately**: if the logic in either of those two Customer Panel
+files ever changes, the header comment in `weather-status.js` flags that this
+copy must be updated too.
+
+### New: this repo's own `/api/weather` proxy
+The Admin Panel is a separate deployment from the Customer Panel, so it can't
+just call the Customer Panel's `/api/weather` (different origin). Copied
+`api/weather.js` byte-for-byte from the Customer Panel repo into this repo's
+own new `api/` folder, and wired it into `server.js` the same way the other
+`/api/*` POST routes are wired (`app.all('/api/weather', require('./api/weather.js'))`,
+placed just before the static-file section). Needs its **own**
+`OPENWEATHER_API_KEY` env var set on THIS deployment (added to
+`.env.example`) — the same key value used for the Customer Panel deployment
+works fine, they're independent read-only lookups of the same public data.
+Fails soft (`{ ok:false, error:"not_configured" }`) if the key is missing —
+the card shows a clear message instead of breaking the tab.
+
+### Files changed
+| File | Change |
+|---|---|
+| `api/weather.js` | NEW — copy of the Customer Panel's OpenWeather proxy |
+| `server.js` | + `app.all('/api/weather', require('./api/weather.js'))` |
+| `js/effects/weather-status.js` | NEW — synced copy of normalizeWeather()/resolveActiveEffect() + `EFFECT_LABELS` |
+| `js/effects-admin.js` | + Live Status card (`_liveStatusHtml`, `_fetchLiveWeather`, 2-min poll timer, refresh button); + `locationName` field (input, load, save, render) |
+| `css/admin.css` | + `.fx-live*` card styles, `.fx-loc-name` |
+| `.env.example` | + `OPENWEATHER_API_KEY` (documented as optional, Effects-tab-only) |
+
+### Not touched
+`firestore.rules` (existing `settings/{docId}` rule already covers the new
+field), the 5 weather-effect rows / manual-force switches / rain-sound row /
+festival rows (unchanged logic, only their surrounding card layout is
+untouched too), any Billing/POS/order code.
+
+### Tests performed
+`node --check` (CJS: `api/weather.js`, `server.js`; ESM: `js/effects-admin.js`,
+`js/effects/weather-status.js`) — all syntax clean. **NOT tested**: no network
+in this environment, so the actual OpenWeather round-trip, the live Firestore
+read/write of `locationName`, and the rendered card in a real browser were
+**not** verified end-to-end. Recommend: set `OPENWEATHER_API_KEY` in this
+deployment's env, save a location + name once from the tab, and confirm the
+card updates within ~2 minutes and after "↻ Refresh".
+
+### Known limitation
+Two independent 10-minute-TTL in-memory caches (one per deployment/serverless
+instance) mean the Admin card's reading and the Customer Panel's actual
+applied effect can very briefly (up to ~10 min) reflect different upstream
+polls right after a real-world weather change — they converge to the same
+1-hourly-ish OpenWeather-update cadence either way, so this is not expected
+to be visible in practice.
 
 ---
 

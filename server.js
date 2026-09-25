@@ -365,6 +365,14 @@ app.post('/api/cancel-receipt', async (req, res) => {
     }
 });
 
+// ── [AI UPDATE 2026-09-25] Weather + Effect Engine — Live Status API ────────
+//   Same handler as the Customer Panel's /api/weather (see that repo's
+//   AI_HANDOFF.md "Seasonal Effects"). Lets the Admin Panel's Effects tab show
+//   the restaurant's current real-world weather. Needs its OWN
+//   OPENWEATHER_API_KEY env var here (see .env.example) — fails soft
+//   ({ ok:false, error:"not_configured" }) if missing, never breaks the tab.
+app.all('/api/weather', require('./api/weather.js'));
+
 // ── 3. Serve static files ─────────────────────────────────────────────────────
 // HTML pages always served fresh; JS/CSS/assets use default permissive caching.
 // The service worker (sw.js) is served with no-cache so installs are always
