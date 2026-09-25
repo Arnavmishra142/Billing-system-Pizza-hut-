@@ -1250,3 +1250,26 @@ input:checked + .slider::before { transform: translateX(18px); }
     color: #1a1e29; font-weight: 800; font-size: 0.82rem; padding: 8px 16px; cursor: pointer;
 }
 .fx-loc-status { font-size: 0.75rem; color: #8b949e; margin-top: 8px; }
+.fx-loc-name { flex: 1 1 100%; }
+
+/* -- Live Status card [AI UPDATE 2026-09-25] -- */
+.fx-live {
+    background: #161b22; border: 1px solid #30363d; border-radius: 16px;
+    padding: 14px 16px; margin-bottom: 16px;
+}
+.fx-live-row {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding: 6px 0; flex-wrap: wrap;
+}
+.fx-live-row:not(:last-of-type) { border-bottom: 1px solid #21262d; }
+.fx-live-row.fx-live-on .fx-live-value { color: #e3b341; }
+.fx-live-label { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: #8b949e; flex-shrink: 0; }
+.fx-live-value { font-size: 0.9rem; color: #e6edf3; text-align: right; }
+.fx-live-value strong { font-weight: 800; }
+.fx-live-via { font-size: 0.75rem; color: #8b949e; font-weight: 400; }
+.fx-live-muted { color: #8b949e; font-size: 0.82rem; }
+.fx-live-refresh {
+    margin-top: 10px; width: 100%; background: #21262d; border: 1px solid #30363d; border-radius: 10px;
+    color: #e6edf3; font-weight: 700; font-size: 0.8rem; padding: 8px; cursor: pointer;
+}
+.fx-live-refresh:disabled { opacity: .5; cursor: default; }
