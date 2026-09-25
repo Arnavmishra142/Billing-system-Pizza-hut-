@@ -36,6 +36,15 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 import { onAuthStateChanged }
     from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+import { normalizeWeather, resolveActiveEffect, EFFECT_LABELS }
+    from "./effects/weather-status.js";
+
+// [AI UPDATE 2026-09-25] Live Status card -- see js/effects/weather-status.js
+// header comment for why this duplicates (not imports) the Customer Panel's
+// normalizer/resolver. Polls this repo's OWN /api/weather (api/weather.js,
+// wired in server.js) -- same 10-minute upstream cache, so polling here is
+// cheap and never hits OpenWeather more often than the Customer Panel does.
+const WEATHER_POLL_MS = 2 * 60 * 1000; // UI refresh cadence (upstream data itself only changes ~10 min)
 
 // Weather-driven effects -- resolved automatically from real weather when
 // "Automatic Weather Effects" is ON. Rows are status-only (no per-row
@@ -63,6 +72,11 @@ let _unsub  = null;
 let _saving = new Set();
 let _loaded = false;
 
+// Live Status card state [AI UPDATE 2026-09-25]
+let _liveWeather = null;   // last /api/weather response (raw, { ok, condId, main, icon, tempC, ... })
+let _weatherLoading = false;
+let _weatherTimer = 0;
+
 const _ref = () => doc(db, 'settings', 'seasonal_effects');
 const _locRef = () => doc(db, 'settings', 'restaurant_location');
 const _root = () => document.getElementById('effectsCardGrid');
@@ -70,6 +84,8 @@ const _root = () => document.getElementById('effectsCardGrid');
 export function initEffectsAdmin() {
     _render();
     _loadLocation();
+    _fetchLiveWeather();
+    if (!_weatherTimer) _weatherTimer = setInterval(_fetchLiveWeather, WEATHER_POLL_MS);
     if (_unsub) return;
     _unsub = onSnapshot(_ref(), (snap) => {
         _config = snap.exists() ? snap.data() : {};
@@ -84,7 +100,29 @@ export function initEffectsAdmin() {
 
 export function destroyEffectsAdmin() {
     if (_unsub) { _unsub(); _unsub = null; }
+    if (_weatherTimer) { clearInterval(_weatherTimer); _weatherTimer = 0; }
     _loaded = false;
+}
+
+// Fetches THIS deployment's /api/weather using the saved restaurant location
+// (falls back to the endpoint's own default coords if none saved yet -- same
+// fallback behaviour as the Customer Panel). Never throws; a failure just
+// shows a clear "couldn't load" state in the card rather than breaking the tab.
+async function _fetchLiveWeather() {
+    if (_weatherLoading) return;
+    _weatherLoading = true;
+    try {
+        const qs = (_location && typeof _location.lat === 'number' && typeof _location.lon === 'number')
+            ? `?lat=${_location.lat}&lon=${_location.lon}` : '';
+        const res = await fetch(`/api/weather${qs}`, { cache: 'no-store' });
+        _liveWeather = res && res.ok ? await res.json() : { ok: false, error: 'request_failed' };
+    } catch (e) {
+        console.warn('[effects-admin] live weather fetch failed:', e);
+        _liveWeather = { ok: false, error: 'request_failed' };
+    } finally {
+        _weatherLoading = false;
+        _render();
+    }
 }
 
 async function _loadLocation() {
@@ -96,6 +134,7 @@ async function _loadLocation() {
         _location = null;
     }
     _renderLocation();
+    if (_location) _fetchLiveWeather(); // re-fetch with the real coords once loaded (first call used defaults)
 }
 
 function _effectsEnabled() { return _config.effectsEnabled !== false; }         // default true
@@ -114,6 +153,8 @@ function _render() {
             <div class="section-page-title">Effects</div>
         </div>
         <p class="fx-intro">Control the atmosphere shown on the customer app. Changes appear live on customers' phones.</p>
+
+        ${_liveStatusHtml({ enabled })}
 
         <div class="fx-master${enabled ? '' : ' fx-off'}">
             <div class="fx-master-row">
@@ -141,6 +182,9 @@ function _render() {
         <div class="fx-location">
             <div class="fx-name">Restaurant Location</div>
             <div class="fx-desc">Coordinates used to look up the current weather. Needed only when Automatic Weather Effects is used.</div>
+            <div class="fx-location-row">
+                <input type="text" id="fxLocName" class="fx-loc-input fx-loc-name" placeholder="Location name (e.g. Salempur) -- for display only">
+            </div>
             <div class="fx-location-row">
                 <input type="text" id="fxLat" class="fx-loc-input" placeholder="Latitude" inputmode="decimal">
                 <input type="text" id="fxLon" class="fx-loc-input" placeholder="Longitude" inputmode="decimal">
@@ -170,7 +214,64 @@ function _render() {
         btn.addEventListener('click', () => _toggleManual(btn.dataset.key));
     });
     root.querySelector('#fxLocSave')?.addEventListener('click', _saveLocation);
+    root.querySelector('#fxWeatherRefresh')?.addEventListener('click', () => { if (!_weatherLoading) _fetchLiveWeather(); });
     _renderLocation();
+}
+
+// [AI UPDATE 2026-09-25] "Live Status" card -- answers, at a glance, the two
+// things an operator actually needs to know: what the real weather is doing
+// at the restaurant right now, and what the customer app is showing BECAUSE
+// of that (or in spite of it, if a manual override or the master switch is
+// in the way). Uses the same normalizeWeather()/resolveActiveEffect() the
+// Customer Panel uses -- see js/effects/weather-status.js.
+function _liveStatusHtml({ enabled }) {
+    const locName = (_location && _location.locationName) ? _location.locationName : null;
+    const w = _liveWeather;
+
+    let weatherLine;
+    let normalized = null;
+    if (_weatherLoading && !w) {
+        weatherLine = `<span class="fx-live-muted">Checking current weather…</span>`;
+    } else if (!w || w.ok !== true) {
+        const reason = w && w.error === 'not_configured'
+            ? 'Weather API key not set up yet on this server (OPENWEATHER_API_KEY).'
+            : "Couldn't reach the weather service right now.";
+        weatherLine = `<span class="fx-live-muted">${reason}</span>`;
+    } else {
+        normalized = normalizeWeather(w);
+        const label = EFFECT_LABELS[normalized.effect] || { icon: '🌡️', name: normalized.effect };
+        const place = locName ? `in ${locName}` : '(location not named -- set it below)';
+        const temp = typeof w.tempC === 'number' ? `${w.tempC}°C, ` : '';
+        weatherLine = `${label.icon} <strong>${temp}${label.name}</strong> ${place}${normalized.isNight ? ' · night' : ''}`;
+    }
+
+    const resolved = resolveActiveEffect(_config, normalized);
+    let customerLine, customerTone = '';
+    if (resolved.source === 'none' && !enabled) {
+        customerLine = '⛔ Nothing -- All Effects is OFF';
+    } else if (resolved.source === 'none') {
+        customerLine = '— Nothing right now (Automatic Weather is off and no effect is forced)';
+    } else {
+        const label = EFFECT_LABELS[resolved.key] || { icon: '✨', name: resolved.key };
+        const via = resolved.source === 'manual' ? 'forced manually' : 'from automatic weather';
+        customerLine = `${label.icon} <strong>${label.name}</strong> <span class="fx-live-via">(${via})</span>`;
+        customerTone = ' fx-live-on';
+    }
+
+    return `
+        <div class="fx-live">
+            <div class="fx-live-row">
+                <span class="fx-live-label">Weather</span>
+                <span class="fx-live-value">${weatherLine}</span>
+            </div>
+            <div class="fx-live-row${customerTone}">
+                <span class="fx-live-label">Customer app is showing</span>
+                <span class="fx-live-value">${customerLine}</span>
+            </div>
+            <button type="button" id="fxWeatherRefresh" class="fx-live-refresh" ${_weatherLoading ? 'disabled' : ''}>
+                ${_weatherLoading ? 'Refreshing…' : '↻ Refresh'}
+            </button>
+        </div>`;
 }
 
 function _rowHtml(e, { manual, auto, enabled }) {
@@ -222,16 +323,18 @@ function _rainSoundRowHtml({ enabled }) {
 }
 
 function _renderLocation() {
+    const nameEl = document.getElementById('fxLocName');
     const latEl = document.getElementById('fxLat');
     const lonEl = document.getElementById('fxLon');
     const statusEl = document.getElementById('fxLocStatus');
     if (!latEl || !lonEl) return;
+    if (nameEl) nameEl.value = (_location && typeof _location.locationName === 'string') ? _location.locationName : '';
     if (_location && typeof _location.lat === 'number' && typeof _location.lon === 'number') {
         latEl.value = String(_location.lat);
         lonEl.value = String(_location.lon);
         if (statusEl) statusEl.textContent = 'Saved.';
     } else if (statusEl) {
-        statusEl.textContent = 'Not set yet -- weather effects will use a default location until this is saved.';
+        statusEl.textContent = 'Not set yet -- weather effects will use a default location (New Delhi) until this is saved.';
     }
 }
 
@@ -244,9 +347,11 @@ function _waitForAuth(ms = 5000) {
 }
 
 async function _saveLocation() {
+    const nameEl = document.getElementById('fxLocName');
     const latEl = document.getElementById('fxLat');
     const lonEl = document.getElementById('fxLon');
     const statusEl = document.getElementById('fxLocStatus');
+    const locationName = (nameEl?.value || '').trim().slice(0, 60);
     const lat = parseFloat(latEl?.value);
     const lon = parseFloat(lonEl?.value);
     if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
@@ -255,9 +360,10 @@ async function _saveLocation() {
     }
     if (!(await _waitForAuth())) { alert('Could not sign in. Please reload the page and try again.'); return; }
     try {
-        await setDoc(_locRef(), { lat, lon, updatedAt: Date.now() }, { merge: true });
-        _location = { lat, lon };
+        await setDoc(_locRef(), { lat, lon, locationName, updatedAt: Date.now() }, { merge: true });
+        _location = { lat, lon, locationName };
         if (statusEl) statusEl.textContent = 'Saved.';
+        _fetchLiveWeather(); // coords may have just changed -- refresh the Live Status card right away
     } catch (e) {
         console.error('[effects-admin] location save failed:', e);
         if (statusEl) statusEl.textContent = 'Could not save. Please try again.';
