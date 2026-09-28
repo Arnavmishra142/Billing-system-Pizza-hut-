@@ -8,7 +8,7 @@
 import { showAlert } from './dialog.js';
 import { db } from './firebase-config.js';
 import {
-    collection, getDocs, addDoc,
+    collection, getDocs, addDoc, onSnapshot,
     getDocsFromCache, getDocsFromServer, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
@@ -22,22 +22,36 @@ document.addEventListener('DOMContentLoaded', () => {
     setupSearch();
 });
 
+// [AI UPDATE 2026-09-27] BUG FIX — menu sync audit.
+// fetchMenuFromCloud() previously only ever ran ONCE (DOMContentLoaded), using
+// getDocsFromCache()/getDocsFromServer() one-time reads. It never re-ran when
+// Menu Management toggled a product/variant ON or OFF, edited an item, or a
+// brand-new product was added — the operator had to refresh the whole POS
+// page to see the change reflected in the actual billing item grid used to
+// add items to a cart. Root cause fix: after the same fast cache/server paint
+// used for the very first render, this now attaches live onSnapshot()
+// listeners (matching the already-working pattern in js/menu-management.js)
+// so the grid updates itself the instant Firestore changes, with no refresh
+// and no polling — only the affected collection's diff is pushed over the
+// already-open listener channel, not a fresh full reload.
+let _unsubMenuProducts   = null;
+let _unsubMenuCategories = null;
+let _unsubMenuItems      = null;
+let _menuCatOrderMap     = {}; // catId → displayOrder
+let _menuCatImageMap     = {}; // catId → imageUrl
+let _latestProductsSnap  = null;
+
 // ── Helper: expand products+variants into the flat menu_items-compatible format ──
 // Called when the new products collection has data. Expands each product+variant
 // pair into a virtual item with "ProductName (VariantName)" name so the existing
 // triple-card / half-full-card rendering code works without modification.
 // Category order is respected via the `displayOrder` field on category docs.
-async function processProductsToItems(productsSnap) {
-    // Attempt to load categories for ordering
-    let catOrderMap = {}; // catId → displayOrder
-    let catImageMap = {}; // catId → imageUrl
-    try {
-        const catSnap = await getDocsFromServer(collection(db, 'categories'));
-        catSnap.docs.forEach(d => {
-            catOrderMap[d.id] = d.data().displayOrder ?? 999;
-            catImageMap[d.id] = d.data().imageUrl || null;
-        });
-    } catch (_) {} // non-fatal; categories may not exist yet
+// [AI UPDATE 2026-09-27] Made synchronous — catOrderMap/catImageMap are now
+// supplied by the live categories listener instead of being re-fetched with
+// getDocsFromServer() on every call.
+function processProductsToItems(productsSnap, catOrderMap, catImageMap) {
+    catOrderMap = catOrderMap || {};
+    catImageMap = catImageMap || {};
 
     const items = [];
     const catSet = new Set(['All']);
@@ -219,12 +233,14 @@ function applyMenuData(items, cats) {
     syncItemBadges();
 }
 
-// 1. FIREBASE SE MENU LAO  (two-phase: cache → network)
+// 1. FIREBASE SE MENU LAO  (fast paint → live sync)
 // AI UPDATE [2026-08-03]: Tries the new products collection first.
 // If products collection is non-empty, uses the new hierarchical read path
 // (processProductsToItems) which expands products+variants into flat items
 // with "ProductName (VariantName)" names so existing triple/half-full card
 // rendering works unchanged. Falls back to legacy menu_items if products is empty.
+// [AI UPDATE 2026-09-27] Phase 2 below now attaches LIVE onSnapshot() listeners
+// instead of a one-time getDocsFromServer() read — see the BUG FIX note above.
 export async function fetchMenuFromCloud() {
     const grid = document.getElementById('itemsGrid');
     if (!grid) return;
@@ -247,7 +263,7 @@ export async function fetchMenuFromCloud() {
         // Try new products collection first
         const prodCacheSnap = await getDocsFromCache(collection(db, 'products'));
         if (!prodCacheSnap.empty) {
-            const { items, cats } = await processProductsToItems(prodCacheSnap);
+            const { items, cats } = processProductsToItems(prodCacheSnap, _menuCatOrderMap, _menuCatImageMap);
             if (items.length > 0) { applyMenuData(items, cats); saveMenuToLS(items, cats); }
         } else {
             // Fallback to legacy menu_items cache
@@ -258,34 +274,97 @@ export async function fetchMenuFromCloud() {
                 saveMenuToLS(items, cats);
             }
         }
-    } catch (e) { /* No cache yet — fine, continue to server fetch */ }
+    } catch (e) { /* No cache yet — fine, continue to live listeners */ }
 
-    // ── Phase 2: Live server fetch (always runs to get fresh data) ──
-    try {
-        // Try new products collection first
-        const prodSnap = await getDocsFromServer(collection(db, 'products'));
+    // ── Phase 2: attach LIVE listeners (server-authoritative, stays in sync) ──
+    document.getElementById('menuRefreshNote')?.remove();
+    _startMenuListeners();
+}
+
+// ── Live listeners: keep the billing item grid in sync with Firestore ──────
+// Detects which schema is active (same one-shot server-forced check already
+// used elsewhere in this codebase, e.g. js/menu-management.js), then attaches
+// onSnapshot() listener(s) to the correct collection(s). Any toggle, edit,
+// add or delete made in the Admin/POS Menu Control (or the Admin Panel) is
+// pushed here immediately — no refresh, no re-navigation required.
+function _startMenuListeners() {
+    if (_unsubMenuProducts)   { _unsubMenuProducts();   _unsubMenuProducts   = null; }
+    if (_unsubMenuCategories) { _unsubMenuCategories(); _unsubMenuCategories = null; }
+    if (_unsubMenuItems)      { _unsubMenuItems();      _unsubMenuItems      = null; }
+
+    getDocsFromServer(collection(db, 'products')).then((prodSnap) => {
         if (!prodSnap.empty) {
-            const { items, cats } = await processProductsToItems(prodSnap);
-            if (items.length > 0) {
-                applyMenuData(items, cats);
-                saveMenuToLS(items, cats);
-                document.getElementById('menuRefreshNote')?.remove();
-                return;
-            }
+            _startMenuCategoriesListener();
+            _startMenuProductsListener();
+        } else {
+            _startLegacyMenuItemsListener();
         }
-        // Fallback to legacy menu_items
-        const serverSnap = await getDocsFromServer(collection(db, 'menu_items'));
+    }).catch((e) => {
+        console.warn('[menu] products check failed, falling back to menu_items:', e);
+        _startLegacyMenuItemsListener();
+    });
+}
+
+function _startMenuCategoriesListener() {
+    _unsubMenuCategories = onSnapshot(collection(db, 'categories'), (catSnap) => {
+        const catOrderMap = {};
+        const catImageMap = {};
+        catSnap.docs.forEach(d => {
+            catOrderMap[d.id] = d.data().displayOrder ?? 999;
+            catImageMap[d.id] = d.data().imageUrl || null;
+        });
+        _menuCatOrderMap = catOrderMap;
+        _menuCatImageMap = catImageMap;
+        // A categories-only change (e.g. reorder) still needs to re-flatten
+        // using whatever products snapshot we already have.
+        if (_latestProductsSnap) {
+            const { items, cats } = processProductsToItems(_latestProductsSnap, _menuCatOrderMap, _menuCatImageMap);
+            applyMenuData(items, cats);
+            saveMenuToLS(items, cats);
+        }
+    }, (err) => {
+        console.warn('[menu] categories listener error:', err.message);
+    });
+}
+
+function _startMenuProductsListener() {
+    _unsubMenuProducts = onSnapshot(collection(db, 'products'), (prodSnap) => {
+        _latestProductsSnap = prodSnap;
+        const { items, cats } = processProductsToItems(prodSnap, _menuCatOrderMap, _menuCatImageMap);
+        if (items.length > 0) {
+            applyMenuData(items, cats);
+            saveMenuToLS(items, cats);
+        } else {
+            // Products collection just became empty (all deleted) — fall back
+            // to legacy menu_items rather than showing a blank grid.
+            _startLegacyMenuItemsListener();
+        }
+    }, (err) => {
+        console.error('[menu] products listener error:', err);
+        const grid = document.getElementById('itemsGrid');
+        if (grid && allItems.length === 0) {
+            grid.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Menu load nahi hua.<br>Internet check karo ya refresh karo.</div>';
+        }
+        _unsubMenuProducts = null;
+        setTimeout(() => { if (!_unsubMenuProducts) _startMenuProductsListener(); }, 5000);
+    });
+}
+
+function _startLegacyMenuItemsListener() {
+    if (_unsubMenuItems) { _unsubMenuItems(); _unsubMenuItems = null; }
+    _unsubMenuItems = onSnapshot(collection(db, 'menu_items'), (serverSnap) => {
         const { items, cats } = processSnapshot(serverSnap);
         applyMenuData(items, cats);
         saveMenuToLS(items, cats);
-    } catch (e) {
-        console.error('Server fetch error:', e);
-        if (!cached || !cached.items || cached.items.length === 0) {
+    }, (err) => {
+        console.error('[menu] menu_items listener error:', err);
+        const grid = document.getElementById('itemsGrid');
+        if (grid && allItems.length === 0) {
             grid.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Menu load nahi hua.<br>Internet check karo ya refresh karo.</div>';
         }
-    }
-
-    document.getElementById('menuRefreshNote')?.remove();
+        _unsubMenuItems = null;
+        setTimeout(() => { if (!_unsubMenuItems) _startLegacyMenuItemsListener(); }, 5000);
+    });
 }
 
 // 2. RENDER CATEGORIES
@@ -825,7 +904,9 @@ function setupQuickAddPopups() {
             
             globalModal.classList.add('hidden');
             
-            await fetchMenuFromCloud();
+            // [AI UPDATE 2026-09-27] No explicit re-fetch needed any more — the
+            // live menu_items listener started in fetchMenuFromCloud() picks up
+            // this new addDoc() automatically and re-renders the grid itself.
 
         } catch(e) {
             console.error("Save error:", e);
