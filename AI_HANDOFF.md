@@ -1,6 +1,105 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-25 (Effects tab: Live Status card — real current weather + what the customer app is actually showing; earlier: 2026-09-24 Seasonal Effects: Admin ✨ Effects tab + Rainy Days; earlier: 2026-09-22 fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+> Last updated: 2026-09-27 (Menu Management sync bug fix — POS billing item grid was a one-time fetch with no live listener; earlier: 2026-09-25 Effects tab: Live Status card — real current weather + what the customer app is actually showing; earlier: 2026-09-24 Seasonal Effects: Admin ✨ Effects tab + Rainy Days; earlier: 2026-09-22 fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+
+---
+
+## [AI UPDATE 2026-09-27] — Menu Management sync bug fix (cross-repo audit)
+
+### Reported symptoms
+1. Product ON→OFF synced correctly everywhere, but OFF→ON often needed a Customer Panel refresh to show up.
+2. Variant ON/OFF (e.g. Pizza Regular/Medium/Large) needed the same investigation.
+3. A brand-new product ("Veg stream momo") added from Admin didn't appear in Customer Panel or the Billing/POS ordering grid.
+4. General: toggle-only-works-after-refresh, stale UI/cache, dead/duplicate realtime listeners, product/variant state mismatch, search/quick-add bypassing unavailable state.
+
+### Root cause (this repo's half)
+**`js/menu.js`** — the actual Billing/POS item grid used to add items to a
+bill — has **never** had a live Firestore listener. `fetchMenuFromCloud()`
+ran exactly once, on `DOMContentLoaded`, using `getDocsFromCache()` /
+`getDocsFromServer()` (one-time reads). Any product/variant toggle, edit,
+delete, or new product made afterwards — from *either* Admin Panel `js/admin-menu.js`
+or the "Menu Control" drawer `js/menu-management.js` — was invisible to the
+already-open POS grid until the page was refreshed. This explains why "OFF"
+looked instant when checked from the Menu Control drawer itself (that drawer,
+`js/menu-management.js`, already had correct `onSnapshot` listeners — see
+`_startProductsListener()` / `_startMenuItemsListener()` there, unchanged) but
+the actual order-taking grid (`js/menu.js`) was still stale, and why a new
+product wouldn't show up in POS either.
+
+The **write side was already correct** — `js/admin-menu.js` (product/variant
+CRUD) and `js/menu-management.js` (ON/OFF toggle, incl. the dual write to
+both the `variants` subcollection and the denormalized `variantsList` array
+on the product doc) needed no changes. This was purely a stale-read problem
+in one file.
+
+### Fix — `js/menu.js`
+- Kept the existing fast-paint phases unchanged (Phase 0: `localStorage`
+  instant render; Phase 1: Firestore IndexedDB cache instant render).
+- Replaced the one-time Phase 2 `getDocsFromServer()` fetch with **live
+  `onSnapshot()` listeners** on `products` + `categories` (new schema) or
+  `menu_items` (legacy schema) — mirroring the exact pattern already proven
+  correct in `js/menu-management.js` (unsubscribe-before-resubscribe, 5 s
+  retry on listener error). New functions: `_startMenuListeners()`,
+  `_startMenuCategoriesListener()`, `_startMenuProductsListener()`,
+  `_startLegacyMenuItemsListener()`.
+- `processProductsToItems()` changed from `async` (it used to re-fetch
+  `categories` with `getDocsFromServer()` on every single call) to a plain
+  sync function that takes `catOrderMap`/`catImageMap` as parameters — these
+  now come from the live categories listener instead of being re-fetched
+  every time a product changes. Behavior/output shape unchanged.
+- Removed the redundant explicit `await fetchMenuFromCloud()` call after
+  adding a legacy global item — the live `menu_items` listener now picks up
+  that `addDoc()` on its own; calling `fetchMenuFromCloud()` again would have
+  torn down and rebuilt the listeners for no reason.
+- This does **not** reintroduce "a full menu reload per toggle" in the sense
+  the task was worried about: Firestore's realtime SDK doesn't re-run a fresh
+  network query on every change — it pushes the diff over the one already-open
+  listener channel. The in-page render is still a full grid re-render (same
+  as the existing, working `menu-management.js` pattern, and same as it was
+  pre-fix on initial load) — deliberately not rewritten into per-item DOM
+  patching, since the menu is small and that would be a much larger, riskier
+  change for a POS-scale item count.
+- If `products` collection ever becomes empty at runtime (all products
+  deleted) the products listener now falls back live to `menu_items` instead
+  of showing a blank grid.
+
+### Variant ON/OFF — verified, not changed
+`processProductsToItems()` already does the right thing and needed no logic
+change, only live data:
+- `if (prod.active === false || prod.inStock === false) return;` — a
+  non-variant product OFF (or a variant-product turned OFF at the product
+  level) removes the **whole product** from the POS grid.
+- `if (v.active === false || v.inStock === false) return;` — a single
+  variant OFF removes **only that variant**; sibling variants stay orderable.
+
+### Search / quick-add bypass — verified, not changed
+`setupSearch()` filters `allItems`, which is the exact same array the live
+listener now keeps current — no separate bypass logic existed; it was only
+ever as stale as `allItems` itself, which is now always live.
+
+### Files changed (this repo)
+- `js/menu.js` — see above. No other file in this repo was modified.
+
+### Files changed (Customer Panel repo — see that repo's own AI_HANDOFF.md)
+- `js/menu.js` — the actual bug that matches the reported symptoms most
+  closely; see `teamdovolve-hue/Order-`'s `AI_HANDOFF.md` for the full
+  root-cause writeup (a `sessionStorage` 5-minute cache + one-time fetch
+  introduced 2026-09-13).
+
+### ARCHITECTURE_LOCK.md updated
+Added `js/menu.js` to the **Realtime Listeners** 🔒 FROZEN row (Section 3) —
+it was missing from that list even though it's now a live-listener module
+like the others. No other architecture changes; this fix restores intended
+behavior, it doesn't introduce a new one.
+
+### Testing notes for the operator
+- Toggle a product OFF then back ON from Menu Control → POS grid should
+  update within roughly a second, no refresh.
+- Toggle a single variant (e.g. Pizza Regular) OFF → only that variant
+  disappears from POS; Medium/Large stay orderable. Toggle back ON → it
+  reappears.
+- Add a brand-new product from Admin → appears in POS grid live.
+- Edit a product's price/name, or delete it → POS grid updates live.
 
 ---
 

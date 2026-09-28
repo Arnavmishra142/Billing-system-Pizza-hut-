@@ -96,7 +96,7 @@ The following systems are **production-stable**. Future AI agents **MUST NOT** m
 | **Walk-in Orders** | `index.html` walk-in flow | 🔒 FROZEN |
 | **Customer Order Synchronization** | `js/cart.js` `syncCustomerOrderCompletion()` | 🔒 FROZEN |
 | **Customer Order History Synchronization** | `js/cart.js` → `customer_order_history` | 🔒 FROZEN |
-| **Realtime Listeners** | `onSnapshot` in `incoming-orders.js`, `menu-management.js`, `admin.js` | 🔒 FROZEN |
+| **Realtime Listeners** | `onSnapshot` in `incoming-orders.js`, `menu-management.js`, `admin.js`, `js/menu.js` [AI UPDATE 2026-09-27: billing item grid restored to live `onSnapshot`, see below] | 🔒 FROZEN |
 | **Firestore Integration** | `js/firebase-config.js`, all collection references | 🔒 FROZEN |
 | **Firebase Integration** | `js/firebase-config.js` | 🔒 FROZEN |
 | **Firestore Collections** | All collection names (see Section 5) | 🔒 FROZEN |
