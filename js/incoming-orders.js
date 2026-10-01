@@ -170,6 +170,8 @@
 // =====================
 
 import { db, auth, functions } from './firebase-config.js';
+// [AI UPDATE 2026-10-01] live customer profile lookup (follows phone-change redirects) — see js/customer-identity.js
+import { resolveLiveCustomer } from './customer-identity.js';
 import {
     collection,
     onSnapshot,
@@ -698,7 +700,20 @@ function renderDrawer(orders) {
             // AI UPDATE [2026-08-01]: Multi-customer same-table support.
             // Determine which customer tab (C1/C2/C3…) this order belongs to.
             // Same phone/UID → reuses existing slot. New identity → next slot.
-            const _orderPhone    = order.customer?.phone || '';
+            let   _orderPhone    = order.customer?.phone || '';
+            // [AI UPDATE 2026-10-01] The order carries the name/phone the customer's device held
+            // when it was placed. If staff have since corrected the customer (POS Edit Customer),
+            // use the LIVE profile so this slot/bill attaches to the current identity. Same-uid
+            // guard + 1.5s cap + try/catch: on any problem the order's own snapshot is used, so
+            // "Open in POS" is never blocked or changed.
+            let   _liveName      = '';
+            try {
+                const _live = await Promise.race([
+                    resolveLiveCustomer(_orderPhone, customerUid),
+                    new Promise(r => setTimeout(() => r(null), 1500)),
+                ]);
+                if (_live) { _orderPhone = _live.phone || _orderPhone; _liveName = _live.name || ''; }
+            } catch (_) { /* keep snapshot */ }
             const customerSlot   = _findOrAllocateCustomerSlot(tableName, _orderPhone, customerUid);
             console.log(`[incoming-orders] Order ${id} (${_orderPhone || customerUid}) → slot ${customerSlot} on ${tableName}`);
 
@@ -764,7 +779,7 @@ function renderDrawer(orders) {
             // Store customer name for the POS cart badge (per-slot).
             // cart.js reads this in renderCart() and shows the amber name badge.
             // Cleared automatically when the cart empties (saveLocalCart([])).
-            localStorage.setItem(`customerName_${tableName}_${customerSlot}`, customerName);
+            localStorage.setItem(`customerName_${tableName}_${customerSlot}`, _liveName || customerName);
             // [AI UPDATE 2026-09-12] session 2: store the online customer's phone alongside
             // their name. js/cart.js reads customerPhone_<table>_<slot> to verify a
             // personalized coupon's `phone` field matches whoever is actually seated in this

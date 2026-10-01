@@ -16,6 +16,9 @@ import { httpsCallable } from "https://www.gstatic.com/firebasejs/10.8.1/firebas
 import { initReceiptPrinter, buildBillReceipt } from './receipt-builder.js';
 // AI UPDATE [2026-07-30]: Import custom dialog system — replaces alert()/confirm().
 import { showAlert, showConfirm, showCustomerDetailsPopup } from './dialog.js';
+// [AI UPDATE 2026-10-01] POS Edit Customer (name + phone) — see js/customer-identity.js header.
+import { showEditCustomerPopup } from './dialog.js';
+import { updateCustomerIdentity, applyIdentityToLocalSlots } from './customer-identity.js';
 
 // NOTE [2026-09-13]: The two historical session notes immediately below (dated
 // 2026-07-28) describe the ORIGINAL table-only-scoped implementation and are
@@ -960,6 +963,27 @@ document.addEventListener('DOMContentLoaded', () => {
         `).join('');
     }
 
+    // ── AI UPDATE [2026-10-01]: Edit Customer (name + phone) from the badge pencil ──────────
+    // Edits the customer's REAL profile (customers/{phone}) through js/customer-identity.js —
+    // a phone change atomically migrates the profile (uid, history, stats, coupons, username
+    // link preserved) and is blocked if the new number belongs to another customer. On success
+    // every POS slot holding the old identity is switched in localStorage and the badge is
+    // re-rendered immediately, so Bill & Settle / Save & Exit / coupons use the corrected data.
+    async function _openEditCustomerPopup() {
+        const oldPhone = localStorage.getItem(getCustomerPhoneKey());
+        if (!oldPhone) return; // no customer profile attached to this slot
+        await showEditCustomerPopup({
+            name:  localStorage.getItem(getCustomerNameKey()) || '',
+            phone: oldPhone.replace(/^\+91/, ''),
+            onSave: async ({ name, phone }) => {
+                const res = await updateCustomerIdentity({ oldPhone, name, phone });
+                applyIdentityToLocalSlots(oldPhone, res.phone, res.name);
+                renderCart();
+                return res;
+            },
+        });
+    }
+
     // Badge click — wired once; the badge DOM node persists across renderCart()
     // calls (only its innerHTML/visibility is updated), so a single listener
     // here is safe and does not need to be re-attached per render.
@@ -967,7 +991,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (onlineCustomerBadgeEl) {
         onlineCustomerBadgeEl.style.cursor = 'pointer';
         onlineCustomerBadgeEl.title = "View this customer's available coupons";
-        onlineCustomerBadgeEl.addEventListener('click', () => {
+        onlineCustomerBadgeEl.addEventListener('click', (e) => {
+            // [AI UPDATE 2026-10-01] Pencil beside the name → Edit Customer popup (NOT the coupons panel).
+            if (e.target.closest && e.target.closest('.ocb-edit-btn')) {
+                e.stopPropagation();
+                _openEditCustomerPopup();
+                return;
+            }
             const phone = localStorage.getItem(getCustomerPhoneKey());
             if (!phone) return; // no online customer bound to this slot — nothing to look up
             const name = localStorage.getItem(getCustomerNameKey()) || 'Customer';
@@ -1523,10 +1553,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (_badgeEl) {
             const _cname = localStorage.getItem(getCustomerNameKey());
             if (_cname) {
+                // [AI UPDATE 2026-10-01] pencil only when a customer profile (phone) is attached.
+                const _hasPhone = !!localStorage.getItem(getCustomerPhoneKey());
+                const _pencil = _hasPhone
+                    ? `<button type="button" class="ocb-edit-btn" aria-label="Edit customer" title="Edit customer name / phone">` +
+                      `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+                      `<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>`
+                    : '';
                 _badgeEl.innerHTML =
                     `<span class="ocb-icon">👤</span>` +
                     `<span class="ocb-label">Customer</span>` +
-                    `<span class="ocb-name">${_cname}</span>`;
+                    `<span class="ocb-name">${_escHtml(_cname)}</span>` +
+                    _pencil;
                 _badgeEl.classList.remove('ocb-hidden');
             } else {
                 _badgeEl.classList.add('ocb-hidden');

@@ -191,6 +191,27 @@ const DIALOG_CSS = `
 
 /* ── [AI UPDATE 2026-09-14] Manual customer lookup card (showCustomerDetailsPopup) ── */
 .bp-cust-lookup-msg { margin: -8px 0 18px; font-size: 0.88rem; }
+
+/* ── [AI UPDATE 2026-10-01] Edit Customer popup (showEditCustomerPopup) ── */
+.bp-field-label {
+    display: block;
+    text-align: left;
+    margin: 0 0 6px 2px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8b949e;
+}
+.bp-edit-cust-error {
+    min-height: 1.2em;
+    margin: -8px 0 14px;
+    text-align: left;
+    font-size: 0.86rem;
+    line-height: 1.4;
+    color: #f85149;
+}
+.bp-dialog-input.bp-input-invalid { border-color: #f85149; box-shadow: 0 0 0 3px rgba(248,81,73,0.18); }
 .bp-cust-found-card {
     text-align: left;
     background: #0d1117;
@@ -554,6 +575,91 @@ export function showCustomerDetailsPopup({ onLookupPhone } = {}) {
     });
 }
 
+// ── showEditCustomerPopup ────────────────────────────────────────────────────
+// [AI UPDATE 2026-10-01] POS "Edit Customer" — opened by the pencil icon beside the
+// customer name in Order Details (js/cart.js). UI-only like the rest of this module:
+// the caller supplies `onSave({ name, phone })`, an async function that performs the save.
+//   • onSave resolves  → popup closes and this promise resolves with onSave's return value
+//   • onSave throws    → the error message is shown inline, popup stays open for correction
+//   • Cancel / Esc     → resolves null. Backdrop taps do NOT close it (don't lose typed edits).
+// @param {object} opts
+// @param {string} opts.name   current name
+// @param {string} opts.phone  current 10-digit phone (no +91)
+// @param {(v:{name:string, phone:string}) => Promise<any>} opts.onSave
+// @returns {Promise<any|null>}
+export function showEditCustomerPopup({ name = '', phone = '', onSave } = {}) {
+    return new Promise(resolve => {
+        const overlay = _makeOverlay(`
+            <div class="bp-dialog bp-type-info" role="dialog" aria-label="Edit Customer">
+                <span class="bp-dialog-icon">✏️</span>
+                <h3 class="bp-dialog-title">Edit Customer</h3>
+                <p class="bp-dialog-message">Changes the customer's saved profile everywhere, not just this order.</p>
+                <label class="bp-field-label" for="bpEditCustName">Customer Name</label>
+                <input class="bp-dialog-input" id="bpEditCustName" type="text" maxlength="40"
+                       autocomplete="off" placeholder="Customer name" />
+                <label class="bp-field-label" for="bpEditCustPhone">Phone Number</label>
+                <input class="bp-dialog-input" id="bpEditCustPhone" type="tel" inputmode="numeric"
+                       maxlength="10" autocomplete="off" placeholder="10-digit mobile number" />
+                <p class="bp-edit-cust-error" id="bpEditCustError" role="alert"></p>
+                <div class="bp-dialog-actions">
+                    <button class="bp-btn bp-btn-cancel" data-action="cancel">Cancel</button>
+                    <button class="bp-btn bp-btn-ok"     data-action="save">Save Changes</button>
+                </div>
+            </div>
+        `);
+
+        const nameInput  = overlay.querySelector('#bpEditCustName');
+        const phoneInput = overlay.querySelector('#bpEditCustPhone');
+        const errEl      = overlay.querySelector('#bpEditCustError');
+        const cancelBtn  = overlay.querySelector('[data-action="cancel"]');
+        const saveBtn    = overlay.querySelector('[data-action="save"]');
+        nameInput.value  = name || '';
+        phoneInput.value = String(phone || '').replace(/\D/g, '').slice(0, 10);
+        let saving = false;
+
+        const showError = (msg, field) => {
+            errEl.textContent = msg || '';
+            nameInput.classList.toggle('bp-input-invalid',  field === 'name');
+            phoneInput.classList.toggle('bp-input-invalid', field === 'phone');
+        };
+        const onKey = (e) => {
+            if (e.key === 'Escape' && !saving) { document.removeEventListener('keydown', onKey); _close(overlay, resolve, null); }
+        };
+        const cancel = () => { if (saving) return; document.removeEventListener('keydown', onKey); _close(overlay, resolve, null); };
+
+        const save = async () => {
+            if (saving) return;
+            const vals = { name: nameInput.value, phone: phoneInput.value };
+            showError('');
+            saving = true; saveBtn.disabled = true; cancelBtn.disabled = true; saveBtn.textContent = 'Saving…';
+            try {
+                const res = typeof onSave === 'function' ? await onSave(vals) : null;
+                document.removeEventListener('keydown', onKey);
+                _close(overlay, resolve, res ?? true);
+            } catch (err) {
+                saving = false; saveBtn.disabled = false; cancelBtn.disabled = false; saveBtn.textContent = 'Save Changes';
+                const msg = (err && err.message) || 'Could not save. Please try again.';
+                showError(msg, /number|phone/i.test(msg) ? 'phone' : /name/i.test(msg) ? 'name' : '');
+            }
+        };
+
+        cancelBtn.addEventListener('click', cancel);
+        saveBtn.addEventListener('click', save);
+        phoneInput.addEventListener('input', () => {
+            phoneInput.value = phoneInput.value.replace(/\D/g, '').slice(0, 10);
+            showError('');
+        });
+        nameInput.addEventListener('input', () => showError(''));
+        [nameInput, phoneInput].forEach(el => el.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); save(); }
+        }));
+        document.addEventListener('keydown', onKey);
+
+        _open(overlay);
+        setTimeout(() => { nameInput.focus(); nameInput.select(); }, 60);
+    });
+}
+
 // ── HTML escape helper ────────────────────────────────────────────────────────
 function _esc(str) {
     return String(str ?? '')
@@ -565,4 +671,4 @@ function _esc(str) {
 
 // ── Global exposure for non-module inline scripts ─────────────────────────────
 // Any <script> block that loads after this module can use window.BillingDialog.*
-window.BillingDialog = { showAlert, showConfirm, showPrompt, showCustomerDetailsPopup };
+window.BillingDialog = { showAlert, showConfirm, showPrompt, showCustomerDetailsPopup, showEditCustomerPopup };
