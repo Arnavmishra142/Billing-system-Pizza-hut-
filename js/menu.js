@@ -287,6 +287,12 @@ export async function fetchMenuFromCloud() {
 // onSnapshot() listener(s) to the correct collection(s). Any toggle, edit,
 // add or delete made in the Admin/POS Menu Control (or the Admin Panel) is
 // pushed here immediately — no refresh, no re-navigation required.
+// [AI UPDATE 2026-10-01] listener-error retries used to be a FIXED 5s loop: every failed attempt re-attached a
+// whole-collection listener (re-billing all its reads) forever — a real quota drain when Firestore errors
+// (e.g. quota exceeded). Now capped exponential backoff: 5s → 10s → 20s … max 5 min, reset on first good snapshot.
+let _menuRetryCount = 0;
+const _menuRetryDelay = () => Math.min(5000 * Math.pow(2, _menuRetryCount++), 5 * 60 * 1000);
+
 function _startMenuListeners() {
     if (_unsubMenuProducts)   { _unsubMenuProducts();   _unsubMenuProducts   = null; }
     if (_unsubMenuCategories) { _unsubMenuCategories(); _unsubMenuCategories = null; }
@@ -329,6 +335,7 @@ function _startMenuCategoriesListener() {
 
 function _startMenuProductsListener() {
     _unsubMenuProducts = onSnapshot(collection(db, 'products'), (prodSnap) => {
+        _menuRetryCount = 0;
         _latestProductsSnap = prodSnap;
         const { items, cats } = processProductsToItems(prodSnap, _menuCatOrderMap, _menuCatImageMap);
         if (items.length > 0) {
@@ -346,13 +353,14 @@ function _startMenuProductsListener() {
             grid.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Menu load nahi hua.<br>Internet check karo ya refresh karo.</div>';
         }
         _unsubMenuProducts = null;
-        setTimeout(() => { if (!_unsubMenuProducts) _startMenuProductsListener(); }, 5000);
+        setTimeout(() => { if (!_unsubMenuProducts) _startMenuProductsListener(); }, _menuRetryDelay());
     });
 }
 
 function _startLegacyMenuItemsListener() {
     if (_unsubMenuItems) { _unsubMenuItems(); _unsubMenuItems = null; }
     _unsubMenuItems = onSnapshot(collection(db, 'menu_items'), (serverSnap) => {
+        _menuRetryCount = 0;
         const { items, cats } = processSnapshot(serverSnap);
         applyMenuData(items, cats);
         saveMenuToLS(items, cats);
@@ -363,7 +371,7 @@ function _startLegacyMenuItemsListener() {
             grid.innerHTML = '<div style="color:#f87171;padding:20px;text-align:center;">Menu load nahi hua.<br>Internet check karo ya refresh karo.</div>';
         }
         _unsubMenuItems = null;
-        setTimeout(() => { if (!_unsubMenuItems) _startLegacyMenuItemsListener(); }, 5000);
+        setTimeout(() => { if (!_unsubMenuItems) _startLegacyMenuItemsListener(); }, _menuRetryDelay());
     });
 }
 

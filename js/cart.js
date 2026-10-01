@@ -21,7 +21,7 @@ import { showEditCustomerPopup } from './dialog.js';
 import { updateCustomerIdentity, applyIdentityToLocalSlots } from './customer-identity.js';
 // [AI UPDATE 2026-10-01] "Any Pizza → Spring Roll FREE" one-time customer offer (see js/pizza-offer.js)
 import {
-    PIZZA_OFFER_ID, PIZZA_OFFER_LABEL, FREE_ITEM_ID, OfferError, describeOfferError,
+    PIZZA_OFFER_ID, PIZZA_OFFER_LABEL, FREE_ITEM_ID, OfferError, describeOfferError, isServerUnavailable, claimOfferLocal, ledgerSet,
     cartHasEligiblePizza, findSpringRollMenuItem, claimOffer, releaseClaim, finalizeClaim,
     buildFreeCartItem, offerRecordFromCart,
 } from './pizza-offer.js';
@@ -335,10 +335,12 @@ async function _lookupManualCustomerByPhone(rawTenDigitPhone) {
 async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tableName, completionReason, cartSnapshot, orderIdOverride = null, editContext = null, pricing = null) {
     if (!rawPhone) return;
     const phone = rawPhone.startsWith('+91') ? rawPhone : `+91${rawPhone}`;
+    let _readOk = false; // true once the first read worked -> a later failure must NOT be replayed
 
     try {
         const ref  = doc(db, 'customers', phone);
         const snap = await getDoc(ref);
+        _readOk = true;
         let resolvedUid;
         let resolvedName = (name || '').trim();
 
@@ -424,8 +426,74 @@ async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tabl
     } catch (err) {
         // Non-fatal — the bill is already complete; this is CRM sync only.
         console.warn('[ManualCustomer] Profile sync failed (non-fatal):', err.message || err);
+        if (_replayingHistory) throw err; // flusher keeps the entry for the next attempt
+        if (!_readOk && isServerUnavailable(err)) {
+            _queueHistorySync({ name, rawPhone, total, billNumber, tableName, completionReason, cartSnapshot,
+                                orderIdOverride: orderIdOverride || `ORDER_${Date.now()}`, editContext, pricing });
+            console.warn('[ManualCustomer] history queued - will sync automatically when Firebase is reachable.');
+        }
     }
 }
+
+// [AI UPDATE 2026-10-01] QUOTA-PROOF HISTORY: when Firestore reads are exhausted, the manual-customer sync below
+// fails on its very first getDoc (before ANY write). Such calls are queued in localStorage and replayed
+// automatically (next load / reconnect) so Customer History, stats and the offer line are not lost.
+const _HIST_Q_KEY = 'nph_history_sync_queue';
+let _replayingHistory = false, _flushingHistory = false;
+function _queueHistorySync(entry) {
+    try {
+        const q = JSON.parse(localStorage.getItem(_HIST_Q_KEY) || '[]');
+        if (!q.some(x => x.orderIdOverride === entry.orderIdOverride)) q.push(entry);
+        localStorage.setItem(_HIST_Q_KEY, JSON.stringify(q));
+    } catch (_) {}
+}
+async function _flushHistoryQueue() {
+    if (_flushingHistory) return;
+    let q; try { q = JSON.parse(localStorage.getItem(_HIST_Q_KEY) || '[]'); } catch (_) { q = []; }
+    if (!q.length) return;
+    _flushingHistory = true; _replayingHistory = true;
+    try {
+        for (const e of q) {
+            await syncManualCustomerProfile(e.name, e.rawPhone, e.total, e.billNumber, e.tableName, e.completionReason,
+                                            e.cartSnapshot, e.orderIdOverride, e.editContext, e.pricing); // throws while still unreachable
+            const rest = JSON.parse(localStorage.getItem(_HIST_Q_KEY) || '[]').filter(x => x.orderIdOverride !== e.orderIdOverride);
+            localStorage.setItem(_HIST_Q_KEY, JSON.stringify(rest));
+        }
+    } catch (_) { /* still blocked — keep the rest for next time */ }
+    finally { _flushingHistory = false; _replayingHistory = false; }
+}
+setTimeout(() => { _flushHistoryQueue(); }, 8000);
+window.addEventListener('online', () => { _flushHistoryQueue(); });
+
+// [AI UPDATE 2026-10-01] Same idea for ONLINE (QR) customers: the sync below reads the accepted pending_table_orders
+// docs first; if reads are exhausted that fails before any write, so the whole call (+ the slot's customer
+// context) is queued and replayed later -- Customer History, stats, the order status and the offer line all follow.
+const _ONLINE_HIST_Q_KEY = 'nph_online_history_sync_queue';
+let _flushingOnlineHistory = false;
+function _queueOnlineHistorySync(entry) {
+    try {
+        const q = JSON.parse(localStorage.getItem(_ONLINE_HIST_Q_KEY) || '[]');
+        if (!q.some(x => x.orderIdOverride === entry.orderIdOverride)) q.push(entry);
+        localStorage.setItem(_ONLINE_HIST_Q_KEY, JSON.stringify(q));
+    } catch (_) {}
+}
+async function _flushOnlineHistoryQueue() {
+    if (_flushingOnlineHistory) return;
+    let q; try { q = JSON.parse(localStorage.getItem(_ONLINE_HIST_Q_KEY) || '[]'); } catch (_) { q = []; }
+    if (!q.length) return;
+    _flushingOnlineHistory = true;
+    try {
+        for (const e of q) {
+            await syncCustomerOrderCompletion(e.tableName, e.customerSlot, e.cartSnapshot, e.total, e.completionReason,
+                                              e.billNumber, e.orderIdOverride, e.editContext, e.pricing, e.identity, e.ctx); // throws while still unreachable
+            const rest = JSON.parse(localStorage.getItem(_ONLINE_HIST_Q_KEY) || '[]').filter(x => x.orderIdOverride !== e.orderIdOverride);
+            localStorage.setItem(_ONLINE_HIST_Q_KEY, JSON.stringify(rest));
+        }
+    } catch (_) { /* still blocked -- keep the rest for next time */ }
+    finally { _flushingOnlineHistory = false; }
+}
+setTimeout(() => { _flushOnlineHistoryQueue(); }, 10000);
+window.addEventListener('online', () => { _flushOnlineHistoryQueue(); });
 
 // ── Customer order completion sync (best-effort, non-blocking) ───────────────
 //
@@ -494,23 +562,27 @@ async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tabl
 // overwrote the history doc's customerName/customerPhone with ''. The manual flow was immune because
 // syncManualCustomerProfile() receives the phone as an argument, not from localStorage.
 // Omitted (every pre-existing caller) = behaviour exactly as before.
-async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot, total, completionReason, billNumber = null, orderIdOverride = null, editContext = null, pricing = null, identity = null) {
+async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot, total, completionReason, billNumber = null, orderIdOverride = null, editContext = null, pricing = null, identity = null, replayCtx = null) {
     // AI UPDATE [2026-09-13]: slot-scoped key suffix — see header comment above.
     const _slotSuffix = `${tableName}_${customerSlot}`;
 
     // ── Step 1: Identify only THIS slot's imported order(s), by doc ID ─────
     // Do this first so we can also recover the customerUid from Firestore
     // if localStorage doesn't have it (e.g. after a page refresh).
-    let customerUid = localStorage.getItem(`activeCustomerUid_${_slotSuffix}`);
+    // [AI UPDATE 2026-10-01] replayCtx = values snapshotted when this sync was queued because Firestore reads were
+    // exhausted (see _queueOnlineHistorySync). Normal calls pass nothing and behave exactly as before.
+    let customerUid = replayCtx ? (replayCtx.uid || '') : localStorage.getItem(`activeCustomerUid_${_slotSuffix}`);
+    let _acceptedIds = [];
+    let _readsOk = false;   // true once Step 1's reads worked -> later failures must NOT be replayed (would double-count)
 
     try {
         // AI UPDATE [2026-09-13]: acceptedOrderIds is now scoped per (table, slot).
         // incoming-orders.js writes the accepted IDs to
         // acceptedOrderIds_<table>_<slot> — only ever the orders that were
         // merged into THIS slot's cart.
-        const _acceptedIds = JSON.parse(
-            localStorage.getItem(`acceptedOrderIds_${_slotSuffix}`) || '[]'
-        );
+        _acceptedIds = replayCtx
+            ? (replayCtx.acceptedIds || [])
+            : JSON.parse(localStorage.getItem(`acceptedOrderIds_${_slotSuffix}`) || '[]');
 
         // AI UPDATE [2026-09-13]: fetch the accepted orders directly by document
         // ID instead of querying the whole table by tableId. This guarantees we
@@ -527,6 +599,8 @@ async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot
                 d.exists() && ['pending', 'accepted', 'kot'].includes((d.data().status || '').toLowerCase())
             );
         }
+
+        _readsOk = true;
 
         // Recover customerUid from this slot's own imported orders only.
         // (No table-wide fallback — that was the exact cross-customer leak.)
@@ -655,13 +729,29 @@ async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot
         // table. `cartItemSourceMap` remains table-scoped (pre-existing, KOT/
         // "Mark as Served" feature, out of scope for this fix — see AI_HANDOFF.md
         // "Known Remaining Limitation") and is intentionally left as-is here.
-        ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
-            .forEach(key => localStorage.removeItem(`${key}_${_slotSuffix}`));
+        // [2026-10-01] a replay must NOT wipe the keys: the slot may already belong to a NEW customer.
+        if (!replayCtx) {
+            ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
+                .forEach(key => localStorage.removeItem(`${key}_${_slotSuffix}`));
+        }
 
         console.log(`[OrderSync] Order completion synced for slot "${_slotSuffix}" (${completionReason})`);
     } catch (err) {
         // Non-fatal — billing is already done, this is just customer-panel sync.
         console.warn('[OrderSync] Customer order history sync failed (non-fatal):', err.message || err);
+        if (replayCtx) throw err; // flusher keeps the entry for the next attempt
+        // [2026-10-01] Reads exhausted before ANY write happened -> queue it, replay when Firebase is reachable.
+        if (!_readsOk && isServerUnavailable(err) && (customerUid || _acceptedIds.length > 0)) {
+            _queueOnlineHistorySync({
+                tableName, customerSlot, cartSnapshot, total, completionReason, billNumber, editContext, pricing, identity,
+                orderIdOverride: orderIdOverride || `ORDER_${Date.now()}`,
+                ctx: { uid: customerUid || '', acceptedIds: _acceptedIds },
+            });
+            // Context is safely stored in the queue -- free the slot so the next customer isn't mistaken for this one.
+            ['activeOrderDocId', 'activeCustomerUid', 'activeSessionId', 'activeLockId', 'acceptedOrderIds']
+                .forEach(key => localStorage.removeItem(`${key}_${_slotSuffix}`));
+            console.warn('[OrderSync] history queued - will sync automatically when Firebase is reachable.');
+        }
     }
 }
 
@@ -1023,11 +1113,34 @@ document.addEventListener('DOMContentLoaded', () => {
             const roll = findSpringRollMenuItem();
             if (!roll) { _setRollNotice('Spring Roll is not on the menu / out of stock.'); return; }
 
-            const res = await claimOffer({
-                phone, name: localStorage.getItem(getCustomerNameKey()) || '',
-                slotKey: `${getCurrentTable()}_${getCurrentCustomer()}`,
-                value: roll.price, itemName: roll.name,
-            });
+            let res;
+            try {
+                res = await claimOffer({
+                    phone, name: localStorage.getItem(getCustomerNameKey()) || '',
+                    slotKey: `${getCurrentTable()}_${getCurrentCustomer()}`,
+                    value: roll.price, itemName: roll.name,
+                });
+            } catch (claimErr) {
+                // Server quota / outage: let staff apply it MANUALLY so the counter is never blocked.
+                // No server claim exists → the one-time check is skipped; Bill & Settle will try to
+                // record it (finalizeClaim) once Firebase is reachable again.
+                if (!(claimErr instanceof OfferError) && isServerUnavailable(claimErr)) {
+                    const ok = await showConfirm(
+                        'Firebase is unavailable (' + (claimErr.code || 'offline') + ').\n\n' +
+                        'Apply the free Spring Roll manually? This device will remember the customer so the offer cannot be given twice from here, and it is saved to the customer profile when the bill settles.',
+                        { type: 'warning', confirmText: 'Apply manually', cancelText: 'Cancel' });
+                    if (!ok) { _setRollNotice('Offer not applied — ' + describeOfferError(claimErr), 'error'); return; }
+                    currentCart = getLocalCart();
+                    if (!cartHasEligiblePizza(currentCart)) { _setRollNotice('Pizza was removed — offer not applied.'); return; }
+                    const local = claimOfferLocal({ phone, slotKey: `${getCurrentTable()}_${getCurrentCustomer()}` }); // throws ALREADY_CLAIMED
+                    localStorage.setItem(getPizzaOfferKey(), JSON.stringify({ token: '', phone: local.phone }));
+                    currentCart.push(buildFreeCartItem({ itemName: roll.name, value: roll.price, claimToken: '' }));
+                    saveLocalCart(currentCart);
+                    _setRollNotice('Applied manually (checked on this device only). It is saved to the customer profile when the bill settles.');
+                    return;
+                }
+                throw claimErr;
+            }
             // Re-read the cart: it may have changed while the transaction was in flight.
             currentCart = getLocalCart();
             if (!cartHasEligiblePizza(currentCart)) {
