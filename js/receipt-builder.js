@@ -147,6 +147,12 @@ export function buildBillReceipt(cart, title, billNo, dateStr, coupon = null) {
         // extras are rendered dynamically — never hardcoded by name.
         // specialRequest is intentionally omitted from the customer bill.
         for (const item of cart) {
+            // [AI UPDATE 2026-10-01] Pizza-offer free Spring Roll: show FREE / Rs0 and the offer note.
+            if (item.freeOffer) {
+                enc = enc.table(TABLE_COLS, [[item.name, '1', 'FREE']]);
+                enc = enc.line('  Rs0 - Pizza Offer (Free Spring Roll)');
+                continue;
+            }
             const _ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
             const _itemTotal = (item.price + _ep) * item.qty;
             enc = enc.table(TABLE_COLS, [[

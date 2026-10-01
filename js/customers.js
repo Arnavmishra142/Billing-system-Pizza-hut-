@@ -61,6 +61,8 @@ import {
 import { signInAnonymously, onAuthStateChanged }
     from 'https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js';
 
+import { adminReleasePending, PIZZA_OFFER_ID, PIZZA_OFFER_LABEL } from './pizza-offer.js'; // [AI UPDATE 2026-10-01]
+
 // ── Auth bootstrap (mandatory pattern) ────────────────────────────────────
 signInAnonymously(auth).catch(() => {});
 
@@ -241,8 +243,10 @@ function _buildOrdersHtml(orders) {
 <div class="cust-ord-item-row">
     <span class="name">${_esc(it.name)}</span>
     <span class="qty">×${it.quantity || 1}</span>
-    <span class="sub">${_fmtRupee(it.subtotal)}</span>
+    <span class="sub">${it.freeOffer ? '<b style="color:#3fb950;">FREE</b> ₹0' : _fmtRupee(it.subtotal)}</span>
 </div>`).join('');
+        // [AI UPDATE 2026-10-01] per-order offer line (customer history)
+        const offerHtml = o.offer ? `<div style="font-size:0.78rem;color:#3fb950;font-weight:700;">🎁 Offer: ${_esc(o.offer.label || '')} · Status: ${_esc(o.offer.status || 'Claimed')} · Value ₹${Number(o.offer.value) || 0}</div>` : '';
         return `
 <div class="bill-card" style="flex-direction:column;align-items:stretch;gap:10px;border-left:3px solid #1f6feb;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
@@ -254,6 +258,7 @@ function _buildOrdersHtml(orders) {
     </div>
     ${itemsHtml ? `<div style="border-top:1px solid #21262d;padding-top:8px;">${itemsHtml}</div>` : ''}
     ${Number(o.customDiscount) > 0 ? `<div class="cust-ord-item-row"><span class="name" style="color:#3fb950;">Custom Discount</span><span class="qty"></span><span class="sub" style="color:#3fb950;">-${_fmtRupee(o.customDiscount)}</span></div>` : ''}
+    ${offerHtml}
     <div style="font-size:0.75rem;font-weight:600;color:#3fb950;">${_esc(statusLabel)}</div>
 </div>`;
     }).join('') + `</div>`;
@@ -969,6 +974,21 @@ window._custOpenDetail = async function(phone) {
 <div class="list-title" style="margin-top:16px;margin-bottom:12px;">Coupons</div>
 <div id="custCouponsContainer"><div class="loading-state">Loading coupons… ☁️</div></div>`;
 
+    // [AI UPDATE 2026-10-01] Offer claim status — same customers/{phone}.offerClaims field the POS and Customer Panel use.
+    const _oc = c.offerClaims?.[PIZZA_OFFER_ID];
+    const _ocDate = _oc?.settledAt?.toMillis?.() ?? _oc?.claimedAt?.toMillis?.() ?? 0;
+    const offerHtml = `
+<div class="list-title" style="margin-top:16px;margin-bottom:8px;">Offers</div>
+<div style="border:1px solid #30363d;border-left:3px solid ${_oc ? '#3fb950' : '#8b949e'};border-radius:8px;padding:12px;font-size:0.85rem;color:#c9d1d9;line-height:1.6;">
+    <div style="font-weight:800;">${_esc(PIZZA_OFFER_LABEL)}</div>
+    ${_oc ? `
+    <div style="color:#3fb950;font-weight:700;">${_oc.finalized ? '✅ Claimed' : '⏳ Claimed at POS — bill not settled yet'}</div>
+    <div>Value: ₹${Number(_oc.value) || 0}${_oc.billNumber ? ` · Bill #${_esc(String(_oc.billNumber))}` : ''}${_oc.orderId ? ` · Order ${_esc(String(_oc.orderId))}` : ''}</div>
+    <div>${_ocDate ? _fmtDate(_ocDate) + ' ' + _fmtTime(_ocDate) : ''}</div>
+    ${_oc.finalized ? '' : `<button type="button" class="btn" style="margin-top:8px;padding:8px 12px;" onclick="window._custReleaseOffer('${_esc(c.id)}')">Release unsettled claim</button>`}
+    ` : '<div style="color:#8b949e;">Not claimed yet</div>'}
+</div>`;
+
     const deleteHtml = `
 <!-- Delete button -->
 <div style="padding:20px 0 4px;">
@@ -986,7 +1006,7 @@ window._custOpenDetail = async function(phone) {
     c._historyLoaded
         ? _buildOrdersHtml(c.orders)
         : '<div class="loading-state">Loading orders… ☁️</div>'
-}</div>` + couponBtnHtml + recoveryHtml + deleteHtml;
+}</div>` + offerHtml + couponBtnHtml + recoveryHtml + deleteHtml;
     overlay.classList.remove('hidden');
 
     // Phase 2 — fetch history if not yet loaded, then update the container
@@ -1001,6 +1021,17 @@ window._custOpenDetail = async function(phone) {
         const el = document.getElementById('custCouponsContainer');
         if (el) el.innerHTML = _buildCouponsHtml(coupons, c.id);
     });
+};
+
+// [AI UPDATE 2026-10-01] Operator-only: free a claim that was taken at the POS but never settled
+// (finalized claims are untouchable — see adminReleasePending()).
+window._custReleaseOffer = async function(phone) {
+    try {
+        const ok = await adminReleasePending(phone);
+        const c = _customers.find(x => x.id === phone);
+        if (ok && c && c.offerClaims) delete c.offerClaims[PIZZA_OFFER_ID];
+        window._custOpenDetail(phone);
+    } catch (e) { console.warn('[PizzaOffer] admin release failed:', e.message); }
 };
 
 window._custCloseDetail = function() {
