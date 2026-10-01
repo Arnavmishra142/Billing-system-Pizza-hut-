@@ -339,8 +339,14 @@ async function _onLoginSubmit() {
 
   try {
     const hash = await _hashPassword(password, _pendingPhone);
+    // [AI UPDATE 2026-10-01] also accept the salt phone recorded by a POS phone change
+    // (customers.passwordHashPhone); current phone is tried first. See customer-repo js/auth.js.
+    let _pwOk = hash === _pendingLoginProfile.passwordHash;
+    if (!_pwOk && _pendingLoginProfile.passwordHashPhone && _pendingLoginProfile.passwordHashPhone !== _pendingPhone) {
+      _pwOk = (await _hashPassword(password, _pendingLoginProfile.passwordHashPhone)) === _pendingLoginProfile.passwordHash;
+    }
 
-    if (hash !== _pendingLoginProfile.passwordHash) {
+    if (!_pwOk) {
       _setError("otpLoginError", "Incorrect password. Please try again.");
       if (passEl) { passEl.value = ""; passEl.focus(); }
       return;
