@@ -888,6 +888,34 @@ document.getElementById('sessionBadge').addEventListener('click', () => {
 
 loadSession();
 
+// [AI UPDATE 2026-10-01] POS "Edit Customer" support. If staff corrected this customer's name or
+// phone after this tab logged in, pick up the live profile (following customer_phone_redirects when
+// the phone changed). Same-uid guard: never adopt a different customer's profile. Fire-and-forget.
+async function refreshSessionFromProfile() {
+    if (!customerSession?.phone || !_authReady) return;
+    try {
+        let phone = customerSession.phone;
+        for (let hop = 0; hop < 5; hop++) {
+            const snap = await getDoc(doc(db, 'customers', phone));
+            if (snap.exists()) {
+                const p = snap.data();
+                const pUid = p.uid || p.authUid || '';
+                if (customerSession.uid && pUid && pUid !== customerSession.uid) return;
+                const liveName  = p.name  || customerSession.name;
+                const livePhone = p.phone || phone;
+                if (liveName !== customerSession.name || livePhone !== customerSession.phone) {
+                    saveSession({ ...customerSession, name: liveName, phone: livePhone, username: p.username || customerSession.username || '' });
+                }
+                return;
+            }
+            const r = await getDoc(doc(db, 'customer_phone_redirects', phone));
+            if (!r.exists() || !r.data().newPhone) return;
+            phone = r.data().newPhone;
+        }
+    } catch (_) { /* non-fatal — keep existing session */ }
+}
+refreshSessionFromProfile();
+
 // ════════════════════════════════════════════════════════════════════════════
 // PHONE NUMBER NORMALISER
 // Accepts: 10-digit local, +91XXXXXXXXXX, 91XXXXXXXXXX, 0XXXXXXXXXX
@@ -1092,8 +1120,15 @@ document.getElementById('loginBtn').addEventListener('click', async () => {
 
     try {
         const hash = await hashPassword(password, _pendingPhone);
+        // [AI UPDATE 2026-10-01] After a POS phone change the stored hash was made with the
+        // ORIGINAL phone (customers.passwordHashPhone). Try that salt too; the current phone
+        // (e.g. after a recovery reset) is always tried first.
+        let _pwOk = hash === _pendingLoginProfile.passwordHash;
+        if (!_pwOk && _pendingLoginProfile.passwordHashPhone && _pendingLoginProfile.passwordHashPhone !== _pendingPhone) {
+            _pwOk = (await hashPassword(password, _pendingLoginProfile.passwordHashPhone)) === _pendingLoginProfile.passwordHash;
+        }
 
-        if (hash !== _pendingLoginProfile.passwordHash) {
+        if (!_pwOk) {
             showError('loginError', 'Incorrect password. Please try again.');
             document.getElementById('loginPasswordInput').value = '';
             document.getElementById('loginPasswordInput').focus();
@@ -1553,11 +1588,12 @@ async function placeOrder() {
 
         // Update lastLoginAt only — do NOT update uid (set once at registration).
         if (customerSession?.phone) {
-            setDoc(
-                doc(db, 'customers', customerSession.phone),
-                { lastLoginAt: serverTimestamp() },
-                { merge: true }
-            ).catch(() => {});
+            // [AI UPDATE 2026-10-01] only touch a profile that still exists — a plain merge-setDoc
+            // would recreate a ghost customers/{oldPhone} doc if staff changed this customer's phone.
+            const _llRef = doc(db, 'customers', customerSession.phone);
+            getDoc(_llRef)
+                .then(snap => snap.exists() ? setDoc(_llRef, { lastLoginAt: serverTimestamp() }, { merge: true }) : null)
+                .catch(() => {});
         }
 
         // Success

@@ -144,8 +144,22 @@ service cloud.firestore {
     match /usernames/{username} {
       allow read:   if request.auth != null;
       allow create: if request.auth != null;
-      allow update: if false;
+      // AI UPDATE [2026-10-01]: was `if false`. POS "Edit Customer" (js/customer-identity.js)
+      // re-points usernames/{username}.phone to the customer's new phone inside the same
+      // transaction that migrates customers/{oldPhone} → customers/{newPhone}. Operator only.
+      allow update: if isOperator();
       allow delete: if isOperator();
+    }
+
+    // ── customer_phone_redirects ──────────────────────────────────────────────
+    // AI UPDATE [2026-10-01]: NEW. Doc ID = a customer's PREVIOUS phone ("+91XXXXXXXXXX"),
+    // body { newPhone, uid, name, movedAt }. Written only by the POS phone-change transaction
+    // (js/customer-identity.js). Read by the Customer Panel so a logged-in session that still
+    // holds the old phone can find the profile (js/auth.js _refreshSessionFromProfile) and by
+    // the POS when an in-flight QR order carries the old phone. Contains no secrets.
+    match /customer_phone_redirects/{oldPhone} {
+      allow read:  if request.auth != null;
+      allow write: if isOperator();
     }
 
     // ── customer_uid_map ──────────────────────────────────────────────────────

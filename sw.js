@@ -97,7 +97,10 @@
 // fixed silent Bluetooth output — echoCancellation was forcing Android into voice-call audio mode,
 // which most A2DP-only Bluetooth speakers don't support, and AudioContext.resume() was called too
 // late relative to the user gesture. See AI_HANDOFF.md).
-const CACHE_NAME = 'pos-static-v57'; const STATIC_ASSETS = [
+// AI UPDATE [2026-10-01]: Bumped pos-static-v57 → pos-static-v58 (js/cart.js, js/dialog.js, js/incoming-orders.js,
+// index.html, customer.html changed; NEW js/customer-identity.js precached below: POS "Edit Customer" pencil —
+// edits the customer's real profile incl. safe phone migration — see AI_HANDOFF.md).
+const CACHE_NAME = 'pos-static-v58'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
@@ -105,6 +108,7 @@ const CACHE_NAME = 'pos-static-v57'; const STATIC_ASSETS = [
     '/css/style.css',
     '/js/firebase-config.js',
     '/js/dialog.js',
+    '/js/customer-identity.js',
     '/js/menu.js',
     '/js/cart.js',
     '/js/receipt-builder.js',

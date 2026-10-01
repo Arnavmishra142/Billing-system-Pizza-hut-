@@ -146,6 +146,23 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+        /* AI UPDATE [2026-10-01]: pencil beside the customer name (opens Edit Customer popup) */
+        .ocb-edit-btn {
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            padding: 0;
+            margin-left: 2px;
+            background: transparent;
+            border: 1px solid rgba(245,158,11,0.35);
+            border-radius: 6px;
+            color: #f59e0b;
+            cursor: pointer;
+        }
+        .ocb-edit-btn:hover, .ocb-edit-btn:focus-visible { background: rgba(245,158,11,0.18); outline: none; }
 
         /* AI UPDATE [2026-09-13]: Customer Coupons panel (opened by tapping the
            online customer name badge above). Reuses the existing .modal /

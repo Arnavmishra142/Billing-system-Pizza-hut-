@@ -1,6 +1,64 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-09-27 (Menu Management sync bug fix — POS billing item grid was a one-time fetch with no live listener; earlier: 2026-09-25 Effects tab: Live Status card — real current weather + what the customer app is actually showing; earlier: 2026-09-24 Seasonal Effects: Admin ✨ Effects tab + Rainy Days; earlier: 2026-09-22 fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount)
+> Last updated: 2026-10-01 (POS "Edit Customer" — pencil beside the customer name edits the REAL customer profile, incl. safe phone migration; earlier: 2026-09-27 (Menu Management sync bug fix — POS billing item grid was a one-time fetch with no live listener; earlier: 2026-09-25 Effects tab: Live Status card — real current weather + what the customer app is actually showing; earlier: 2026-09-24 Seasonal Effects: Admin ✨ Effects tab + Rainy Days; earlier: 2026-09-22 fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount))
+
+---
+
+## [AI UPDATE 2026-10-01] — POS "Edit Customer" (name + phone) — edits the customer's real identity
+
+### Request
+Pencil icon beside the customer name in POS **Order Details**; popup with Customer Name, Phone Number, Cancel, Save Changes. The edit must change the customer's **actual identity** (not just the current order), including safe handling when the phone changes.
+
+### Audit result — the source of truth
+| Question | Answer |
+|---|---|
+| Where is "the customer"? | `customers/{+91XXXXXXXXXX}` — **the phone is the Firestore document ID** (and `phone` field). Admin → Customers, POS badge/coupons/history, Customer Panel greeting/offers all read this doc. |
+| What links history to a customer? | `customers.uid` (legacy `authUid`) → `customer_order_history/{uid}/orders/*`. **Not** the phone. For POS-created (walk-in) profiles `uid == the phone at creation time` (opaque ID; see `syncManualCustomerProfile()` in `js/cart.js`). |
+| What else holds the phone as a key/link? | `usernames/{username}.phone`; `coupons/*.phone` (queried by phone everywhere); `customerPhone_<table>_<slot>` / `customerName_…` / `manualCustomerIdentity_…` / `customerSlotMap_<table>` (POS localStorage). |
+| Login dependency | `passwordHash = SHA-256(password + ":" + phone)` — the phone is the salt. A phone change would silently break the customer's login unless handled (see Password below). |
+| Snapshots (must NOT be rewritten) | `sales_history.onlineCustomer*/manualCustomer*`, `customer_order_history/*/orders/*.customerName/customerPhone`, `pending_table_orders.customer`. |
+
+### What was implemented
+**Files / functions (Billing repo)**
+- **NEW `js/customer-identity.js`** — `validateCustomerIdentity()`, `updateCustomerIdentity({oldPhone,name,phone})` (→ `_updateNameOnly()` / `_migratePhone()`), `applyIdentityToLocalSlots()`, `resolveLiveCustomer()`, `CustomerIdentityError`. Header comment has the full design.
+- `js/dialog.js` — NEW `showEditCustomerPopup({name,phone,onSave})` (+ CSS `.bp-field-label`, `.bp-edit-cust-error`); added to `window.BillingDialog`. Error from `onSave` is shown inline and the popup stays open; backdrop tap does not close it.
+- `js/cart.js` — imports; NEW `_openEditCustomerPopup()`; badge click listener now routes `.ocb-edit-btn` clicks to the popup (does **not** open the coupons panel); `renderCart()` badge renders the pencil **only when a phone is attached** (name-only walk-ins have no profile) and now HTML-escapes the name.
+- `index.html` — CSS `.ocb-edit-btn`.
+- `js/incoming-orders.js` — "Open in POS" now resolves the LIVE profile (`resolveLiveCustomer`, uid-guarded, 1.5 s cap, try/catch → falls back to the order's own snapshot) so a QR order placed with a stale name/phone attaches to the corrected identity and the right slot.
+- `firestore.rules` — `usernames` update: `false` → `isOperator()`; NEW `customer_phone_redirects/{oldPhone}` (read: signed-in, write: operator).
+- `customer.html`, `order-panel-updates/js/auth.js` — login also accepts `passwordHashPhone` salt; `customer.html` additionally refreshes its session from the live profile and no longer recreates a profile with a blind merge-`setDoc` on order placement.
+- `sw.js` — cache `pos-static-v57 → v58`, precaches `js/customer-identity.js`.
+
+**Files (Customer Panel repo `Order--main`)** — `js/auth.js` only: login tries `passwordHashPhone` as an alternate salt; NEW `_refreshSessionFromProfile()` (once per page load, after auth) adopts current name/phone/username and follows `customer_phone_redirects`. See that repo's `AI_HANDOFF.md`.
+
+### Behaviour
+- **Validation** (project's existing rules): phone = exactly 10 digits stored `+91XXXXXXXXXX` (no other phone rule exists in the project, so none was invented); name = trimmed/whitespace-collapsed, 2–40 chars (existing registration rule) + must contain a letter + no `<` `>`.
+- **Name only / same phone** → single `updateDoc(customers/{phone}, {name, updatedAt})`; unused coupons' `name` label refreshed (fire-and-forget).
+- **Phone changed** → ONE Firestore **transaction** (all-or-nothing): create `customers/{new}` as a full copy of `customers/{old}` (uid, totalOrders, lifetimeSpend, lastOrderAt, milestoneCouponIssued, createdAt, passwordHash, username, … preserved by spread; `phone`/`name`/`updatedAt` changed; `previousPhones[]`, `phoneChangedAt`, `passwordHashPhone` added) → delete `customers/{old}` → `usernames/{username}.phone` → new → every `coupons` doc with `phone == old` re-pointed (used coupons keep their `name`) → write `customer_phone_redirects/{old}` → delete `customer_phone_redirects/{new}` if a stale one exists. A best-effort sweep re-points any coupon issued between the pre-query and the commit.
+- **uid is never changed.** If a legacy doc has neither `uid` nor `authUid`, `uid` is pinned to the OLD phone so history keeps resolving (readers otherwise fall back to the phone and would split history).
+- **Collision** → if `customers/{new}` exists the transaction aborts with `PHONE_IN_USE`; message shows the other customer's name; **nothing** is overwritten or merged. Same block when the slot has no profile yet (walk-in picked in the popup but not yet billed) — such a slot is updated locally only.
+- **Password** → staff can't recompute the hash, so `passwordHashPhone` records the phone it was made with and the Customer Panel/`customer.html` login tries: (1) the phone typed (covers staff-assisted recovery, which hashes with the current phone), then (2) `passwordHashPhone`. No Worker change needed.
+- **POS immediate update** → after a successful save `applyIdentityToLocalSlots()` rewrites every `customerPhone_*`/`customerName_*`/`manualCustomerIdentity_*`/`customerSlotMap_*` entry holding the old phone (all tables, not just this one) and `renderCart()` re-renders the badge synchronously — the visible update does not wait on any follow-up work. Bill & Settle / Save & Exit / coupon apply / loyalty then read the corrected identity.
+- **Everything that reads the live profile updates automatically** (Admin Customers list/detail, POS coupons panel, "View History", Customer Panel offers/greeting): they key off `customers/{phone}` + `uid`, which are now correct. Admin Customers reloads on tab open.
+
+### Intentionally NOT changed
+`sales_history` and `customer_order_history` snapshots (immutable financial/order records — Customer Panel history reads by `uid`, so it still shows every order), `pending_table_orders.customer`, `syncCustomerOrderCompletion()` (stays fire-and-forget), billing/KOT/discount logic, the Cloudflare Worker (legacy `customerAuth` bridge and recovery flow untouched), Admin UI (no edit button added there — request was POS-only).
+
+### ⚠️ REQUIRED deploy steps
+1. **Deploy `firestore.rules`** (billing). Name-only edits work without it; **phone changes fail safely with a "database rules" message until it is deployed** (transaction touches `usernames` update + `customer_phone_redirects`).
+2. Deploy the Billing app (new `js/customer-identity.js`; SW cache v58 forces refresh).
+3. Deploy the Customer Panel (`js/auth.js`). Until then a customer whose phone was changed **cannot log in with their old password** and sees stale name on an old session.
+
+### Customer Panel Integration Status (this change)
+Applied in the provided `Order--main` repo: `js/auth.js` (see above). Contract additions to `customers/{phone}`: `passwordHashPhone`, `previousPhones`, `phoneChangedAt`; new collection `customer_phone_redirects`.
+
+### Known limits / things a future agent should know
+- Verified here with an in-memory Firestore mock (collision block, field/uid/stats preservation, coupons, username link, redirects incl. chained moves, legacy no-uid doc, local slots, number reuse). **Not** verified against the real Firestore emulator or live rules — run one phone change on a test customer after deploying.
+- After a phone change the **old number no longer exists as a customer**: logging in with it on the Customer Panel starts a brand-new registration (new uid). Session-refresh and `resolveLiveCustomer` are uid-guarded so a stranger's profile is never adopted.
+- A QR order already placed (not yet opened in POS) still carries the old phone in `pending_table_orders`; "Open in POS" resolves it through the redirect.
+- Transactions need a live connection (no offline queue); offline shows "No connection. Nothing was changed".
+- `phoneVerified` is written `false` on the new doc (required by the `customers` create rule; the project is in bridge mode where it is always `false`).
+- `customers.uid` for walk-in profiles can equal an old phone string; do **not** "tidy" it to the new phone — history lives under that path.
 
 ---
 

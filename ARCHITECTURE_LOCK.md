@@ -103,6 +103,7 @@ The following systems are **production-stable**. Future AI agents **MUST NOT** m
 | **Customer Synchronization** | `customer.html`, `customers/` collection | 🔒 FROZEN |
 | **Customer Password Auth** | `customer.html` auth screens, `order-panel-updates/js/auth.js` | 🔒 FROZEN |
 | **Username Registry** | `usernames/{username}` collection | 🔒 FROZEN |
+| **Customer Identity Edit (POS pencil)** | `js/customer-identity.js`, `js/dialog.js` `showEditCustomerPopup`, `js/cart.js` `_openEditCustomerPopup()` | 🆕 NEW (2026-10-01) — the ONLY sanctioned way to change a customer's name/phone; see AI_HANDOFF.md |
 | **Order Edit History** | `js/order-edit.js`, edit-mode branches in `js/cart.js` (Bill & Settle / Save & Exit) | 🆕 NEW (2026-09-16 session 4) — not yet frozen, but reuses/extends the frozen Billing Workflow and Customer Order History Synchronization systems above; see AI_HANDOFF.md for full design |
 
 **Rule:** If you are unsure whether a system is frozen, treat it as frozen and ask the user instead.
@@ -178,7 +179,7 @@ Before modifying any of the items below, a future AI agent **must verify** that 
 | `customer_order_history/{uid}/orders` shape | `js/cart.js` | `js/history.js`, `js/order-status.js` |
 | `customers/{phone}` document shape | `customer.html` | `js/auth.js` |
 | `usernames/{username}` document shape | `customer.html`, `order-panel-updates/js/auth.js` | `js/auth.js` |
-| Password hash format: SHA-256(password + ":" + phone) | `customer.html`, `order-panel-updates/js/auth.js` | `js/auth.js` |
+| Password hash format: SHA-256(password + ":" + phone). Login also tries `customers.passwordHashPhone` (phone the hash was made with, set by a POS phone change) [2026-10-01] | `customer.html`, `order-panel-updates/js/auth.js` | `js/auth.js` |
 | `menu_items.inStock` field | `js/menu-management.js` | `js/menu.js` |
 | Anonymous Firebase Auth pattern | `js/incoming-orders.js`, `js/admin.js` | `js/auth.js` |
 | QR table ID format (`"Table N"`) | `js/tables.js`, `index.html` | `js/order.js` |
@@ -228,7 +229,7 @@ Schema changes require **explicit user approval**. Never rename collections, ren
 ```
 {
   name:          string      // Customer display name
-  phone:         string      // "+91XXXXXXXXXX" (also the document ID) — permanent identity
+  phone:         string      // "+91XXXXXXXXXX" (also the document ID). Changed ONLY by js/customer-identity.js, which migrates the doc atomically (2026-10-01); uid is the permanent identity
   username:      string      // @handle without @ (e.g. "arnavmishra") — unique, set at registration
   passwordHash:  string      // SHA-256(password + ":" + phone) — set at registration
   phoneVerified: boolean     // Always false in bridge mode (OTP bypassed)
@@ -241,6 +242,10 @@ Schema changes require **explicit user approval**. Never rename collections, ren
   lifetimeSpend: number      // FieldValue.increment(total) on each completion
   lastOrderAt:   Timestamp   // serverTimestamp() on each completion; null until first order
   // Note: field was previously stored as `authUid` (bug, fixed session 17). Read as uid || authUid for backward compat.
+  // ── Added 2026-10-01 by POS "Edit Customer" (js/customer-identity.js), all optional ──
+  passwordHashPhone: string  // phone the passwordHash was computed with, when it differs from the current phone
+  previousPhones:    string[] // earlier phones of this customer, oldest first
+  phoneChangedAt:    Timestamp // last phone migration
   // Note: passwordHash is absent on pre-session-21 accounts. Treat absence as "needs registration".
 }
 ```
@@ -253,7 +258,18 @@ Schema changes require **explicit user approval**. Never rename collections, ren
 ```
 Document ID is the username (without @). Used to enforce global username uniqueness.
 Read by the registration form for real-time availability checks.
-Written once at account creation; username changes are a future feature.
+Written once at account creation; username changes are a future feature. `phone` is re-pointed (operator `update`) when a customer's phone is changed from the POS (2026-10-01).
+
+#### `customer_phone_redirects/{oldPhone}` — Phone-change forwarding (added 2026-10-01)
+```
+{
+  newPhone: string     // "+91XXXXXXXXXX" — where the profile lives now
+  uid:      string     // customer's permanent uid (same-uid guard on the reader side)
+  name:     string
+  movedAt:  Timestamp
+}
+```
+Doc ID = the customer's PREVIOUS phone. Written only inside the POS phone-change transaction (`js/customer-identity.js`); deleted when that number becomes a live customer again. Read by the Customer Panel (`js/auth.js` `_refreshSessionFromProfile`) and `customer.html` to heal a session holding the old phone, and by POS `js/incoming-orders.js` for in-flight QR orders. Rules: read = signed in, write = operator.
 
 #### `menu_items/{itemId}` — Menu catalog
 ```
