@@ -50,21 +50,27 @@ const _normPhone = (p) => {
     return d.length === 10 ? `+91${d}` : '';
 };
 
+/** Category counts as Pizza when it is just the word (any case / plural / emoji): "Pizza", "Pizzas", "🍕 Pizza". */
+const _isPizzaCategory = (c) => /^[^a-z0-9]*pizzas?[^a-z0-9]*$/i.test(String(c || ''));
+
 /** Eligible = a real menu item in the "Pizza" category (same test js/menu.js uses). */
 export function isEligiblePizzaItem(cartItem) {
     if (!cartItem || cartItem.freeOffer) return false;
     if (!(Number(cartItem.price) > 0) || !(Number(cartItem.qty) > 0)) return false;
-    if (cartItem.category) return String(cartItem.category).toLowerCase() === 'pizza';
+    if (cartItem.category) return _isPizzaCategory(cartItem.category);
+    // Cart rows added without a category (stepper / customer-panel merge): look the item up on the
+    // live menu by id, then by exact name.
     const menu = Array.isArray(window._posMenuItems) ? window._posMenuItems : [];
-    const m = menu.find(x => x.id === cartItem.id);
-    return !!m && String(m.category || '').toLowerCase() === 'pizza';
+    const nm = String(cartItem.name || '').trim().toLowerCase();
+    const m = menu.find(x => x.id === cartItem.id) || (nm ? menu.find(x => String(x.name || '').trim().toLowerCase() === nm) : null);
+    return !!m && _isPizzaCategory(m.category);
 }
 export const cartHasEligiblePizza = (cart) => (cart || []).some(isEligiblePizzaItem);
 
 /** Cheapest in-stock "Spring Roll" on the live POS menu (value of the free item). */
 export function findSpringRollMenuItem() {
     const menu = Array.isArray(window._posMenuItems) ? window._posMenuItems : [];
-    const hits = menu.filter(x => /spring\s*roll/i.test(x.name || '') && x.inStock !== false);
+    const hits = menu.filter(x => /spring\s*roll/i.test(x.name || '') && !/pizza/i.test(x.name || '') && x.inStock !== false);
     hits.sort((a, b) => (Number(a.price) || 0) - (Number(b.price) || 0));
     return hits[0] || null;
 }
@@ -77,12 +83,12 @@ export async function getClaim(phone) {
     return snap.exists() ? (snap.data().offerClaims?.[PIZZA_OFFER_ID] || null) : null;
 }
 
-/** Atomically claim. Throws OfferError('ALREADY_CLAIMED' | 'NO_CUSTOMER' | 'NO_PHONE'). */
+/** Atomically claim. Throws OfferError('ALREADY_CLAIMED' | 'PENDING' | 'NO_PHONE'). */
 export async function claimOffer({ phone, name, slotKey, value, itemName }) {
     const p = _normPhone(phone);
-    if (!p) throw new OfferError('NO_PHONE', 'Attach a customer (name + phone) to this order first.');
+    if (!p) throw new OfferError('NO_PHONE', 'Enter a valid 10-digit phone number for this customer first.');
     const ref = doc(db, 'customers', p);
-    const claimToken = `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    let claimToken = `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     await runTransaction(db, async (tx) => {
         const snap = await tx.get(ref);
         const claim = {
@@ -103,8 +109,18 @@ export async function claimOffer({ phone, name, slotKey, value, itemName }) {
             });
             return;
         }
-        if (snap.data().offerClaims?.[PIZZA_OFFER_ID]) {
-            throw new OfferError('ALREADY_CLAIMED', 'This customer has already claimed the free Spring Roll offer.');
+        const existing = snap.data().offerClaims?.[PIZZA_OFFER_ID];
+        if (existing) {
+            if (existing.finalized === true) {
+                throw new OfferError('ALREADY_CLAIMED', 'This customer has already used the free Spring Roll offer.');
+            }
+            // Unsettled claim made from THIS SAME table/slot (e.g. the browser storage marker was lost
+            // after a refresh / cache clear) → take it over instead of locking the operator out.
+            if (slotKey && existing.slotKey === slotKey && existing.claimToken) {
+                claimToken = existing.claimToken;
+                return;
+            }
+            throw new OfferError('PENDING', 'This customer already has the offer reserved on another open bill. Settle/cancel that bill, or release it from Admin → Customers.');
         }
         tx.update(ref, { [`offerClaims.${PIZZA_OFFER_ID}`]: claim });
     });
