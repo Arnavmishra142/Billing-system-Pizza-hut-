@@ -8,7 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
     <title>POS System - New Pizza Hut & Live Cake</title>
-    <link rel="stylesheet" href="css/style.css?v=305">
+    <link rel="stylesheet" href="css/style.css?v=306">
     <link rel="manifest" href="manifest.json">
 
     <!-- =========================================
@@ -454,12 +454,16 @@
 
                     <!-- 🥟 FREE SPRING ROLL — AI UPDATE [2026-10-01]. Shown only when the order has an eligible Pizza
                          (or the roll is already applied). Logic: js/cart.js (FREE SPRING ROLL block) + js/pizza-offer.js. -->
-                    <div id="freeRollBox" style="display:none;margin:10px 0;">
-                        <label style="display:flex;align-items:center;gap:8px;font-size:0.9rem;font-weight:700;color:#e6edf3;cursor:pointer;">
-                            <input type="checkbox" id="freeRollCheck" style="width:18px;height:18px;accent-color:#16a34a;">
-                            <span>✓ FREE SPRING ROLL <span style="font-size:0.72rem;font-weight:600;color:#8b949e;">(Any Pizza offer)</span></span>
-                        </label>
-                        <div id="freeRollMsg" style="font-size:0.78rem;margin-top:4px;min-height:14px;"></div>
+                    <div id="freeRollBox" class="free-roll-box" style="display:none;">
+                        <div class="free-roll-row">
+                            <span class="free-roll-icon" aria-hidden="true">🥟</span>
+                            <div class="free-roll-text">
+                                <div class="free-roll-title">Free Spring Roll</div>
+                                <div class="free-roll-sub">Any Pizza offer · one-time per customer</div>
+                            </div>
+                            <button type="button" id="freeRollBtn" class="free-roll-btn" aria-pressed="false">Apply</button>
+                        </div>
+                        <div id="freeRollMsg" class="free-roll-msg" role="status" aria-live="polite"></div>
                     </div>
 
                     <!-- 🎟️ Coupon — AI UPDATE [2026-09-12] -->

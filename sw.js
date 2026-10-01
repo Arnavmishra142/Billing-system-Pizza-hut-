@@ -101,7 +101,8 @@
 // index.html, customer.html changed; NEW js/customer-identity.js precached below: POS "Edit Customer" pencil —
 // edits the customer's real profile incl. safe phone migration — see AI_HANDOFF.md).
 // [AI UPDATE 2026-10-01] v58 → v59: NEW js/pizza-offer.js (Pizza → Spring Roll FREE offer); cart.js, customers.js, receipt-builder.js, index.html, details.html changed.
-const CACHE_NAME = 'pos-static-v59'; const STATIC_ASSETS = [
+// [AI UPDATE 2026-10-01] v59 → v60: Spring Roll offer fixes — Apply/Unapply button (index.html, css/style.css), cart.js, pizza-offer.js.
+const CACHE_NAME = 'pos-static-v60'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
