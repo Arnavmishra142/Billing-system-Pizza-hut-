@@ -32,7 +32,8 @@
 //   releaseClaim() only works while finalized === false AND the claimToken matches, so a
 //   settled claim can never be un-claimed by a stale cart/slot.
 // ═══════════════════════════════════════════════════════════════════════════
-import { db } from './firebase-config.js';
+import { db, auth } from './firebase-config.js';
+import { signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 import {
     doc, runTransaction, getDoc, serverTimestamp, deleteField,
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
@@ -43,6 +44,23 @@ export const FREE_ITEM_ID      = `FREEOFFER_${PIZZA_OFFER_ID}`;
 
 export class OfferError extends Error {
     constructor(code, message) { super(message); this.code = code; }
+}
+
+/** Firestore rules need a signed-in (operator/anonymous) session — make sure one exists before any write. */
+async function _ensureAuth() {
+    try { if (typeof auth.authStateReady === 'function') await auth.authStateReady(); } catch (_) {}
+    if (!auth.currentUser) await signInAnonymously(auth);
+}
+
+/** Turn a raw Firebase error into a short message that tells staff what to do. */
+export function describeOfferError(err) {
+    const code = String(err?.code || '').replace('firestore/', '').replace('auth/', '');
+    if (code === 'permission-denied')  return 'Permission denied by Firestore rules — deploy the latest firestore.rules and make sure the POS is signed in. (permission-denied)';
+    if (code === 'unavailable' || code === 'deadline-exceeded' || /offline/i.test(err?.message || ''))
+        return 'No connection to the server — check internet and try again. (' + (code || 'offline') + ')';
+    if (code === 'unauthenticated' || code === 'admin-restricted-operation' || code === 'operation-not-allowed')
+        return 'POS is not signed in — enable Anonymous sign-in in Firebase Auth, then reload. (' + code + ')';
+    return 'Could not apply the offer: ' + (code || err?.name || 'error') + (err?.message ? ' — ' + String(err.message).slice(0, 120) : '');
 }
 
 const _normPhone = (p) => {
@@ -87,6 +105,7 @@ export async function getClaim(phone) {
 export async function claimOffer({ phone, name, slotKey, value, itemName }) {
     const p = _normPhone(phone);
     if (!p) throw new OfferError('NO_PHONE', 'Enter a valid 10-digit phone number for this customer first.');
+    await _ensureAuth();
     const ref = doc(db, 'customers', p);
     let claimToken = `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     await runTransaction(db, async (tx) => {
@@ -131,6 +150,7 @@ export async function claimOffer({ phone, name, slotKey, value, itemName }) {
 export async function releaseClaim({ phone, claimToken }) {
     const p = _normPhone(phone);
     if (!p || !claimToken) return false;
+    await _ensureAuth();
     const ref = doc(db, 'customers', p);
     return runTransaction(db, async (tx) => {
         const snap = await tx.get(ref);

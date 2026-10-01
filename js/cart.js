@@ -21,7 +21,7 @@ import { showEditCustomerPopup } from './dialog.js';
 import { updateCustomerIdentity, applyIdentityToLocalSlots } from './customer-identity.js';
 // [AI UPDATE 2026-10-01] "Any Pizza → Spring Roll FREE" one-time customer offer (see js/pizza-offer.js)
 import {
-    PIZZA_OFFER_ID, PIZZA_OFFER_LABEL, FREE_ITEM_ID, OfferError,
+    PIZZA_OFFER_ID, PIZZA_OFFER_LABEL, FREE_ITEM_ID, OfferError, describeOfferError,
     cartHasEligiblePizza, findSpringRollMenuItem, claimOffer, releaseClaim, finalizeClaim,
     buildFreeCartItem, offerRecordFromCart,
 } from './pizza-offer.js';
@@ -994,8 +994,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         localStorage.removeItem(getPizzaOfferKey());
                     } catch (e) {
                         // marker is kept → renderCart() retries the release; Admin can also release it.
-                        console.warn('[PizzaOffer] release failed:', e);
-                        _setRollNotice('Removed from the bill, but the offer could not be released yet — check connection.', 'error');
+                        console.error('[PizzaOffer] release failed:', e);
+                        _setRollNotice('Removed from the bill, but the offer could not be released yet. ' + describeOfferError(e), 'error');
                     }
                 }
                 return;
@@ -1042,8 +1042,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (err instanceof OfferError) {
                 _setRollNotice(err.code === 'ALREADY_CLAIMED' ? '❌ ' + err.message : err.message, 'error');
             } else {
-                console.warn('[PizzaOffer] failed:', err);
-                _setRollNotice('Could not apply the offer. Check connection and try again.', 'error');
+                console.error('[PizzaOffer] failed:', err);
+                _setRollNotice(describeOfferError(err), 'error');
             }
         } finally {
             _freeRollBusy = false;
