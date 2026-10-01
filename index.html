@@ -452,6 +452,16 @@
                         <span id="cartTotal" class="total-amount">₹0.00</span>
                     </div>
 
+                    <!-- 🥟 FREE SPRING ROLL — AI UPDATE [2026-10-01]. Shown only when the order has an eligible Pizza
+                         (or the roll is already applied). Logic: js/cart.js (FREE SPRING ROLL block) + js/pizza-offer.js. -->
+                    <div id="freeRollBox" style="display:none;margin:10px 0;">
+                        <label style="display:flex;align-items:center;gap:8px;font-size:0.9rem;font-weight:700;color:#e6edf3;cursor:pointer;">
+                            <input type="checkbox" id="freeRollCheck" style="width:18px;height:18px;accent-color:#16a34a;">
+                            <span>✓ FREE SPRING ROLL <span style="font-size:0.72rem;font-weight:600;color:#8b949e;">(Any Pizza offer)</span></span>
+                        </label>
+                        <div id="freeRollMsg" style="font-size:0.78rem;margin-top:4px;min-height:14px;"></div>
+                    </div>
+
                     <!-- 🎟️ Coupon — AI UPDATE [2026-09-12] -->
                     <!-- [AI UPDATE 2026-09-12] Section now has an id + a gate-status label so
                          js/cart.js can disable the whole coupon box (input + Apply button) and

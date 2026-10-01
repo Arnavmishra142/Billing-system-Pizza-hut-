@@ -376,6 +376,10 @@
             const _ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
             const _itemAmt = (item.price + _ep) * item.qty;
             _printTotal += _itemAmt;
+            if (item.freeOffer) { // [AI UPDATE 2026-10-01]
+                billText += item.name.padEnd(16, " ").substring(0, 16) + "     1x     FREE" + "\n" + "  (Pizza Offer - Free Spring Roll)" + "\n";
+                return;
+            }
             let n = item.name.length > 16 ? item.name.substring(0, 14) + ".." : item.name.padEnd(16, " ");
             let q = String(item.qty).padStart(2, " ") + "x";
             let a = String(_itemAmt).padStart(6, " ");
@@ -463,6 +467,15 @@
                 ${bill.items.map(item => {
                     const _ep = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
                     const _amt = (item.price + _ep) * item.qty;
+                    if (item.freeOffer) { // [AI UPDATE 2026-10-01] Pizza offer: free Spring Roll
+                        return `
+                    <div class="item-row">
+                        <span class="item-name">${_esc(item.name)}</span>
+                        <span class="item-qty">1x</span>
+                        <span class="item-amt" style="color:#16a34a;font-weight:800;">FREE<br>₹0</span>
+                    </div>
+                    <div class="item-extra" style="color:#16a34a;">🎁 ${_esc(item.offerLabel || 'Any Pizza → Spring Roll FREE')}</div>`;
+                    }
                     return `
                     <div class="item-row">
                         <span class="item-name">${_esc(item.name)}</span>

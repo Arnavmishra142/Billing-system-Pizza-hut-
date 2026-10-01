@@ -1,6 +1,32 @@
 # AI_HANDOFF.md — Project State Document
 > Auto-maintained by AI agent. Update this file after every implementation.
-> Last updated: 2026-10-01 (POS "Edit Customer" — pencil beside the customer name edits the REAL customer profile, incl. safe phone migration; earlier: 2026-09-27 (Menu Management sync bug fix — POS billing item grid was a one-time fetch with no live listener; earlier: 2026-09-25 Effects tab: Live Status card — real current weather + what the customer app is actually showing; earlier: 2026-09-24 Seasonal Effects: Admin ✨ Effects tab + Rainy Days; earlier: 2026-09-22 fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount))
+> Last updated: 2026-10-01 (Pizza → Spring Roll FREE one-time offer; earlier: 2026-10-01 (POS "Edit Customer" — pencil beside the customer name edits the REAL customer profile, incl. safe phone migration; earlier: 2026-09-27 (Menu Management sync bug fix — POS billing item grid was a one-time fetch with no live listener; earlier: 2026-09-25 Effects tab: Live Status card — real current weather + what the customer app is actually showing; earlier: 2026-09-24 Seasonal Effects: Admin ✨ Effects tab + Rainy Days; earlier: 2026-09-22 fix: Voice Announcement mic silent on Bluetooth speakers; earlier same day: Push-to-Talk Voice Announcement mic in the Recent Bills drawer; earlier: quick calculator in the Custom Instant Discount modal; earlier: Google Review QR compact trigger + modal; earlier same day: QR card in the cart drawer; earlier: Custom Instant Discount: Cash / % toggle; earlier same day: online-customer Edit History stats fix, Custom Instant Discount))
+
+---
+
+## [AI UPDATE 2026-10-01] — "Any Pizza → 1 Spring Roll FREE" (one-time, customer-specific offer)
+
+### Source of truth
+`customers/{+91XXXXXXXXXX}.offerClaims.pizza_spring_roll` — the existing customer doc (no new collection / customer system). Shape: `{status:'claimed', finalized:false|true, claimToken, claimedAt, value, itemName, slotKey, orderId, billNumber, settledAt}`. Survives refresh/logout/devices/future orders. `js/customer-identity.js` phone migration copies the doc by spread, so the claim moves with the customer. No firestore.rules change (customers: read = signed-in, update = operator). The Customer Panel reads this same field.
+
+### Claim flow
+1. POS tick (`#freeRollCheck`, shown only if cart has an eligible Pizza) → `_onFreeRollToggle()` in `js/cart.js`; requires `customerPhone_<table>_<slot>`.
+2. `claimOffer()` (`js/pizza-offer.js`) = Firestore transaction: rejects `ALREADY_CLAIMED`; creates a minimal `manual_pos` profile if the walk-in phone has none; writes `finalized:false` + `claimToken`. Busy flag blocks double clicks; cart is re-checked after the transaction (Pizza removed meanwhile → claim released).
+3. Cart gets item `FREEOFFER_pizza_spring_roll` (price 0, qty 1, `freeOffer`, `offerLabel`, `offerValue`); slot marker `pizzaOfferClaim_<table>_<slot>` = `{token, phone}` in localStorage (convenience only).
+4. `renderCart()` → `_normalizeFreeRoll()` every render: Pizza gone → roll removed; qty/price/extras forced back to 1/0/none; duplicates dropped; unsettled claim whose roll vanished → `releaseClaim()` (token-guarded, never touches finalized). Skipped while the POS menu has not loaded.
+5. Bill & Settle / Save & Exit: `_takeOfferSettlement()` (before `saveLocalCart([])`) → `_finalizeOfferForBill()` → `finalizeClaim()` (idempotent; Edit-History re-settle is a no-op). Cancel Order wipes the cart → marker still present → release path.
+6. Admin can free a stuck unsettled claim (`adminReleasePending`, never finalized ones).
+
+### Where the offer is saved
+`offer:{offerId,label,status:'Claimed',itemName,value}` on `sales_history`, `customer_order_history/{uid}/orders/*` (both sync functions) and ghost history; line items carry `freeOffer/offerLabel/offerValue`. Pizza prices and order totals are untouched (roll is ₹0).
+
+### Files / functions (Billing)
+- NEW `js/pizza-offer.js`: `claimOffer, releaseClaim, finalizeClaim, adminReleasePending, getClaim, isEligiblePizzaItem, cartHasEligiblePizza, findSpringRollMenuItem, buildFreeCartItem, offerRecordFromCart`.
+- `js/cart.js`: imports; FREE SPRING ROLL block (`_normalizeFreeRoll, _renderFreeRollBox, _onFreeRollToggle, _takeOfferSettlement, _finalizeOfferForBill`); free-item row in `renderCart()`; `category` stored on add-to-cart; settle handlers; legacy printed bill row; history item/offer fields in `syncManualCustomerProfile` + `syncCustomerOrderCompletion`.
+- `index.html` (`#freeRollBox`), `js/receipt-builder.js` (FREE row), `details.html` (receipt + reprint), `js/customers.js` (Offers card, per-order offer line, `_custReleaseOffer`), `sw.js` (v58→v59, precache).
+
+### Eligibility / known limits
+Eligible = cart item whose category is "Pizza"; free item = cheapest in-stock menu item named like "spring roll". Closing the POS mid-order leaves an unsettled claim reserved until released from Admin. Removing the Pizza while editing an already-settled order does not un-claim (finalized claims are permanent). Deleting a customer deletes their claim. Untested in a live browser/Firestore — verify: tick, double-click, 2 sessions, untick/pizza removal, settle, Edit History re-settle, phone edit while pending.
 
 ---
 
