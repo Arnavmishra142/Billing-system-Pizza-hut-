@@ -208,8 +208,30 @@ async function fetchAllSales(forceServer = false) {
             allSales = [];
             snap.forEach(d => { allSales.push({ ...d.data(), id: d.id }); });
             _salesServerFetchedAt = now;
-        } catch (e) { console.error("Sales fetch error:", e); }
+            _salesFetchFailed = false;
+        } catch (e) {
+            console.error("Sales fetch error:", e);
+            _salesFetchFailed = true;
+        }
     }
+    _renderSalesFetchNotice();
+}
+
+// [AI UPDATE 2026-10-04] A failed server fetch used to be swallowed (console only) and Admin silently showed the
+// IndexedDB cache — which can be missing recent POS bills. Say so on screen instead of looking "complete".
+let _salesFetchFailed = false;
+function _renderSalesFetchNotice() {
+    const host = document.getElementById('salesSection');
+    if (!host) return;
+    let el = document.getElementById('salesFetchNotice');
+    if (!_salesFetchFailed) { if (el) el.remove(); return; }
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'salesFetchNotice';
+        el.style.cssText = 'margin:10px 0;padding:10px 12px;border-radius:8px;background:rgba(210,153,34,.15);border:1px solid #d29922;color:#d29922;font-weight:700;font-size:0.82rem;';
+        host.insertBefore(el, host.firstChild);
+    }
+    el.textContent = '⚠ Could not reach the server — showing saved/cached data, recent bills may be missing. Tap Refresh to retry.';
 }
 
 window.loadSalesData = async function(filterType, filterValue) {
