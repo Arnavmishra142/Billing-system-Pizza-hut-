@@ -100,9 +100,10 @@
 // AI UPDATE [2026-10-01]: Bumped pos-static-v57 → pos-static-v58 (js/cart.js, js/dialog.js, js/incoming-orders.js,
 // index.html, customer.html changed; NEW js/customer-identity.js precached below: POS "Edit Customer" pencil —
 // edits the customer's real profile incl. safe phone migration — see AI_HANDOFF.md).
-// [AI UPDATE 2026-10-01] v58 → v59: NEW js/pizza-offer.js (Pizza → Spring Roll FREE offer); cart.js, customers.js, receipt-builder.js, index.html, details.html changed.
-// [AI UPDATE 2026-10-01] v59 → v60: Spring Roll offer fixes — Apply/Unapply button (index.html, css/style.css), cart.js, pizza-offer.js.
-const CACHE_NAME = 'pos-static-v60'; const STATIC_ASSETS = [
+// [AI UPDATE 2026-10-01] v58 → v59 / v60: Pizza → Spring Roll FREE offer added (since fully REMOVED — see below).
+// [AI UPDATE 2026-10-04] v60 → v61: Free Spring Roll offer REMOVED (js/pizza-offer.js deleted; cart.js, customers.js, receipt-builder.js,
+//   index.html, details.html, css/style.css cleaned) + POS sales_history durable-save queue (js/cart.js) + Admin sales fetch error banner (js/admin.js, admin/index.html).
+const CACHE_NAME = 'pos-static-v61'; const STATIC_ASSETS = [
     '/',
     '/index.html',
     '/customer.html',
@@ -111,7 +112,6 @@ const CACHE_NAME = 'pos-static-v60'; const STATIC_ASSETS = [
     '/js/firebase-config.js',
     '/js/dialog.js',
     '/js/customer-identity.js',
-    '/js/pizza-offer.js',
     '/js/menu.js',
     '/js/cart.js',
     '/js/receipt-builder.js',

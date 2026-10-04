@@ -162,6 +162,10 @@ Order Completed ✅
 Status value progression (these strings are shared with the Customer Panel — never change them):
 - `"pending"` → `"accepted"` → `"kot"` → `"completed"`
 
+**[2026-10-04] Additions (no step above changed):**
+- Every `sales_history` write from the POS (Bill & Settle / Save & Exit, new or Edit History) MUST go through `saveSaleDurably()` in `js/cart.js` (localStorage-backed retry queue, same `billId`). Never reintroduce a bare fire-and-forget `setDoc`/`updateDoc` on `sales_history` — a failed write silently loses the bill in Admin.
+- An active customer order older than **3 hours** (from its Firestore `createdAt`) is retired by the Customer Panel with status `"dismissed"` (`dismissReason: "auto_expired_3h"`) and is never written to `customer_order_history`. No new status value was added.
+
 ---
 
 ## 4. Cross-Repository Contract (CRITICAL)

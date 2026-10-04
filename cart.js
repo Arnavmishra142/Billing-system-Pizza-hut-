@@ -19,12 +19,6 @@ import { showAlert, showConfirm, showCustomerDetailsPopup } from './dialog.js';
 // [AI UPDATE 2026-10-01] POS Edit Customer (name + phone) — see js/customer-identity.js header.
 import { showEditCustomerPopup } from './dialog.js';
 import { updateCustomerIdentity, applyIdentityToLocalSlots } from './customer-identity.js';
-// [AI UPDATE 2026-10-01] "Any Pizza → Spring Roll FREE" one-time customer offer (see js/pizza-offer.js)
-import {
-    PIZZA_OFFER_ID, PIZZA_OFFER_LABEL, FREE_ITEM_ID, OfferError, describeOfferError, isServerUnavailable,
-    cartHasEligiblePizza, findSpringRollMenuItem, claimOffer, releaseClaim, finalizeClaim,
-    buildFreeCartItem, offerRecordFromCart,
-} from './pizza-offer.js';
 
 // NOTE [2026-09-13]: The two historical session notes immediately below (dated
 // 2026-07-28) describe the ORIGINAL table-only-scoped implementation and are
@@ -392,12 +386,9 @@ async function syncManualCustomerProfile(name, rawPhone, total, billNumber, tabl
                             extras:         Array.isArray(i.extras) ? i.extras : [],
                             specialRequest: i.specialRequest || '',
                             subtotal:       +((i.price + ep) * i.qty).toFixed(2),
-                            ...(i.freeOffer ? { freeOffer: i.freeOffer, offerLabel: i.offerLabel || PIZZA_OFFER_LABEL, offerValue: Number(i.offerValue) || 0 } : {}),
                         };
                     }),
                     total:            +total.toFixed(2),
-                    // [AI UPDATE 2026-10-01] customer-history record of the Pizza→Spring Roll offer (additive)
-                    ...(offerRecordFromCart(cartSnapshot) ? { offer: offerRecordFromCart(cartSnapshot) } : {}),
                     completedAt:      serverTimestamp(),
                     completionReason, // 'bill_settle' | 'save_exit'
                     orderedAt:        new Date().toISOString(),
@@ -614,12 +605,9 @@ async function syncCustomerOrderCompletion(tableName, customerSlot, cartSnapshot
                             extras:         Array.isArray(i.extras) ? i.extras : [],
                             specialRequest: i.specialRequest || '',
                             subtotal:       +((i.price + ep) * i.qty).toFixed(2),
-                            ...(i.freeOffer ? { freeOffer: i.freeOffer, offerLabel: i.offerLabel || PIZZA_OFFER_LABEL, offerValue: Number(i.offerValue) || 0 } : {}),
                         };
                     }),
                     total:            +total.toFixed(2),
-                    // [AI UPDATE 2026-10-01] customer-history record of the Pizza→Spring Roll offer (additive)
-                    ...(offerRecordFromCart(cartSnapshot) ? { offer: offerRecordFromCart(cartSnapshot) } : {}),
                     completedAt:      serverTimestamp(),
                     completionReason,          // 'bill_settle' | 'save_exit'
                     orderedAt:        new Date().toISOString(),
@@ -897,200 +885,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // checkoutBtn/saveExitBtn handlers below so the popup only ever appears
     // ONCE per bill; see the "two-step" flow fix in those handlers.
     const getManualCustomerIdentityKey = () => `manualCustomerIdentity_${getCurrentTable()}_${getCurrentCustomer()}`;
-
-    // ── AI UPDATE [2026-10-01]: FREE SPRING ROLL (Any Pizza → 1 Spring Roll FREE) ─────────
-    // One-time, customer-specific. The AUTHORITATIVE claim is customers/{phone}.offerClaims
-    // .pizza_spring_roll (transactions in js/pizza-offer.js) — localStorage below is only a
-    // per-slot convenience marker {token, phone} so an unsettled claim can be released when the
-    // Pizza/roll is removed or the order is cancelled. Cart item: id FREEOFFER_pizza_spring_roll,
-    // price 0, qty locked to 1, flagged `freeOffer` (so it never merges with a paid Spring Roll).
-    const getPizzaOfferKey = () => `pizzaOfferClaim_${getCurrentTable()}_${getCurrentCustomer()}`;
-    const _readOfferMarker = () => { try { return JSON.parse(localStorage.getItem(getPizzaOfferKey()) || 'null'); } catch (_) { return null; } };
-    let _freeRollBusy = false;      // blocks double-click / repeated clicks while a claim is in flight
-    let _freeRollNotice = '';
-    let _freeRollNoticeKind = 'warn';   // 'warn' | 'error'
-    const _p10 = (p) => String(p || '').replace(/\D/g, '').slice(-10);
-    const _setRollNotice = (txt, kind = 'warn') => { _freeRollNotice = txt; _freeRollNoticeKind = kind; };
-
-    function _normalizeFreeRoll() {
-        const marker   = _readOfferMarker();
-        const hasRoll  = currentCart.some(i => i.freeOffer === PIZZA_OFFER_ID);
-        const menuLoaded = Array.isArray(window._posMenuItems) && window._posMenuItems.length > 0;
-        // Menu not loaded yet → we cannot judge Pizza eligibility; never drop/release on a guess.
-        if (!menuLoaded && (hasRoll || marker)) return;
-        let changed = false;
-        if (hasRoll) {
-            if (!cartHasEligiblePizza(currentCart)) {           // Pizza gone → roll must go
-                currentCart = currentCart.filter(i => i.freeOffer !== PIZZA_OFFER_ID);
-                changed = true;
-                _setRollNotice('Free Spring Roll removed — the order no longer has a Pizza.');
-            } else {                                            // quantity / price / extras can't be abused
-                let seen = false;
-                currentCart = currentCart.filter(i => {
-                    if (i.freeOffer !== PIZZA_OFFER_ID) return true;
-                    if (seen) { changed = true; return false; } // never more than ONE free roll
-                    seen = true;
-                    if (i.qty !== 1 || i.price !== 0 || (i.extras && i.extras.length) || i.specialRequest) changed = true;
-                    i.qty = 1; i.price = 0; i.extras = []; i.specialRequest = '';
-                    if ((i.printedQty || 0) > 1) i.printedQty = 1;
-                    return true;
-                });
-            }
-        }
-        if (changed) saveLocalCart(currentCart);
-        // Unsettled claim whose roll is no longer in the cart → give the claim back (token-guarded;
-        // a settled claim can never be released).
-        const stillHasRoll = currentCart.some(i => i.freeOffer === PIZZA_OFFER_ID);
-        if (marker && !stillHasRoll) {
-            localStorage.removeItem(getPizzaOfferKey());
-            releaseClaim({ phone: marker.phone, claimToken: marker.token })
-                .catch(e => console.warn('[PizzaOffer] release failed (admin can release):', e.message));
-        } else if (marker && stillHasRoll) {
-            const livePhone = localStorage.getItem(getCustomerPhoneKey());
-            if (livePhone && _p10(livePhone) !== _p10(marker.phone)) { // phone edited via Edit Customer → keep marker current
-                localStorage.setItem(getPizzaOfferKey(), JSON.stringify({ token: marker.token, phone: livePhone }));
-            }
-        }
-    }
-
-    function _renderFreeRollBox() {
-        const box = document.getElementById('freeRollBox');
-        const btn = document.getElementById('freeRollBtn');
-        const msg = document.getElementById('freeRollMsg');
-        if (!box || !btn) return;
-        const hasRoll  = currentCart.some(i => i.freeOffer === PIZZA_OFFER_ID);
-        const eligible = cartHasEligiblePizza(currentCart);
-        box.style.display = (eligible || hasRoll) ? '' : 'none';
-        box.classList.toggle('is-applied', hasRoll);
-        box.classList.toggle('is-busy', _freeRollBusy);
-        btn.disabled = _freeRollBusy;
-        btn.classList.toggle('is-unapply', hasRoll);
-        btn.setAttribute('aria-pressed', hasRoll ? 'true' : 'false');
-        btn.textContent = _freeRollBusy ? (hasRoll ? 'Removing…' : 'Applying…') : (hasRoll ? 'Unapply' : 'Apply');
-        if (msg) {
-            const txt = _freeRollNotice || (hasRoll ? '✓ Applied — 1 Spring Roll added at ₹0.' : '');
-            msg.textContent = txt;
-            msg.className = 'free-roll-msg' + (_freeRollNotice ? (_freeRollNoticeKind === 'error' ? ' is-error' : ' is-warn') : (hasRoll ? ' is-ok' : ''));
-        }
-    }
-
-    // wantOn=true → APPLY, wantOn=false → UNAPPLY. Both hold the busy flag for the whole async job, so
-    // a quick Unapply → Apply can never race the claim release (that used to give a false "Already claimed").
-    async function _onFreeRollToggle(wantOn) {
-        if (_freeRollBusy) return;
-        _freeRollBusy = true; _freeRollNotice = '';
-        _renderFreeRollBox();
-        try {
-            currentCart = getLocalCart();
-
-            // ── UNAPPLY ─────────────────────────────────────────────────────────────
-            if (!wantOn) {
-                const marker = _readOfferMarker();
-                currentCart = currentCart.filter(i => i.freeOffer !== PIZZA_OFFER_ID);
-                saveLocalCart(currentCart);
-                if (marker) {
-                    try {
-                        await releaseClaim({ phone: marker.phone, claimToken: marker.token });
-                        localStorage.removeItem(getPizzaOfferKey());
-                    } catch (e) {
-                        // marker is kept → renderCart() retries the release; Admin can also release it.
-                        console.error('[PizzaOffer] release failed:', e);
-                        _setRollNotice('Removed from the bill, but the offer could not be released yet. ' + describeOfferError(e), 'error');
-                    }
-                }
-                return;
-            }
-
-            // ── APPLY ───────────────────────────────────────────────────────────────
-            if (currentCart.some(i => i.freeOffer === PIZZA_OFFER_ID)) return;     // already applied
-            if (!cartHasEligiblePizza(currentCart)) { _setRollNotice('Add a Pizza to use this offer.'); return; }
-
-            let phone = localStorage.getItem(getCustomerPhoneKey());
-            if (!phone) {
-                // Walk-in with no customer attached yet → ask right here (same popup + same storage keys
-                // Bill & Settle uses, so it will not ask a second time).
-                const picked = await showCustomerDetailsPopup({ onLookupPhone: _lookupManualCustomerByPhone });
-                if (!/^\d{10}$/.test(picked.phone || '')) {
-                    _setRollNotice('A valid 10-digit phone number is needed — the offer is one-time per customer.');
-                    return;
-                }
-                localStorage.setItem(getManualCustomerIdentityKey(), JSON.stringify(picked));
-                localStorage.setItem(getCustomerNameKey(), picked.name || 'Customer');
-                localStorage.setItem(getCustomerPhoneKey(), `+91${picked.phone}`);
-                phone = `+91${picked.phone}`;
-            }
-
-            const roll = findSpringRollMenuItem();
-            if (!roll) { _setRollNotice('Spring Roll is not on the menu / out of stock.'); return; }
-
-            let res;
-            try {
-                res = await claimOffer({
-                    phone, name: localStorage.getItem(getCustomerNameKey()) || '',
-                    slotKey: `${getCurrentTable()}_${getCurrentCustomer()}`,
-                    value: roll.price, itemName: roll.name,
-                });
-            } catch (claimErr) {
-                // Server quota / outage: let staff apply it MANUALLY so the counter is never blocked.
-                // No server claim exists → the one-time check is skipped; Bill & Settle will try to
-                // record it (finalizeClaim) once Firebase is reachable again.
-                if (!(claimErr instanceof OfferError) && isServerUnavailable(claimErr)) {
-                    const ok = await showConfirm(
-                        'Firebase is unavailable (' + (claimErr.code || 'offline') + '), so the one-time check cannot run.\n\n' +
-                        'Apply the free Spring Roll manually? Make sure this customer has not already used it.',
-                        { type: 'warning', confirmText: 'Apply manually', cancelText: 'Cancel' });
-                    if (!ok) { _setRollNotice('Offer not applied — ' + describeOfferError(claimErr), 'error'); return; }
-                    currentCart = getLocalCart();
-                    if (!cartHasEligiblePizza(currentCart)) { _setRollNotice('Pizza was removed — offer not applied.'); return; }
-                    currentCart.push(buildFreeCartItem({ itemName: roll.name, value: roll.price, claimToken: '' }));
-                    saveLocalCart(currentCart);
-                    _setRollNotice('Applied manually (not verified online). It will be recorded when the bill settles.');
-                    return;
-                }
-                throw claimErr;
-            }
-            // Re-read the cart: it may have changed while the transaction was in flight.
-            currentCart = getLocalCart();
-            if (!cartHasEligiblePizza(currentCart)) {
-                await releaseClaim({ phone: res.phone, claimToken: res.claimToken }).catch(() => {});
-                _setRollNotice('Pizza was removed — offer not applied.');
-                return;
-            }
-            localStorage.setItem(getPizzaOfferKey(), JSON.stringify({ token: res.claimToken, phone: res.phone }));
-            currentCart.push(buildFreeCartItem({ itemName: roll.name, value: roll.price, claimToken: res.claimToken }));
-            saveLocalCart(currentCart);
-        } catch (err) {
-            if (err instanceof OfferError) {
-                _setRollNotice(err.code === 'ALREADY_CLAIMED' ? '❌ ' + err.message : err.message, 'error');
-            } else {
-                console.error('[PizzaOffer] failed:', err);
-                _setRollNotice(describeOfferError(err), 'error');
-            }
-        } finally {
-            _freeRollBusy = false;
-            renderCart();
-        }
-    }
-
-    // Called by Bill & Settle / Save & Exit BEFORE saveLocalCart([]): removes the slot marker (so the
-    // settle path is never mistaken for a "cancel → release") and returns what finalizeClaim needs.
-    function _takeOfferSettlement(cartSnapshot) {
-        const rec = offerRecordFromCart(cartSnapshot);
-        if (!rec) return null;                    // no roll in this bill → leave marker for renderCart() to release
-        const marker = _readOfferMarker();
-        localStorage.removeItem(getPizzaOfferKey());
-        return { rec, markerPhone: marker ? marker.phone : null };
-    }
-    function _finalizeOfferForBill(ctx, phoneCandidates, billId, shortOrderId) {
-        if (!ctx) return;
-        const phone = phoneCandidates.find(Boolean) || ctx.markerPhone;
-        finalizeClaim({ phone, orderId: billId, billNumber: shortOrderId, value: ctx.rec.value, itemName: ctx.rec.itemName })
-            .catch(e => console.warn('[PizzaOffer] finalize failed (non-fatal):', e.message));
-    }
-    document.getElementById('freeRollBtn')?.addEventListener('click', () => {
-        const applied = currentCart.some(i => i.freeOffer === PIZZA_OFFER_ID);
-        _onFreeRollToggle(!applied);   // Apply when not applied, Unapply when applied
-    });
 
     // ── AI UPDATE [2026-09-13]: Customer Coupons panel ──────────────────────────
     // Tapping the online customer name badge above (e.g. "Test2") opens a small
@@ -1656,7 +1450,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 qty:            1,
                 printedQty:     0,
                 parcel:         false,
-                ...(item.category ? { category: item.category } : {}), // [AI UPDATE 2026-10-01] pizza-offer eligibility
                 extras:         Array.isArray(item.extras) ? item.extras : [],
                 specialRequest: item.specialRequest || '',
             });
@@ -1704,7 +1497,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 qty:            item.qty,
                 printedQty:     0,
                 parcel:         false,
-                ...(item.category ? { category: item.category } : {}), // pizza-offer eligibility
                 extras:         Array.isArray(item.extras) ? item.extras : [],
                 specialRequest: item.specialRequest || '',
             });
@@ -1736,7 +1528,6 @@ document.addEventListener('DOMContentLoaded', () => {
         _loadCoupon();        // AI UPDATE [2026-09-12]: restore coupon state for this table/slot
         _loadCustomDiscount(); // AI UPDATE [2026-09-20]: restore Custom Instant Discount for this table/slot
         _customDiscountNotice = '';
-        _freeRollNotice = '';   // [pizza-offer] don't carry another slot's message over
         renderCart();
     });
 
@@ -1749,7 +1540,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // The parcel state is stored in the cart item (localStorage) as item.parcel: true/false.
     // Backward compatible — items without the field are treated as parcel: false.
     function renderCart() {
-        _normalizeFreeRoll(); // [AI UPDATE 2026-10-01] free-roll safety (pizza removed / qty / dup) + release unsettled claim
         cartItemsContainer.innerHTML = '';
         let totalAmount = 0;
 
@@ -1817,7 +1607,6 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
             cartTotalElement.innerText = '₹0.00';
             _updateCouponUI(0); // AI UPDATE [2026-09-12]
-            _renderFreeRollBox();
             return;
         }
 
@@ -1837,22 +1626,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const _isTableOrder = !getCurrentTable().includes('Parcel') && getCurrentTable() !== 'Direct Entry';
 
         currentCart.forEach(item => {
-            // [AI UPDATE 2026-10-01] FREE Spring Roll row: no qty/price controls, shows FREE + offer label.
-            // The ✕ keeps working as "untick" (generic remove handler → renderCart releases the claim).
-            if (item.freeOffer === PIZZA_OFFER_ID) {
-                const _fd = document.createElement('div');
-                _fd.className = 'cart-item';
-                _fd.innerHTML = `
-                    <button class="cart-item-remove" data-id="${item.id}" title="Remove free item">✕</button>
-                    <div class="cart-item-header">
-                        <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">🥟 ${_escHtml(item.name)}
-                            <span style="background:#16a34a;color:#fff;font-size:0.7rem;font-weight:800;padding:2px 6px;border-radius:4px;">FREE</span></span>
-                        <span style="color:#16a34a;font-weight:800;">₹0</span>
-                    </div>
-                    <div style="font-size:0.75rem;color:#16a34a;margin-top:2px;">🎁 ${_escHtml(PIZZA_OFFER_LABEL)} · Qty 1</div>`;
-                cartItemsContainer.appendChild(_fd);
-                return;
-            }
             const _extraPrice = Array.isArray(item.extras) ? item.extras.reduce((s, e) => s + (Number(e.price) || 0), 0) : 0;
             const itemTotal = (item.price + _extraPrice) * item.qty;
             totalAmount += itemTotal;
@@ -1926,7 +1699,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         cartTotalElement.innerText = `₹${totalAmount.toFixed(2)}`;
         _updateCouponUI(totalAmount); // AI UPDATE [2026-09-12]: refresh coupon discount / payable rows
-        _renderFreeRollBox();         // [AI UPDATE 2026-10-01]
 
         // AI UPDATE [2026-09-14]: Immediately compute correct "Xm" text + color state
         // for the per-item timer badges just inserted above, instead of waiting for
@@ -2780,11 +2552,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     const _itemAmt = (item.price + _ep) * item.qty;
                     _legacyTotal += _itemAmt;
                     legacyTotalQty += item.qty;
-                    if (item.freeOffer) { // [AI UPDATE 2026-10-01] free Spring Roll — clearly FREE, ₹0
-                        billText += `${item.name}`.padEnd(16, ' ').substring(0, 16) + ' 1x  FREE   Rs0\n';
-                        billText += '  (Pizza Offer - Free Spring Roll)\n';
-                        return;
-                    }
                     billText += formatBillRow(item.name, item.qty, item.price + _ep, _itemAmt);
                     if (Array.isArray(item.extras) && item.extras.length > 0) {
                         item.extras.forEach(e => { billText += `  + ${e.name}${e.price ? ` (+Rs${e.price})` : ''}\n`; });
@@ -2810,7 +2577,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             // ── Clear cart and navigate back immediately ───────────────────────
-            const _offerCtx = _takeOfferSettlement(cartSnapshot); // [AI UPDATE 2026-10-01] before the cart/marker is wiped
             saveLocalCart([]);
             currentCart = [];
             renderCart();
@@ -2832,7 +2598,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (_editMode) {
                 // ── Update the EXISTING sale in place — never a new document ───
                 updateDoc(doc(db, "sales_history", billId), {
-                    offer: offerRecordFromCart(cartSnapshot), // [AI UPDATE 2026-10-01] Pizza→Spring Roll offer record (null if none)
                     items: cartSnapshot,
                     total: total,
                     couponCode:     discount > 0 ? _couponToRedeem.code : null,
@@ -2847,7 +2612,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }).catch(err => console.error("Bill update (Edit History) failed:", err));
             } else {
                 setDoc(doc(db, "sales_history", billId), {
-                    offer: offerRecordFromCart(cartSnapshot), // [AI UPDATE 2026-10-01] Pizza→Spring Roll offer record (null if none)
                     orderId: billId, // AI UPDATE [2026-09-16]: shared ID — see EDIT HISTORY header comment above.
                     table: tableName,
                     customer: customerName,
@@ -2881,7 +2645,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 // the on-device 24h History drawer / details.html can show who this
                 // bill belongs to and offer an Edit button for it (see js/order-edit.js).
                 window.saveToGhostHistory(orderId, total, cartSnapshot, {
-                    offer: offerRecordFromCart(cartSnapshot), // [AI UPDATE 2026-10-01]
                     billId,
                     customerName:  _onlineName  || _manualCustomer.name || null,
                     customerPhone: _onlinePhone || (_manualCustomer.phone ? `+91${_manualCustomer.phone}` : null),
@@ -2933,7 +2696,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 );
             }
 
-            _finalizeOfferForBill(_offerCtx, [_onlinePhone, _manualCustomer.phone ? `+91${_manualCustomer.phone}` : null], billId, shortOrderId); // [AI UPDATE 2026-10-01] stamp order/bill on the claim
             // AI UPDATE [2026-09-16]: edit finished — clear the flag so this
             // synthetic edit table/slot never carries it into a future session.
             if (_editMode) _clearEditMode(tableName, customerName);
@@ -3008,7 +2770,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const _onlinePhone = localStorage.getItem(getCustomerPhoneKey()) || _editOnlineIdentity(_editMode).phone || null;
 
             // ── Clear cart and navigate back immediately ───────────────────────
-            const _offerCtx = _takeOfferSettlement(cartSnapshot); // [AI UPDATE 2026-10-01] before the cart/marker is wiped
             saveLocalCart([]);
             currentCart = [];
             renderCart();
@@ -3019,7 +2780,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (_editMode) {
                     // ── Update the EXISTING sale in place — never a new document ──
                     updateDoc(doc(db, "sales_history", billId), {
-                        offer: offerRecordFromCart(cartSnapshot), // [AI UPDATE 2026-10-01] Pizza→Spring Roll offer record (null if none)
                         items: cartSnapshot,
                         total: total,
                         couponCode:     discount > 0 ? _couponToRedeem.code : null,
@@ -3034,7 +2794,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     }).catch(err => console.error("Save & Exit update (Edit History) failed:", err));
                 } else {
                     setDoc(doc(db, "sales_history", billId), {
-                        offer: offerRecordFromCart(cartSnapshot), // [AI UPDATE 2026-10-01] Pizza→Spring Roll offer record (null if none)
                         orderId: billId, // AI UPDATE [2026-09-16]: shared ID — see EDIT HISTORY header comment.
                         table: tableName,
                         customer: customerName,
@@ -3061,7 +2820,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     let orderId = tableName.includes('Parcel') ? tableName : `${tableName} [${customerName}]`;
                     // AI UPDATE [2026-09-16] round 2: see the matching Bill & Settle note above.
                     window.saveToGhostHistory(orderId + " (HOLD)", total, cartSnapshot, {
-                    offer: offerRecordFromCart(cartSnapshot), // [AI UPDATE 2026-10-01]
                         billId,
                         customerName:  _onlineName  || _manualCustomer.name || null,
                         customerPhone: _onlinePhone || (_manualCustomer.phone ? `+91${_manualCustomer.phone}` : null),
@@ -3110,7 +2868,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     );
                 }
 
-                _finalizeOfferForBill(_offerCtx, [_onlinePhone, _manualCustomer.phone ? `+91${_manualCustomer.phone}` : null], billId, shortOrderId); // [AI UPDATE 2026-10-01] stamp order/bill on the claim
 
                 // AI UPDATE [2026-09-16]: edit finished — clear the flag.
                 if (_editMode) _clearEditMode(tableName, customerName);
