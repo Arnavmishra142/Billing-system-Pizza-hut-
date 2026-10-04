@@ -32,7 +32,9 @@
 // fetch handler below.
 // AI UPDATE [2026-09-24]: v13→v14 — bust cached admin/index.html, js/admin.js, css/admin.css
 // after adding the Effects tab (js/effects-admin.js is network-first, not precached).
-const CACHE = 'admin-pos-v14';
+// AI UPDATE [2026-10-04]: v14→v15 — bust cached admin/index.html + js/admin.js (sales fetch-failure notice) and
+// js/customers.js (Free Spring Roll offer card/lines removed).
+const CACHE = 'admin-pos-v15';
 const PRECACHE = [
     '/admin/index.html',
     '/css/admin.css',
